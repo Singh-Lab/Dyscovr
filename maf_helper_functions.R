@@ -1,0 +1,720 @@
+############################################################
+# Helper functions for exploratory analysis and visualization
+# of MAF files
+# Written By: Sara Camilli, July 2020
+############################################################
+library(maftools)
+library(stats)
+library(ggplot2)
+library(dplyr)
+
+# Generalized ID conversion table from BiomaRt
+all_genes_id_conv <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/all_genes_id_conv.csv", header = TRUE)
+
+
+############################################################
+
+#' SUMMARIZE MAF
+#' This function takes a MAF file that has been read by 
+#' maftools and analyzes it as a whole using maftools functions;
+#' returns gene summary
+#' @param maf a MAF file that has been read in by maftools
+summarize_maf <- function(maf) {
+  # Get summaries of the maf file
+  gene_summary <- getGeneSummary(maf)  
+  plotmafSummary(maf = maf, rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+  return(gene_summary)
+
+}
+
+############################################################
+
+#' GET PFAM DOMAINS
+#' This function takes a MAF file and that has been read by 
+#' maftools and an "n" value. Extracts protein and domain 
+#' summaries for the top n genes, which it then returns.
+#' @param maf a MAF file that has been read in by maftools
+#' @param n number of top genes we'd like pfam domains for
+get_pfam_domains <- function(maf, n) {
+  # Examine the top pfam domains and get summaries using maftools
+  maf.pfam = pfamDomains(maf = maf, top = n)   
+  maf_protein_summary <- maf.pfam$proteinSummary
+  maf_domain_summary <- maf.pfam$domainSummary
+  return(maf.pfam)
+}
+
+############################################################
+
+#' GET MUTATION COUNT MATRIX
+#' This function takes a MAF file that has been read by 
+#' maftools and returns a mutation-count matrix
+#' THIS ONLY INCLUDES NONSYNONYMOUS VARIANTS unless includeSyn 
+#' is specified as FALSE. This only includes primary solid 
+#' tumor samples (not normal).
+#' @param maf a MAF file that has been read in by maftools
+get_mut_count_matrix <- function(maf) {
+  # mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = NULL)
+  mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = "Missense_Mutation")
+  print(mut_count_matrix)
+  return(mut_count_matrix)
+}
+
+
+############################################################
+
+#' GET AVERAGE # MISSENSE MUTATIONS FOR GIVEN GENE
+#' Input a MAF file and corresponding mutation-count matrix.
+#' Get the average number of missense mutations for 
+#' top genes, E.g. "TP53", "PIK3CA" and produce a Lollipop plot.
+#' @param mut_count_matrix a mutation-count matrix produced by maftools
+#' @param maf_file the maf file read in by maftools
+#' @param top_gene the gene name of the gene we're interested in
+#' looking at average number of mutations for
+get_avg_missense_muts_per_gene <- function(mut_count_matrix, maf_file, top_gene) {
+  index <- which(rownames(mut_count_matrix) == top_gene)
+  gene_avg_muts <- mean(as.numeric(mut_count_matrix_missense[index,]))
+  lollipopPlot(maf = maf_file, gene = top_gene, showMutationRate = TRUE)
+  return(gene_avg_muts)
+}
+
+############################################################
+
+#' GET TOTAL NUMBER OF MUTATIONS PER PATIENT
+#' Given a mutation count matrix, produces a DF of the total number of 
+#' mutations per participant, for each of their samples if applicable.
+#' Plots a histogram of the total mutation counts across patients
+#' for first sample as well as a boxplot.
+#' @param mut_count_matrix a mutation-count matrix produced by maftools
+get_num_mutations_per_patient <- function(mut_count_matrix) {
+  total_mut_count_df <- data.frame(matrix(ncol = 1, nrow = 0))
+  
+  for (i in 1:ncol(mut_count_matrix)) {
+    id <- colnames(mut_count_matrix)[i]
+    new_row <- c(sum(as.numeric(mut_count_matrix[,i])))
+    total_mut_count_df <- rbind(total_mut_count_df, new_row)
+    rownames(total_mut_count_df)[i] <- id 
+  }
+  colnames(total_mut_count_df) <- c("Total.Num.Mut")
+  
+  # Create visualizations
+  # hist(total_mut_count_df$Sample.1, xlab = "Total Number of Mutations", ylab = "Number of Patients",
+       #main = "Histogram of Total Mutation Count Per Patient",
+       #xlim = c(0, max(total_mut_count_df$Sample.1)+20), breaks = 50)
+  #boxplot(total_mut_count_df$Sample.1, ylab = "Total Number of Mutations")
+  # Appear to be two high-mutational outliers
+  #identify(rep(1, length(total_mut_count_df$Sample.1)), total_mut_count_df$Sample.1, 
+           #labels = rownames(total_mut_count_df))
+  
+  return(total_mut_count_df)
+}
+
+
+############################################################
+
+#' GET PATHWAY AND VAF PLOTS
+#' Given a maf file and n value, creates following plots:
+#' 1. Variant allele frequency plot
+#' 2. Oncoplot (top n genes)
+#' 3. Oncogenic pathways plot
+#' @param maf_file a maf file processed by maftools
+#' @param n number of top genes we are interested in for
+#' our oncoplot
+create_vaf_oncoplots <- function(maf_file, n) {
+  plotVaf(maf = maf_file)
+  oncoplot(maf = maf_file, top = n)
+  OncogenicPathways(maf = maf_file)
+}
+
+
+############################################################
+
+#' VISUALIZE MUTATION DISTRIBUTION
+#' Given a maf data frame and corresponding clinical data frame:
+#' 1. Reads in the maf using maftools
+#' 2. Uses helper function to get a patient ID:cancer type mapping 
+#' for all patients in the maf file
+#' 3. Gets the mutation count matrix for each cancer type
+#' 4. Plots the mutation counts as a histogram per cancer type
+#' @param total_mutation_count_matrix a mutation-count matrix produced
+#' by maftools
+#' @param patient_id_cancer_type_map a clinical data frame produced
+#' by the 'make_patient_id_cancer_type_map()' function
+visualize_mutation_distrib <- function(total_mutation_count_matrix, patient_id_cancer_type_map) {
+
+  # For every cancer type, get a separate visualization of the mutation
+  cancer_types <- unique(patient_id_cancer_type_map[,'Project.ID'])
+  print(cancer_types)
+  mut_count_matrices <- lapply(cancer_types, function(ct) {
+    # Subset the mapping to just this cancer type & get all the patients of this type
+    patients <- patient_id_cancer_type_map[patient_id_cancer_type_map$Project.ID == ct, 'Patient.ID'] 
+    print(patients)
+    # Use these patients to subset the total count matrix file
+    #count_matrix_sub <- total_mutation_count_matrix[grepl(paste(patients, collapse = "|"), total_mutation_count_matrix$X),]            #maf[unlist(strsplit(maf$Tumor.Sample.Barcode, "-", fixed = TRUE))[3] %fin% patients,]  # May need to fix this, or use subset
+    count_matrix_sub <- total_mutation_count_matrix[grepl(paste(patients, collapse = "|"), rownames(total_mutation_count_matrix)), , drop = FALSE]            #maf[unlist(strsplit(maf$Tumor.Sample.Barcode, "-", fixed = TRUE))[3] %fin% patients,]  # May need to fix this, or use subset
+    # Add a column for the cancer type
+    count_matrix_sub$Project.ID <- rep(ct, nrow(count_matrix_sub)) 
+    return(as.data.frame(count_matrix_sub))
+  }) 
+  
+  # Re-combine these all into one big table for plotting
+  total_mut_count_tab <- do.call("rbind", mut_count_matrices)
+  print(head(total_mut_count_tab))
+  
+  return(total_mut_count_tab)
+}
+
+
+#' Helper function that, using a list of patient IDs and a clinical DF from
+#' the TCGA, creates a mapping between patient IDs and their cancer type
+#' (since cancer type is not listed in aggregated MAF files)
+#' @param patient_ids a vector of four-digit patient IDs from the TCGA
+#' @param clinical_df a clinical DF produced by the TCGA for the given cohort
+make_patient_id_cancer_type_map <- function(patient_ids, clinical_df) {
+  
+  rows <- lapply(patient_ids, function(id) {
+    # Extract the "project ID" for each patient ID and split out the "TCGA-" part
+    project_id <- unlist(strsplit(unique(clinical_df[grepl(id, clinical_df$tcga_barcode), 'project_id']), "-", fixed = TRUE))[2]
+    if(!length(project_id) == 0) {
+      return(c(id, project_id))
+    }
+  })
+  rows <- rows[!is.na(rows)]
+  df <- as.data.frame(do.call("rbind", rows))
+  colnames(df) <- c("Patient.ID", "Project.ID")
+  print(df)
+  return(df)
+}
+
+# Import needed information
+total_mutation_count_matrix <- read.csv(paste(path, "Saved Output Data Files/Pan-Cancer/Mutation/Mutation Count Matrices/total_mut_count_matrix_per_patient.csv", sep = ""))
+patient_ids <- unique(unlist(lapply(total_mutation_count_matrix$X, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3])))
+
+# Make the patient ID-cancer type mapping
+cancer_patient_id_type_map <- make_patient_id_cancer_type_map(patient_ids, clinical_df)
+
+# Visualize the mutation distribution
+total_mut_count_tab <- visualize_mutation_distrib(total_mutation_count_matrix, cancer_patient_id_type_map)
+
+# Plot the total mutation counts as a histogram for each table
+ggplot(total_mut_count_tab, aes(x=Total.Num.Mut)) + geom_histogram() +
+  labs(x = "Total Mutation Count", y = "Frequency") + facet_wrap(~Project.ID)
+
+
+### OPTIONAL, IF NEEDED ###
+#' Function to get per-cancer sub-MAF files from a pan-cancer aggregated MAF file
+#' @param maf a pan-cancer aggregated MAF file to split
+#' @param clinical_df an aggregated clinical DF across all cancer types in the TCGA
+get_per_cancer_sub_mafs <- function(maf, clinical_df) {
+  
+  # Get a mutation count matrix for every cancer type; split the maf file into sub-mafs
+  # based on patient cancer types
+  patient_ids <- unique(unlist(lapply(maf$Tumor_Sample_Barcode, 
+                                      function(x) unlist(strsplit(x, "-", fixed = TRUE))[3])))
+  patient_id_cancer_type_map <- make_patient_id_cancer_type_map(patient_ids, clinical_df)
+  
+  # For every cancer type, get a separate visualization of the mutation
+  cancer_types <- unique(patient_id_cancer_type_map[,'Project.ID'])
+  print(cancer_types)
+  lapply(cancer_types, function(ct) {
+    # Subset the mapping to just this cancer type & get all the patients of this type
+    patients <- patient_id_cancer_type_map[patient_id_cancer_type_map$Project.ID == ct, 'Patient.ID'] 
+    # Use these patients to subset the MAF file
+    maf_sub <- maf[grepl(patients, maf$Tumor.Sample.Barcode),]            #maf[unlist(strsplit(maf$Tumor.Sample.Barcode, "-", fixed = TRUE))[3] %fin% patients,]  # May need to fix this, or use subset
+    
+    # Write this MAF to a file
+    write.table(maf_sub, paste(path, paste("Saved Output Data Files/Pan-Cancer/Mutation/Sub-MAF Files/maf_file_", paste(ct, ".maf", sep = ""), sep = ""), sep = ""))
+  }) 
+}
+
+# Call this function
+get_per_cancer_sub_mafs(maf_file_df_missense, clinical_df)
+
+
+############################################################
+
+#' FILTER HYPERMUTATORS
+#' Given a maf filename, maf DF, & UUID-Barcode conversion:
+#' 1. Reads in the maf using maftools
+#' 2. Uses helper function to get mut-count matrix
+#' 3. Determines outliers and removes them
+#' 4. Returns filtered maf DF and the filtered mutation-count matrix
+#' @param maf_filename the name of the maf file, including its path
+#' @param maf_df a MAF file processed by maftools
+filter_hypermutators <- function(maf_filename, maf_df) {
+  
+  maf <- read.maf(maf_filename)
+  mut_count_matrix <- get_mut_count_matrix(maf)
+  total_mut_count_tab <- get_num_mutations_per_patient(mut_count_matrix)
+  total_mut_counts <- total_mut_count_tab[,1]
+  
+  # Get the IQR
+  iqr <- IQR(total_mut_counts)
+  # Get Q3 of data
+  q3 <- as.numeric(quantile(total_mut_counts)[4])
+  # Get Q3 + 1.5(IQR)
+  thres <- as.numeric(q3 + (1.5 * iqr))
+
+  # Filter the mutation count table by this threshold
+  total_mut_count_tab_filt <- subset(total_mut_count_tab, Total.Num.Mut < thres)
+
+  # Get the remaining patients left in the matrix
+  remaining_samp <- rownames(total_mut_count_tab_filt)
+
+  # Filter the maf DF to include only these patients & return
+  maf_df_filt <- maf_df[maf_df$Tumor_Sample_Barcode %fin% remaining_samp,]
+
+  return(list(maf_df = maf_df_filt, mut_count_df = total_mut_count_tab_filt))
+}
+
+############################################################
+
+#' UPDATE CLINICAL FILE WITH TOTAL MUTATION COUNTS
+#' Given a total mutation count table (filtered to exclude 
+#' hypermutators), and a clinical DF:
+#' 1. Extracts all unique case_ids 
+#' 2. Removes rows from clinical data frame without matching case ids
+#' 3. Adds a column in the clinical DF with the total mutation
+#' count for each patient
+#' 4. Returns the updated clinical DF
+#' @param total_mut_count_tab a mutation-count matrix from maftools that has
+#' been filtered to remove hypermutators
+#' @param clinical_df a clinical DF from the TCGA
+#' @param uuid_barcode_conversion a table that maps between patient 
+#' barcodes and UUIDs
+update_clin_with_mut_counts <- function(total_mut_count_tab, clinical_df) {
+  
+  # Get the unique patient UUIDs for our mutation count table
+  ids <- rownames(total_mut_count_tab)
+  patient_ids <- unlist(lapply(ids, function(id) 
+    paste(unlist(strsplit(id, split = "-", fixed = TRUE))[1:3], collapse = "-")))
+  
+  # Subset the clinical data frame to only these IDs
+  clinical_df <- clinical_df[clinical_df$case_submitter_id %fin% patient_ids,]
+
+  total_mut_counts <- unlist(lapply(clinical_df$case_submitter_id, function(case) 
+    total_mut_count_tab[grepl(case, rownames(total_mut_count_tab)), 'Total.Num.Mut']))
+
+  # Add vector as a new column 
+  clinical_df$Total.Num.Muts <- total_mut_counts
+  
+  return(clinical_df)
+}
+
+
+############################################################
+
+#' VISUALIZE THE NUMBER OF PATIENTS WITH MUTATIONS IN EACH
+#' PROTEIN
+#' Given a MAF file (filtered as desired), a subsetted domains DF
+#' and a label, creates barplots/ boxplots of the frequency of binding among
+#' all the patients in the MAF file. Also prints some useful info.
+#' @param all_gene_id_conv ID conversion doc from BioMart
+#' @param domain_df a subsetted domain data frame that has information
+#' about gene domains
+#' @param label a string denoting the level of specificity ("I-Protein", 
+#' "I-Domain", or "I-Binding Position")
+#' @param maf_df a MAF table processed by maftools
+visualize_mutation_freqs <- function(all_gene_id_conv, domain_df, label, maf_df) {
+  
+  # Get the protein IDs from the domain DF
+  if (label == "I-Protein") {
+    protein_ids <- unique(unlist(lapply(domain_df$Query, function(x) unlist(strsplit(x, "|", fixed = TRUE))[2])))
+  } else if (label == "I-Domain") {
+    protein_ids <- unique(domain_df$Swissprot)
+  } else if (label == "I-Binding Position") {
+    protein_ids <- unique(domain_df$Protein.ID)
+  }
+  print(length(protein_ids))
+
+  # For all protein IDs, see which patient tumors have a mutation in it
+  freq_df <- data.frame(matrix(ncol = 2, nrow = length(protein_ids)))
+  colnames(freq_df) <- c("ID", "Num.Patients")
+  freq_df$ID <- protein_ids
+  
+  # Construct mutation frequency matrix for visualization
+  if (label == "I-Protein") {
+    maf_df <- data.frame(maf_df)
+    freq_df$Num.Patients <- unlist(lapply(protein_ids, function(x) length(unique(maf_df[grepl(x, maf_df$SWISSPROT), 'Tumor_Sample_Barcode']))))
+  } else if (label == "I-Domain") {
+    freq_df$Num.Patients <- unlist(lapply(protein_ids, function(x) length(unique(domain_df[grepl(x, domain_df$Swissprot),'Patient']))))
+  } else if (label == "I-Binding Position") {
+    freq_df$Num.Patients <- unlist(lapply(protein_ids, function(x) length(unique(domain_df[domain_df$Protein.ID == x,'Patient']))))
+  } else {
+    print(paste("Invalid label:", label))
+  }
+  
+  freq_df <- freq_df[order(freq_df$Num.Patients, decreasing = TRUE),]
+
+  # Create barplots
+  # ylab_label <- strsplit(strsplit(label, " ", fixed = TRUE)[1], "-", fixed = TRUE)[2]
+  # create_barplot(freq_df, label, ylab_label)
+
+  # Create boxplot
+  # create_boxplot(freq_df, label)
+  
+  # Create histogram
+  # create_histogram(freq_df, label)
+  
+  # Create cumulative histogram
+  create_cumulative_histogram(freq_df, label)
+    
+  # Print some interesting output information
+  #print(paste("Percent above 1% frequency:", (length(col_freq[col_freq >1])/length(col_freq))*100))
+  #print(paste("Number of proteins with >1% frequency:", length(col_freq[col_freq > 1])))
+  print(paste("Number of proteins mutated in patients more than 3 times:", length(freq_df$Num.Patients[freq_df$Num.Patients >3])))
+  print(paste("Number of proteins mutated in patients more than 6 times:", length(freq_df$Num.Patients[freq_df$Num.Patients >6])))
+  
+  freq_df_sub <- subset(freq_df, Num.Patients > 3)
+  freq_df_sub$Gene.Name <- unlist(lapply(freq_df_sub$ID, function(x) 
+    paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == x, 'external_gene_name'])), collapse = ";")))
+  print(paste(freq_df_sub$Gene.Name, freq_df_sub$Num.Patients, sep = ":"))
+  
+  return(freq_df_sub)
+}
+
+#' Uses a frequency data frame, along with specificity labels,
+#' to plot a barplot of mutation frequency across patients
+#' @param freq_df a data frame with each protein and its frequency
+#' of mutation across all patients
+#' @param label a string label denoting the level of specificity
+#' ('I-Protein', 'I-Domain', or 'I-Binding Position')
+#' @param ylab_label a string label for the y-axis label ('Protein' 
+#' for I-Protein, 'Domain' for I-Domain, or 'Position' for 
+#' I-Binding Position)
+create_barplot <- function(freq_df, label, ylab_label) {
+  barplot(freq_df$Num.Patients, main = paste(label, " Number of Patients with Mutations in Each Protein", sep = ":"), 
+          xlab = "Protein", ylab = paste("# of Patient Tumor Samp. with >1 Missense Mut. in Ligand-Binding ", 
+                                         ylab_label, sep = ""), col = "blue") #, names.arg = rownames(abs_df))
+}
+
+#' Uses a frequency data frame, along with a specificity label,
+#' to plot a boxplot of mutation frequency across patients
+#' @param freq_df a data frame with each protein and its frequency
+#' of mutation across all patients
+#' @param label a string label denoting the level of specificity
+#' ('I-Protein', 'I-Domain', or 'I-Binding Position')
+create_boxplot <- function(freq_df, label) {
+  bp = boxplot(freq_df$Freq, main = paste(label, " Frequency of Mutation across patients", sep = ":"), ylab = "Frequency",
+               horizontal = TRUE, col = "orange")
+  identify(rep(1, length(freq_df$Freq)), freq_df$Freq, labels = rownames(freq_df))
+  print(paste("Outliers:", bp$out))
+}
+
+#' Uses a frequency data frame, along with a specificity label,
+#' to plot a histogram of mutation frequency across patients
+#' @param freq_df a data frame with each protein and its frequency
+#' of mutation across all patients
+#' @param label a string label denoting the level of specificity
+#' ('I-Protein', 'I-Domain', or 'I-Binding Position')
+create_histogram <- function(freq_df, label) {
+  hist(freq_df$Num.Patients, main = paste(label, " Frequency of Mutations across Patient Population", sep = ":"), 
+       xlab = "Number of Patients with Mutated Version of Protein", ylab = "Number of Genes", 
+       col = brewer.pal(n = 11, name = "RdBu"), xlim = c(2, max(freq_df$Num.Patients)))
+}
+
+
+#' Uses a frequency data frame, along with a specificity label,
+#' to plot a cumulative histogram of mutation frequency across patients
+#' @param freq_df a data frame with each protein and its frequency
+#' of mutation across all patients
+#' @param label a string label denoting the level of specificity
+#' ('I-Protein', 'I-Domain', or 'I-Binding Position')
+create_cumulative_histogram <- function(freq_df, label) {
+  cum_vals <- c()
+  for (i in 1:max(freq_df$Num.Patients)) {
+    cum_vals <- c(cum_vals, length(freq_df$Num.Patients[freq_df$Num.Patients >= i]))
+  }
+  print(cum_vals)
+  
+  barplot(height = cum_vals[4:20], main = paste(label, " Frequency of Mutations across Patient Population", sep = ":"), 
+          xlab = "Minimum # of Patients with Mutated Version of Protein", ylab = "Number of Proteins", col = 'cornflowerblue',
+          border = 'black', space = 0, xpd = FALSE, names.arg = c(4:20), cex.lab = 1.5, cex.axis = 1.5, cex.main = 1.5, cex.sub = 1.5)
+}
+
+
+# Call function
+frequency_df_iprotein <- visualize_mutation_freqs(all_gene_id_conv, domains_missense_iprotein_sub, "I-Protein", maf_subset_df_missense)
+frequency_df_idomain <- visualize_mutation_freqs(all_gene_id_conv, domains_missense_idomain_sub, "I-Domain")
+frequency_df_ibindingpos <- visualize_mutation_freqs(all_gene_id_conv, domains_missense_ibindingpos_sub, "I-Binding Position")
+
+
+
+############################################################
+#' GET NUMBER OF REMAINING DOMAINS THAT BIND EACH LIGAND TYPE
+#' Function takes subsetted data frame of domain information from 
+#' Batch-CD search, along with InteracDome and CanBind DFs and a ligand
+#' groups conversion document. Extracts the ligand(s) that each domain is 
+#' predicted to bind. Prints the number of binding domains for each ligand 
+#' type and creates pie chart & bar chart visualizations.
+#' @param domains a data frame with information about protein domains
+#' @param interacdome_df an InteracDome data frame with information about
+#' the ligands that bind particular protein domains
+#' @param canbind_df_sub a CanBind data frame with information about 
+#' the ligands that bind particular base positions
+#' @param ligand_groups a table matching ligand names to their broader
+#' categories
+get_num_domains_per_ligand <- function(domains, interacdome_df, canbind_df_sub, ligand_groups) {
+  
+  # Get the domains from the domain DF
+  doms <- domains$Accession
+  doms_stripped <- unique(as.character(regmatches(doms, gregexpr("[[:digit:]]+", doms))))  # strip the PF from the name
+  print(doms_stripped)
+  
+  # Create a list to hold counts of the results
+  domain_types_list <- list("DNA" = 0, "RNA" = 0, "SM" = 0, "ION" = 0, "PEPTIDE" = 0, "NUCACID" = 0)
+  
+  # Create columns of stripped IDs for InteracDome for easier comparison
+  interac_ids_stripped <- unlist(lapply(interacdome_df$pfam_id, function(x) 
+    unlist(strsplit(unlist(strsplit(x, "_", fixed = TRUE))[1], "F", fixed = TRUE))[2]))
+  interacdome_df$stripped_pfam_ids <- interac_ids_stripped
+  
+  # For all domains, check the ligand type they bind
+  for (i in 1:length(doms_stripped)) {
+    domain_types_list <- get_ligand_types(i, interacdome_df, canbind_df_sub, ligand_groups)
+  }
+  
+  # Make this list into a data frame for visualization, ordered by count
+  domain_types_table <- data.frame(matrix(unlist(domain_types_list), nrow = length(domain_types_list),
+                                          byrow = TRUE), stringsAsFactors = FALSE)
+  domain_types_table$Category <- names(domain_types_list)
+  colnames(domain_types_table) <- c('Count', 'Category')
+  domain_types_table <- domain_types_table[order(-domain_types_table$Count),]
+  print(domain_types_table)
+  
+  # Make a pie chart
+  pie(domain_types_table$Count, labels = domain_types_table$Category)
+  # Make a bar chart
+  barplot(domain_types_table$Count, names.arg = domain_types_table$Category, 
+          xlab = "Ligand Type", ylab = "Number of Binding Domains", col=brewer.pal(n = 6, name = "RdBu"),
+          main = "Number of domains that bind each ligand type, in top proteins", ylim = c(0,6000))
+  print(paste("Total number of unique domains:", length(doms_stripped)))
+}
+
+
+#' CHECK LIGAND TYPES 
+#' A helper function that, given an index i, checks the ligand type bound
+#' by the domain in the ith row of the domain DF and updates the given
+#' domain types list (which it then returns)
+#' @param i the row index of the domain DF 
+#' @param interacdome_df an InteracDome data frame with information about
+#' the ligands that bind particular protein domains
+#' @param canbind_df_sub a CanBind data frame with information about 
+#' the ligands that bind particular base positions
+#' @param domain_types_list a list containing the count of each ligand type 
+#' bound by these proteins' domains
+get_ligand_types <- function(i, interacdome_df, canbind_df_sub, domain_types_list) {
+  # Check InteracDome
+  ligand_types_interac <- interacdome_df[interacdome_df$stripped_pfam_ids == doms_stripped[i], 'ligand_type']
+  
+  # Check CanBind
+  prot_id <- unlist(strsplit(domains$Query[i], "|", fixed = TRUE))[2]
+  ligand_types_canbind <- canbind_df_sub[canbind_df_sub$Swissprot == prot_id, 'LigandType']
+  ligand_types_canbind_list <- unlist(strsplit(ligand_types_canbind, ",", fixed = TRUE))
+  
+  # Get the union of these two
+  ligand_types <- union(ligand_types_interac, ligand_types_canbind_list)
+  ligand_types <- ligand_types[!is.na(ligand_types)]
+  
+  # Update the list with counts for these
+  if (!length(ligand_types) == 0) {
+    for (j in 1:length(ligand_types)) {
+      domain_types_list <- general_important_functions::check_lig_type(ligand_types[j], 
+                                                                       domain_types_list, ligand_groups)
+    }
+  }
+  return(domain_types_list)
+}
+
+
+# Import ligand group category file
+ligand_groups <- read.csv(paste(path, "Input Data Files/ligand_groups.csv", sep = ""), check.names = FALSE)
+# Fix column names, if needed
+colnames(ligand_groups)[1] <- "group_name"
+
+# Call function
+get_num_domains_per_ligand(domains_missense_iprotein_sub, interacdome_df, canbind_df_sub, ligand_groups)
+get_num_domains_per_ligand(domains_missense_idomain_sub, interacdome_df, canbind_df_sub, ligand_groups)
+get_num_domains_per_ligand(domains_missense, interacdome_conf, canbind_df_sub, ligand_groups)  # Also look across all domains, for reference
+
+
+############################################################
+
+#' GET PROP. OF REMAINING PROTEINS THAT BIND EACH LIGAND TYPE
+#' Function takes subsetted data frame of domain information from 
+#' Batch-CD search, along with InteracDome and CanBind DFs and a ligand
+#' groups conversion document. Do not need to include ConCavity, as it 
+#' does not make predictions for specific binding types.
+#' For each ligand type, creates a pie chart with the proportion of 
+#' remaining proteins predicted to bind that ligand in at least
+#' one of its domains, according to InteracDome or CanBind
+#' @param domains a data frame with information about protein domains
+#' @param interacdome_dw_sub domain weights file from InteracDome
+#' @param canbind_df_sub a CanBind data frame with information about 
+#' the ligands that bind particular base positions
+#' @param ligand_groups a table matching ligand names to their broader
+#' categories
+#' @param label a string denoting the level of specificity ('I-Protein',
+#' 'I-Domain', or 'I-Binding Position')
+#' @param ibinding_ids vector of regulatory protein swissprot IDs; needed
+#' only for 'I-Domain' and 'I-Binding Position' cases
+get_num_proteins_that_bind_each_lig_type <- function(domains, interacdome_dw_sub, canbind_df_sub, 
+                                                     ligand_groups, label, ibinding_ids) {
+  
+  # If I-Protein, we can get the Swissprot IDs of all the proteins we're interested in from
+  # the domains DF; otherwise import them as a parameter
+  if(label == "I-Protein") {
+    proteins <- unique(unlist(lapply(domains$Query, function(x) unlist(strsplit(x, "|", fixed = TRUE))[2])))
+  } else {
+    proteins <- ibinding_ids
+  }
+  
+  # Create columns of stripped IDs for InteracDome for easier comparison
+  interac_ids_stripped <- unlist(lapply(interacdome_dw_sub$domain_name, 
+                                        function(x) unlist(strsplit(unlist(strsplit(x, "_", fixed = TRUE))[1],
+                                                                    "F", fixed = TRUE))[2]))
+  interacdome_dw_sub$stripped_pfam_ids <- interac_ids_stripped
+  
+  # Save the number of proteins that bind each ligand type for plotting
+  num_dna_binders <- 0
+  num_rna_binders <- 0
+  num_pep_binders <- 0
+  num_sm_binders <- 0
+  num_ion_binders <- 0
+  
+  # Loop through all the proteins in the remaining group
+  for (i in 1:length(proteins)) {
+    prot_id <- proteins[i]
+    print(prot_id)
+    
+    # Create a list to hold counts of the resulting ligands it binds
+    domain_types_list <- list("DNA" = 0, "RNA" = 0, "SM" = 0, "ION" = 0, "PEPTIDE" = 0, "NUCACID" = 0)
+    
+    # Get the domains of this protein and strip the "pfam" from the front 
+    if (label == "I-Protein") {domains_sub <- domains[grep(prot_id, domains$Query),]} 
+    else {domains_sub <- domains[grep(prot_id, domains$Swissprot),]}
+    doms <- domains_sub$Accession
+    doms_stripped <- unique(as.character(regmatches(doms, gregexpr("[[:digit:]]+", doms))))
+    
+    # For all domains, check the ligand type they bind
+    for (j in 1:length(doms_stripped)) {
+      domain_types_list <- get_ligand_types(j, interacdome_dw_sub, canbind_df_sub, domain_types_list)
+    }
+    if (domain_types_list$DNA > 0) {num_dna_binders <- num_dna_binders + 1}
+    if (domain_types_list$RNA > 0) {num_rna_binders <- num_rna_binders + 1}
+    if (domain_types_list$PEPTIDE > 0) {num_pep_binders <- num_pep_binders + 1}
+    if (domain_types_list$SM > 0) {num_sm_binders <- num_sm_binders + 1}
+    if (domain_types_list$ION > 0) {num_ion_binders <- num_ion_binders + 1}
+  }
+
+  print(paste("Number of DNA Binders:", num_dna_binders))
+  print(paste("Number of RNA Binders:", num_rna_binders))
+  print(paste("Number of Peptide Binders:", num_pep_binders))
+  print(paste("Number of SM Binders:", num_sm_binders))
+  print(paste("Number of Ion Binders:", num_ion_binders))
+  
+  counts <- list("DNA" = num_dna_binders, "RNA" = num_rna_binders, "PEPTIDE" = num_pep_binders, 
+                 "SM" = num_sm_binders, "ION" = num_ion_binders)
+  
+  # Make this list into a data frame for visualization, ordered by count
+  counts_table <- data.frame(matrix(unlist(counts), nrow = length(counts),
+                                         byrow = TRUE), stringsAsFactors = FALSE)
+  counts_table$Category <- names(counts)
+  colnames(counts_table) <- c('Count', 'Category')
+  counts_table <- counts_table[order(-counts_table$Count),]
+  print(counts_table)
+  
+  barplot(counts_table$Count, names.arg = counts_table$Category, 
+          xlab = "Ligand Type", ylab = "Number of Proteins", col=brewer.pal(n = 6, name = "RdBu"),
+          main = "Number of proteins that bind each ligand type", ylim = c(0,length(proteins)))
+  
+  total_num_prots <- length(proteins)
+  print(paste("Total Number of Proteins:", total_num_prots))
+  
+  prop_dna_binders <- num_dna_binders / total_num_prots
+  prop_rna_binders <- num_rna_binders / total_num_prots
+  prop_pep_binders <- num_pep_binders / total_num_prots
+  prop_sm_binders <- num_sm_binders / total_num_prots
+  prop_ion_binders <- num_ion_binders / total_num_prots
+
+  print(paste("Prop. of DNA Binders:", prop_dna_binders))
+  print(paste("Prop. of RNA Binders:", prop_rna_binders))
+  print(paste("Prop. of Peptide Binders:", prop_pep_binders))
+  print(paste("Prop. of SM Binders:", prop_sm_binders))
+  print(paste("Prop. of Ion Binders:", prop_ion_binders))
+  
+  proportions <- list("DNA" = prop_dna_binders, "RNA" = prop_rna_binders, "PEPTIDE" = prop_pep_binders, 
+                      "SM" = prop_sm_binders, "ION" = prop_ion_binders)
+
+  # Make this list into a data frame for visualization, ordered by count
+  proportions_table <- data.frame(matrix(unlist(proportions), nrow = length(proportions),
+                                          byrow = TRUE), stringsAsFactors = FALSE)
+  proportions_table$Category <- names(proportions)
+  colnames(proportions_table) <- c('Proportion', 'Category')
+  proportions_table <- proportions_table[order(-proportions_table$Proportion),]
+  print(proportions_table)
+  
+  barplot(proportions_table$Proportion, names.arg = proportions_table$Category, 
+          xlab = "Ligand Type", ylab = "Proportion of Proteins", col=brewer.pal(n = 6, name = "RdBu"),
+          main = "Proportion of proteins that bind each ligand type", ylim = c(0,1))
+}
+
+# Import necessary files 
+ligand_groups <- read.csv(paste(path, "Input Data Files/ligand_groups.csv", sep = ""), check.names = FALSE)
+# Fix colnames, if needed
+colnames(ligand_groups)[1] <- "group_name"
+
+# Call function
+get_num_proteins_that_bind_each_lig_type(domains_missense_iprotein_sub, interacdome_domainweights, canbind_df_sub, ligand_groups, "I-Protein")
+get_num_proteins_that_bind_each_lig_type(domains_missense_idomain_sub, interacdome_domainweights, canbind_df_sub, ligand_groups, "I-Domain", ibinding_ids = swissprot_ids_missense_idomain)
+get_num_proteins_that_bind_each_lig_type(domains_missense_idomain_sub, interacdome_domainweights, canbind_df_sub, ligand_groups, "I-Binding Position", ibinding_ids = swissprot_ids_missense_ibindingpos)
+
+get_num_proteins_that_bind_each_lig_type(domains_missense, interacdome_conf, canbind_df_sub, ligand_groups)  # Also look across all domains, for reference
+
+#
+#
+#
+#
+#
+#
+#
+#
+#### SAMPLE MAIN FOR USING THE CODE ABOVE ###
+
+# Use maftools to examine the proportion of patients that possess top mutations
+maf_filename <- "TCGA.BRCA.muse.b8ca5856-9819-459c-87c5-94e91aca4032.DR-10.0.somatic.maf"
+maf <- read.maf(maf = maf_filename)  # Read in maf file using maftools
+
+# Use subsetMAF to also create subsetted MAF objects
+subset_maf <- subsetMaf(maf, genes = protein_ids, mafObj = TRUE, isTCGA = TRUE)
+subset_maf_missense <- subsetMaf(maf, genes = protein_ids_missense, mafObj = TRUE, 
+                                          isTCGA = TRUE, query = "Variant_Classification == 'Missense_Mutation'")
+# maftools_subset_maf_silent <- subsetMaf(maftools_maf, genes = protein_ids_silent, mafObj = TRUE, 
+# isTCGA = TRUE, query = "Variant_Classification == 'Silent'")
+
+# We want to use this function to summarize the full MAF file and also a subsetted
+# MAF file that includes ONLY our transcription factors of interest and patients of interest
+full_maf_pfam_genes <- summarize_maf(maf)
+full_maf_pfam_doms <- get_pfam_domains(maf, 6)
+
+subset_maf_pfam_genes <- summarize_maf(subset_maf)
+subset_maf_pfam_doms <- get_pfam_domains(subset_maf, 6)
+
+subset_maf_pfam_missense_genes <- summarize_maf(subset_maf_missense)
+subset_maf_pfam_missense_doms <- get_pfam_domains(subset_maf_missense, 6)
+
+# Get a matrix of all the mutations per gene per sample (for full MAF file and also
+# for subsetted MAF files)
+mut_count_matrix <- get_mut_count_matrix(maf = maf)
+mut_count_matrix_subset <- get_mut_count_matrix(maf = subset_maf)
+mut_count_matrix_missense <- get_mut_count_matrix(maf = subset_maf_missense)
+# TODO: differentiate between tumor and normal samples
+
+# Save as CSV output
+write.csv(mut_count_matrix, file = "mut_count_matrix.csv")
+write.csv(mut_count_matrix_subset, file = "mut_count_matrix_subset.csv")
+write.csv(mut_count_matrix_missense, file = "mut_count_matrix_subset_missense.csv")
+#write.csv(mut_count_matrix_silent, file = "mut_count_matrix_silent.csv")
+
+
+# Get binding domains for particular proteins
+unique(domains_missense_idomain_sub[grep("P60484", domains_missense_idomain_sub$Swissprot),'Accession'])

@@ -1,0 +1,62 @@
+Description of Inputs to Linear Model:
+
+Protein ID List: Vector of Protein Names (ex. A1CF)
+Downstream Target Dataframe: Colnames are protein names (ex. A1CF), entries are gene target ENSG IDs (ex. ENSG00000000003).
+Clinical DF: Dataframe - Colnames are clinical categories (ex. treatment_type), where one column is tcga_barcode for the patient (ex. TCGA-BH-A0AU) 
+	that contains the specific 4-digit patient identifier (ex. A0AU). Entries in that row are specific to that patient. Each patient has two rows 
+	with identical identifiers, refering to each treatment type (radition & pharmacological intervention).
+Mutation Dataframe: Colnames are case TCGA IDs (ex. TCGA-AN-A046-01A-21W-A050-09) that contain the specific 4-digit patient identifier (ex. A046). 
+	Each patient has only one unique column. Rownames are protein names (ex. PIK3CA). Entries are mutation status for a given protein in a given patient 
+	(0 or 1 integer) at a specific level of specificity.
+		Possible levels of specificity: 
+			1. Mutation in predicted DNA/RNA-binding position
+			2. Mutation in conserved DNA/RNA-binding domain
+			3. Mutation in predicted ligand-binding position
+			4. Mutation in conserved ligand-binding domain
+			5. Mutation in conserved region
+			6. Mutation in protein possessing conserved DNA/RNA-binding domain
+			7. Mutation in protein possessing conserved ligand-binding domain
+CNA Dataframe: Colnames are patient TCGA barcodes (ex. TCGA-E2-A1IH) that contain the specific 4-digit patient identifier (ex. A1IH).
+	Rownames are protein ENSG IDs (ex. ENSG00000000003). 
+		Possible entries:
+			1. Entries are -1, 0, or 1 integers corresponding to "deleted", "unchanged", and "amplified".
+			2. Entries are -1, 0, or positive integers corresponding to "deleted", "unchanged" and the copy number of the given gene.
+Methylation Dataframe (INDEP.): Colnames are case TCGA IDs (ex. TCGA-A7-A0CE-11A-21D-A10Q-05) that contain the specific 4-digit patient identifier (ex. A0CE).
+	Each patient has only one unique column. Rownames are protein ENSG IDs. 
+		Possible entries:
+			1. Entries are 0 or 1 corresponding to "not methylated" or "methylated". Defined as 0 if there are no probes on the gene body or 
+			   promoter region that exceed a confidently methylated threshold (0.8); 1 if there is >=1 confidently methylated probes
+			2. Entries correspond to "not differentially methylated" or "differentially methylated". This can be defined in one of 
+			   several ways:
+				- 1 if the difference in the absolute number of confidently methylated probes exceeds 1, 0 o.w.
+				- 1 if there are no confidently methylated probes in either tumor or normal, but there is 1 or more confidently methylated 
+					probes in the other, 0 o.w.
+				- 1 if the absolute difference in average beta values between tumor and normal exceeds a threshold, 0 o.w.
+				- 1 if the absolute difference in average m-values (logit of beta values) between tumor and normal exceeds a threshold, 
+					0 o.w. -- more statistically rigorous but less biologically interpretable
+			In this case, entry is a semicolon (;) separated character of the following format: 
+				the difference in avg. beta value (tumor-normal);binary value to indicate if diff. in avg. beta values exceeds thres. p;
+				the difference between number of confidently methylated probes (tumor-normal);binary value to indicate if one of two samples
+					has no confident probes and the other does
+Methylation Dataframe (DEP.): Colnames are case TCGA IDs (ex. TCGA-A7-A0CE-11A-21D-A10Q-05) that contain the specific 4-digit patient identifier (ex. A0CE).
+	Each patient has one-two unique columns (depending on whether or not they have a matched normal sample). Entries are semicolon separated, average
+	Beta value; average m-value;number of fully methylated probes (Beta>0.8), across the gene body and promoter region.
+Expression Dataframe: Colnames are TCGA Patient ID;TCGA Sample ID (ex. TCGA-AR-A24V;TCGA-AR-A24V-01A) each of which contains the specific 4-digit 
+	patient identifier (ex. A24V). Each patient has one unique column per sample. Rownames are gene target ENSG IDs (ex. ENSG00000000003). 
+	Entries are expression counts or FPKM values.
+is_brca: TRUE or FALSE value that indicates if we're looking at BRCA
+.
+.
+.
+.
+.
+.
+Intermediate Inputs:
+
+Patient Dataframe: Colnames are linear model input variables related to patient identification (Gender, Age (buckets 1-10), Race (buckets 1-5), Prior malignancies, 
+	Treatment-radiation, Treatment-pharmacological, Total Number of Mutations (buckets 1-3)). Rownames are patients (unique 4-digit identifier, eg. A1IH). Entries
+	are relevant 0 or 1 values. 
+
+
+	
+
