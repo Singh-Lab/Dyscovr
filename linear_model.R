@@ -13,15 +13,11 @@ library(broom)
 library(data.table)
 library(speedglm)
 library(argparse)
-#library(Rcpp)
-#library(RcppEigen)
-#library(rlist)
-#library(rockchalk)
-#library(enrichvs)
+library(stringr)
 
 
 # Source other files needed
-source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/"
+source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Sara_LinearModel/"
 source(paste(source_path, "linear_model_helper_functions.R", sep = ""))
 source(paste(source_path, "general_important_functions.R", sep = ""))
 
@@ -94,9 +90,9 @@ parser$add_argument("--target_df", default = "allgene_targets.csv",
 # The decision for if/ how to bucket CNAs and methylation
 parser$add_argument("--cna_bucketing", default = "bucket_inclAmp", 
                     type = "character",
-                    help = "The type of bucketing we use for CNA values. Default is bucket_inclAmp, but rawCNA and bucket_exclAmp are also options.")
+                    help = "If/ the type of bucketing we use for CNA values. Default is bucket_inclAmp, but rawCNA and bucket_exclAmp are also options.")
 parser$add_argument("--meth_bucketing", default = TRUE, type = "character",
-                    help = "If we are bucketing methylation values. Default is FALSE.")
+                    help = "If/ the type of bucketing we use for methylation values. Default is FALSE.")
 
 # Label the type of methylation data we are using (Beta, M, or Threshold)
 parser$add_argument("--meth_type", default = "Beta", type = "character",
@@ -121,9 +117,19 @@ parser$add_argument("--num_pcs", default = 2, type = "integer",
 parser$add_argument("--debug", default = "FALSE", type = "character",
                     help = "A TRUE/ FALSE value indicating whether or not we want detailed printing for debugging purposes. Default is FALSE.")
 
+# Add a flag for running collinearity diagnostics; can be useful but adds to runtime.
+parser$add_argument("--collinearity_diagn", default = "FALSE", type = "character",
+                    help = "A TRUE/ FALSE value indicating whether or not we want detailed collinearity diagnostics. Can be useful but adds to runtime; not suggested for large runs. Default is FALSE.")
+
 
 # Parse the given arguments
-args <- parser$parse_args()
+tryCatch({
+  args <- parser$parse_args()
+}, error = function(cond) {
+  print(cond)
+  print(traceback())
+})
+
 
 
 ############################################################
@@ -147,6 +153,7 @@ randomize <- str2bool(args$randomize)
 test <- str2bool(args$test)
 meth_bucketing <- str2bool(args$meth_bucketing)
 debug <- str2bool(args$debug)
+collinearity_diagn <- str2bool(args$collinearity_diagn)
 
 
 ############################################################
@@ -412,14 +419,21 @@ if(debug) {
 #' principal components we are including as covariates in the model 
 #' @param debug a TRUE/FALSE value indicating if we are in debug mode and should 
 #' use additional prints
+#' @param collinearity_diagn a TRUE/FALSE value indicating if we are running 
+#' collinearity diagnostics
+#' @param outpath a string with the local path for debugging/ collinearity files 
+#' we'll be writing from inside the function
+#' @param outfn a string with a generic output filename based on the characteristics
+#' of the given run; can be modified to write files within this function
 run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df, 
                              mutation_df_targ, mutation_df_regprot, methylation_df, 
                              methylation_df_meQTL, cna_df, expression_df, 
                              analysis_type, tumNormMatched, randomize, cna_bucketing, 
-                             meth_bucketing, num_PEER, num_pcs, debug) {
+                             meth_bucketing, num_PEER, num_pcs, debug, collinearity_diagn,
+                             outpath, outfn) {
   
   # We need to get a mini-table for every r_i, t_k combo that we rbind into a master table of results
-  results_df_list <- mclapply(1:protein_ids_df[, .N], function(i) {
+  results_df_list <- lapply(1:protein_ids_df[, .N], function(i) {
     
     # Get the given regulatory protein r_i's Swissprot & ENSG IDs
     regprot <- protein_ids_df$swissprot_ids[i]
@@ -442,6 +456,9 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
     if(debug) {
       print("Starter DF, with Regprot Inputs")
       print(head(starter_df))
+      
+      print(dim(downstream_target_df)) 
+      
     }
     
     # Loop through all the targets for this protein of interest and create a table 
@@ -458,116 +475,152 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
       # a standard (1.5 x IQR) + Q3 schema
       #starter_df <- filter_expression_df(expression_df, starter_df, targ_ensg)
       
-      # Create a full input table to the linear model for this target
-      if(!is.na(methylation_df_meQTL)) {methylation_df_targ <- methylation_df_meQTL}
-      else {methylation_df_targ <- methylation_df}
-      
-      lm_input_table <- fill_targ_inputs(starter_df = starter_df, targ_k = targ, 
-                                         targ_k_ensg = targ_ensg, 
-                                         mutation_targ_df = mutation_df_targ,
-                                         methylation_df = methylation_df_targ, 
-                                         cna_df = cna_df, expression_df = expression_df, 
-                                         cna_bucketing = cna_bucketing,
-                                         meth_bucketing = meth_bucketing, 
-                                         analysis_type = analysis_type,
-                                         tumNormMatched = tumNormMatched, debug = debug)
-      
-      
-      if(length(lm_input_table) == 0) {return(NA)}
-      if (is.na(lm_input_table)) {return(NA)}
-      if(lm_input_table[, .N] == 0) {return(NA)}
-      
-      # If a row has NA, remove that whole row and predict without it
-      #lm_input_table <- na.exclude(lm_input_table)
-      lm_input_table <- na.omit(lm_input_table)
-      
-      # Make sure everything is numeric type
-      #lm_input_table[,2:ncol(lm_input_table)] <- sapply(lm_input_table[,2:ncol(lm_input_table)], as.numeric) 
-      
-      if(debug) {
-        print("LM Input Table")
-        print(head(lm_input_table))
+      if(length(intersect(targ_ensg, regprot_ensg)) == 0) {
+        # Create a full input table to the linear model for this target
+        if(!is.na(methylation_df_meQTL)) {methylation_df_targ <- methylation_df_meQTL}
+        else {methylation_df_targ <- methylation_df}
+        
+        lm_input_table <- fill_targ_inputs(starter_df = starter_df, targ_k = targ, 
+                                           targ_k_ensg = targ_ensg, 
+                                           mutation_targ_df = mutation_df_targ,
+                                           methylation_df = methylation_df_targ, 
+                                           cna_df = cna_df, expression_df = expression_df, 
+                                           cna_bucketing = cna_bucketing,
+                                           meth_bucketing = meth_bucketing, 
+                                           analysis_type = analysis_type,
+                                           tumNormMatched = tumNormMatched, debug = debug)
+        
+        
+        if(length(lm_input_table) == 0) {return(NA)}
+        if (is.na(lm_input_table)) {return(NA)}
+        if(lm_input_table[, .N] == 0) {return(NA)}
+        
+        # If a row has NA, remove that whole row and predict without it
+        #lm_input_table <- na.exclude(lm_input_table)
+        lm_input_table <- na.omit(lm_input_table)
+        
+        # Make sure everything is numeric type
+        #lm_input_table[,2:ncol(lm_input_table)] <- sapply(lm_input_table[,2:ncol(lm_input_table)], as.numeric) 
+        
+        if(debug) {
+          print("LM Input Table")
+          print(head(lm_input_table))
+          #print(is.character(lm_input_table))
+          #print(length(lm_input_table))
+          #print(is.na(lm_input_table))
+          #print(typeof(lm_input_table))
+          new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "lm_input_table", 
+                                                                              sep = "_"), sep = "_"))
+          fwrite(lm_input_table, paste(outpath, paste(new_fn, ".csv", sep = ""), sep = "/"))
+        }
+        
+        # Randomize expression across cancer and normal, across all samples
+        if (randomize) {
+          if(analysis_type == "eQTL") {lm_input_table$ExpStat_k <- sample(lm_input_table$ExpStat_k)}
+          else if (analysis_type == "meQTL") {lm_input_table$MethStat_k <- sample(lm_input_table$MethStat_k)}
+          else {print(paste("Analysis type is invalid:", analysis_type))}
+        }
+        
+        formula <- construct_formula(lm_input_table, analysis_type, num_PEER, num_pcs,
+                                     cna_bucketing, meth_bucketing)
+        if(debug) {
+          print(paste("Formula:", formula))
+        }
+        
+        if(!tumNormMatched) {
+          lm_fit <- tryCatch( 
+            { 
+              speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
+                                data = lm_input_table)
+            }, error = function(cond) {
+              message("There was a problem with this linear model run:")
+              message(cond)
+              return(NA)
+            })
+        } else {
+          lm_fit <- tryCatch(
+            {
+              speedglm::speedlm(formula = formula, offset = log2(Lib_Size_Tum / Lib_Size_Norm), 
+                                data = lm_input_table)
+            }, error = function(cond) {
+              message("There was a problem with this linear model run:")
+              message(cond)
+              return(NA)
+            })
+        }
+        
+        # Tidy the output
+        summary_table <- tidy(lm_fit)
+        
+        # Restrict the output table to just particular columns, if desired
+        #summary_table <- lm_fit[lm_fit$term == "MutStat_i" | lm_fit$term == "CNAStat_i",]
+        
+        # Add a column for the regulatory protein and target gene to ID them
+        summary_table$R_i <- regprot
+        summary_table$T_k <- paste(targ, collapse = ";")
+        
+        if(debug) {
+          print("Summary Table")
+          print(head(summary_table))
+          new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "summary_table", 
+                                                                              sep = "_"), sep = "_"))
+          new_fn <- paste(new_fn, ".csv", sep = "")
+          fwrite(summary_table, paste(outpath, new_fn, sep = "/"))
+        }
+        
+        # Run collinearity diagnostics 
+        if(collinearity_diagn) {
+          print("Running Collinearity Diagnostics")
+          fit_lm <- lm(formula = formula, offset = log2(Lib_Size), 
+                       data = lm_input_table)
+          source(paste(getwd(), "run_collinearity_diagnostics.R", sep = "/"), local = TRUE)
+        }
+        
+        # Remove the memory from the input tables
+        rm(lm_input_table)
+        gc()
+        
+        # Return this summary table
+        return(summary_table)
       }
-      
-      # Randomize expression across cancer and normal, across all samples
-      if (randomize) {lm_input_table$ExpStat_k <- sample(lm_input_table$ExpStat_k)}
-      
-      formula <- construct_formula(lm_input_table, analysis_type, num_PEER, num_pcs,
-                                   cna_bucketing, meth_bucketing)
-      if(debug) {
-        print(paste("Formula:", formula))
-      }
-      
-      if(!tumNormMatched) {
-        lm_fit <- tryCatch( 
-          { 
-            speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
-                              data = lm_input_table)
-          }, error = function(cond) {
-            message("There was a problem with this linear model run:")
-            message(cond)
-            return(NA)
-          })
-      } else {
-        lm_fit <- tryCatch(
-          {
-            speedglm::speedlm(formula = formula, offset = log2(Lib_Size_Tum / Lib_Size_Norm), 
-                              data = lm_input_table)
-          }, error = function(cond) {
-            message("There was a problem with this linear model run:")
-            message(cond)
-            return(NA)
-          })
-      }
-      
-      # Remove the memory from the input tables
-      rm(lm_input_table)
-      gc()
-      
-      # Tidy the output
-      summary_table <- tidy(lm_fit)
-      
-      # Restrict the output table to just particular columns, if desired
-      #summary_table <- lm_fit[lm_fit$term == "MutStat_i" | lm_fit$term == "CNAStat_i",]
-      
-      # Add a column for the regulatory protein and target gene to ID them
-      summary_table$R_i <- regprot
-      summary_table$T_k <- paste(targ, collapse = ";")
-      
-      if(debug) {
-        print("Summary Table")
-        print(head(summary_table))
-      }
-      
-      # Return this summary table
-      return(summary_table)
+      else {return(NA)}
     })
     
     # Now we have a list of output summary DFs for each of this regulatory protein's targets. 
     # Bind them all together.
     #return(do.call("rbind", regprot_i_results_df_list))
     regprot_i_results_df_list <- regprot_i_results_df_list[!is.na(regprot_i_results_df_list)]
+    regprot_i_results_df <- as.data.table(rbindlist(regprot_i_results_df_list, fill = TRUE))
     
-    return(as.data.table(rbindlist(regprot_i_results_df_list, fill = TRUE)))
+    if(debug) {
+      print("Combined Results DF")
+      print(head(regprot_i_results_df))
+    }
+    
+    return(regprot_i_results_df)
   })
-  
-  # Now we have a list of the results tables, one table per regulatory protein, 
-  # with entries for each target. Bind these all together into one master table.
-  
-  # Check that none of the DF entries are NA or empty data.tables
-  results_df_list <- results_df_list[!is.na(results_df_list)]
-  results_df_list <- Filter(function(dt) nrow(dt) != 0, results_df_list)
-  
-  master_df <- rbindlist(results_df_list, use.names = TRUE, fill = TRUE)
-  #master_df <- do.call(rbind, results_df_list)
-  
-  if(debug) {
-    print("Master DF")
-    print(head(master_df))
-  }
-  
-  # Return this master DF
-  return(master_df)
+        
+        # Now we have a list of the results tables, one table per regulatory protein, 
+        # with entries for each target. Bind these all together into one master table.
+        if(debug) {
+          print("Results DF list")
+          print(head(results_df_list))
+        }
+        
+        # Check that none of the DF entries are NA or empty data.tables
+        results_df_list <- results_df_list[!is.na(results_df_list)]
+        results_df_list <- Filter(function(dt) nrow(dt) != 0, results_df_list)
+        
+        master_df <- rbindlist(results_df_list, use.names = TRUE, fill = TRUE)
+        #master_df <- do.call(rbind, results_df_list)
+        
+        if(debug) {
+          print("Master DF")
+          print(head(master_df))
+        }
+        
+        # Return this master DF
+        return(master_df)
 }
 
 
@@ -633,7 +686,10 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
     # Does this regulatory protein have a methylation marker in cancer, or differential 
     # methylation between tumor and normal?
     meth_stat <- get_meth_stat(methylation_df, sample, meth_bucketing, tumNormMatched)
-    if(meth_bucketing) {meth_stat <- as.integer(meth_stat[[1]])}
+    if(meth_bucketing) {
+      meth_stat <- as.integer(meth_stat[[1]])
+      if(length(meth_stat) > 3) {meth_stat <- meth_stat[1:3]}
+    }
     
     if (debug) {
       print(paste("Meth stat:", meth_stat))
@@ -745,10 +801,12 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
         # Is this target methylated, or differentially methylated?
         if(analysis_type == "meQTL") {meth_bucketing <- FALSE}
         meth_stat <- get_meth_stat(methylation_df, sample, meth_bucketing, tumNormMatched)
-        if(meth_bucketing) {meth_stat <- meth_stat[[1]]}	
-        
+        if(meth_bucketing) {
+          meth_stat <- as.integer(meth_stat[[1]])
+          if(length(meth_stat) > 3) {meth_stat <- meth_stat[1:3]}
+        }
         # What is the expression of this target in this sample in cancer?
-        exp_stat <- get_exp_stat(expression_df, sample, tumNormMatched)
+        exp_stat <- unlist(get_exp_stat(expression_df, sample, tumNormMatched))
         
         if(debug) {
           print(paste("exp_stat:", exp_stat))
@@ -793,7 +851,12 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
       
       return(full_df)
     }
-  } else {return(NA)}
+  } else {
+    if(debug) {
+      print(paste("Target not found in all DFs:", targ_k))
+    }
+    return(NA)
+  }
 }
 
 
@@ -849,6 +912,13 @@ construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
   }))
   colnames_to_incl <- colnames_to_incl[-vals_to_remove]
   
+  # Additionally, if we have any columns that are uniform (the same value in all patients) we'd 
+  # like to remove those as well, as long as they are not MutStat_i
+  uniform_val_ind <- which(sapply(lm_input_table, function(x) length(unique(x)) == 1))
+  uniform_vals <- colnames(lm_input_table)[uniform_val_ind]
+  uniform_vals <- uniform_vals[!(uniform_vals == "MutStat_i")]
+  colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% uniform_vals)]
+  
   # Exclude the library size, as we are using this as an offset instead
   colnames_to_incl <- colnames_to_incl[!(colnames_to_incl == "Lib_Size")]
   
@@ -866,6 +936,32 @@ construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
   }
   return(formula)
 }
+
+
+############################################################
+#### CREATE OUTPATH AND OUTFILE NAME 
+############################################################
+# Create an appropriate file outpath
+outpath <- create_file_outpath(cancerType = args$cancerType, test = test, 
+                               tester_name = args$tester_name, run_name = args$run_name,
+                               tumNormMatched = tumNormMatched, QTLtype = args$QTLtype)
+
+if(debug) {
+  print(paste("Outpath:", outpath))
+}
+
+# Create an appropriate output file name
+outfn <- create_output_filename(test = test, tester_name = args$tester_name, run_name = args$run_name,
+                                targets_name = args$targets_name, expression_df_name = args$expression_df,
+                                cna_bucketing = args$cna_bucketing, mutation_regprot_df_name = args$mutation_regprot_df, 
+                                meth_bucketing = meth_bucketing, meth_type = args$meth_type, 
+                                patient_df_name = args$patient_df, num_PEER = args$num_PEER, 
+                                num_pcs = args$num_pcs, randomize = randomize)
+
+if(debug) {
+  print(paste("Outfile Name:", outfn))
+}
+
 
 ############################################################
 #### CALL FUNCTION
@@ -891,76 +987,16 @@ master_df <- run_linear_model(protein_ids_df = protein_ids_df,
                               meth_bucketing = meth_bucketing,
                               num_PEER = args$num_PEER,
                               num_pcs = args$num_pcs,
-                              debug = debug)
+                              debug = debug,
+                              collinearity_diagn = collinearity_diagn,
+                              outpath = outpath, outfn = outfn)
+
 
 ############################################################
-#### INITIAL PROCESSING OF RAW FILE
+#### INITIAL PROCESSING OF RAW FILE & WRITING
 ############################################################
-
 # Order the file by p-value
 master_df <- master_df[order(p.value)]
-
-# Create the appropriate path (add the cancer type, the regulatory protein group or tester name, 
-# tumor-normal matched or tumor only, and the analysis type (eQTL or meQTL)
-outpath <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/output_files"
-
-outpath <- paste(outpath, args$cancerType, sep = "/")
-
-if(test) {
-  outpath <- paste(outpath, args$tester_name, sep = "/")
-} else {outpath <- paste(outpath, args$run_name, sep = "/")}
-
-if(tumNormMatched) {
-  outpath <- paste(outpath, "tumor_normal_matched", sep = "/")
-} else {outpath <- paste(outpath, "tumor_only", sep = "/")}
-
-outpath <- paste(outpath, args$QTLtype, sep = "/")
-
-if(debug) {
-  print(paste("Outpath:", outpath))
-}
-
-# Create an appropriate output filename
-outfn <- "output_results"
-
-# Add the name of the regulatory protein/ group of regulatory proteins
-if(test) {
-  outfn <- paste(outfn, args$tester_name, sep = "_")
-} else {outfn <- paste(outfn, args$run_name, sep = "_")} 
-
-# Add the name of the target group
-outfn <- paste(outfn, args$targets_name, sep = "_")
-
-# Add the decisions for expression normalization, CNA bucketing, mutation restriction, 
-# methylation bucketing, and immune cell deconvolution bucketing 
-expr_norm <- unlist(strsplit(args$expression_df, "_", fixed = TRUE))[2]
-cna_bucketing <- "rawCNA"
-if (args$cna_bucketing != "rawCNA") {cna_bucketing <- paste("CNA", args$cna_bucketing, sep = "")}
-mutation_restr <- unlist(strsplit(args$mutation_regprot_df, "_", fixed = TRUE))[1]
-meth_b_lab <- "Raw"
-if(meth_bucketing) {
-  meth_b_lab <- "Bucketed"
-}
-meth_label <- paste("meth", paste(args$meth_type, meth_b_lab, sep = ""), sep = "")
-ici_label_spl <- unlist(strsplit(args$patient_df, "_", fixed = TRUE))
-ici_label <- ici_label_spl[4]
-if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
-if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
-
-outfn <- paste(outfn, paste(mutation_restr, paste(expr_norm, paste(cna_bucketing, paste(meth_label, ici_label, sep = "_"), 
-                                                                   sep = "_"), sep = "_"), sep = "_"), sep = "_")
-if(!(args$num_PEER == 0)) {outfn <- paste(outfn, paste(args$num_PEER, "PEER", sep = ""), sep = "_")}
-if(!(args$num_pcs == 0))  {outfn <- paste(outfn, paste(args$num_pcs, "PCs", sep = ""), sep = "_")}
-
-# Add "uncorrected" to the filename so we know MHT correction has not yet been done on these results
-outfn <- paste(outfn, "_uncorrected", sep = "")
-
-# If we randomized expression, add "_RANDOMIZED" to the end of the filename
-if (randomize) {outfn <- paste(outfn, "_RANDOMIZED", sep = "")}
-
-if(debug) {
-  print(paste("Outfile Name:", outfn))
-}
 
 # Write the results to the given file
 fwrite(master_df, paste(outpath, paste(outfn, ".csv", sep = ""), sep = "/"))
@@ -972,6 +1008,15 @@ master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
 # Write these to files as well 
 fwrite(master_df_mut, paste(outpath, paste(outfn, "_MUT.csv", sep = ""), sep = "/")) 
 fwrite(master_df_cna, paste(outpath, paste(outfn, "_CNA.csv", sep = ""), sep = "/"))  
+
+# Combine the collinearity results and write to a file
+if(collinearity_diagn) {
+  collinearity_df <- combine_collinearity_diagnostics(outpath)
+  # Adjust the output file name for collinearity results
+  collin_fn <- str_replace(outfn, "output_results", "collinearity_results")
+  if(debug) {print(paste("Collinearity Output FN:", collin_fn))}
+  fwrite(collinearity_df, paste(outpath, paste(collin_fn, ".csv", sep = ""), sep = "/"))
+}
 
 # Call the file to create output visualizations
 source(paste(source_path, "process_LM_output.R", sep = "")) 

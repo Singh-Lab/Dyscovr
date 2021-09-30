@@ -5,7 +5,7 @@
 
 # This file contains a set of helper functions that will be called by the linear
 # model (from linear_model.R or linear_model.R) while it is running.
-
+library(stringr)
 
 ############################################################
 
@@ -75,7 +75,6 @@ get_cna_stat <- function(cna_df, sample, cna_bucketing) {
       buckets_list <- unlist(strsplit(unlist(strsplit(str_buckets, "(", fixed = TRUE))[2], ")", fixed = TRUE))[1]
       cna_stat <- list(as.integer(unlist(strsplit(buckets_list, ",", fixed = TRUE))))
     } else {cna_stat <- list(NA, NA, NA)}
-    print(cna_stat)
   }  
   return(cna_stat)
 }
@@ -117,16 +116,22 @@ get_meth_stat <- function(methylation_df, sample, meth_bucketing, tumNormMatched
   
   if(!tumNormMatched) {
     if(meth_bucketing) { 
-      str_buckets <- as.character(unlist(methylation_df[,grepl(sample, colnames(methylation_df)), with = FALSE]))
-      #print(str_buckets)
-      buckets_list <- unlist(strsplit(unlist(strsplit(str_buckets, "(", fixed = TRUE))[2], ")", fixed = TRUE))[1]
-      meth_stat <- list(as.integer(unlist(strsplit(buckets_list, ",", fixed = TRUE))))
+      meth_buckets <- methylation_df[,grepl(sample, colnames(methylation_df)), with = FALSE]
+      str_buckets <- as.character(unlist(meth_buckets))
+      if(length(str_buckets) > 1) {
+        if(length(unique(str_buckets)) == 1) {str_buckets <- unique(str_buckets)}
+        else {str_buckets <- str_buckets[1]}
+      }
+      print(str_buckets)
+      if(!(length(str_buckets) == 0)) {
+        buckets_list <- unlist(strsplit(unlist(strsplit(str_buckets, "(", fixed = TRUE))[2], ")", fixed = TRUE))[1]
+        meth_stat <- list(as.integer(unlist(strsplit(buckets_list, ",", fixed = TRUE))))
+      } else {meth_stat <- list(NA, NA, NA)}
       #print(meth_stat)
     } else {  
-      meth_stat <- mean.default(as.numeric(methylation_df[,grepl(sample, colnames(methylation_df)), 
-                                                          with = FALSE]))
+      meth_stat <- unlist(methylation_df[,grepl(sample, colnames(methylation_df)), with = FALSE])
+      if (length(meth_stat) > 1) {meth_stat <- mean.default(as.numeric(meth_stat))}
       if(length(meth_stat) < 1) {meth_stat <- NA}
-      if (length(meth_stat) > 1) {meth_stat <- meth_stat[1]}
       if (is.nan(meth_stat)) {meth_stat <- NA}
     }
   } else {
@@ -268,6 +273,146 @@ get_tnm_fc <- function(df, sample) {
   
   return(logfc)
 }
+
+
+
+############################################################
+#' Create the appropriate output file path (add the cancer type, the regulatory protein group 
+#' or tester name, tumor-normal matched or tumor only, and the analysis type (eQTL or meQTL)
+#' @param cancerType the name of the type of cancer, or "Pan-Cancer" for all cancers
+#' @param test a TRUE/ FALSE value indicating whether this is a test on a single
+#' regulatory protein
+#' @param tester_name if this is a test, the name of the tester regulatory protein
+#' @param run_name string value indicating the type of run if we are not running 
+#' a test on a single regulatory protein 
+#' @param tumNormMatched a TRUE/ FALSE value indicating whether or not this is a 
+#' tumor-normal matched run
+#' @param QTL_type either "eQTL" or "meQTL" depending on the type of run we are running
+create_file_outpath <- function(cancerType, test, tester_name, run_name, 
+                                tumNormMatched, QTLtype) {
+  outpath <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/output_files"
+  
+  outpath <- paste(outpath, cancerType, sep = "/")
+  
+  if(test) {
+    outpath <- paste(outpath, tester_name, sep = "/")
+  } else {outpath <- paste(outpath, run_name, sep = "/")}
+  
+  if(tumNormMatched) {
+    outpath <- paste(outpath, "tumor_normal_matched", sep = "/")
+  } else {outpath <- paste(outpath, "tumor_only", sep = "/")}
+  
+  outpath <- paste(outpath, QTLtype, sep = "/")
+  
+  return(outpath)
+}
+
+
+############################################################
+#' Create the appropriate output file name for the master DF result based on the
+#' conditions of the given run
+#' @param test a TRUE/ FALSE value indicating whether this is a test on a single
+#' regulatory protein
+#' @param tester_name if this is a test, the name of the tester regulatory protein
+#' @param run_name string value indicating the type of run if we are not running 
+#' a test on a single regulatory protein
+#' @param targets_name a string name of the category of targets we are testing
+#' @param expression_df_name the string name used to import the expression DF
+#' @param cna_bucketing a string description of how we are bucketing/ handling 
+#' CNA values
+#' @param mutation_regprot_df_name the string name used to import the mutation
+#' regprot DF (used to get the level of specificity of mutations)
+#' @param meth_bucketing a TRUE/ FALSE value indicating if we are in some way 
+#' bucketing our methylation value
+#' @param meth_type 'Beta' or 'M' depending on the type of methylation we are
+#' using
+#' @param patient_df_name the string name used to import the patient DF
+#' @param num_PEER an integer value from 0 to 10 indicating the number of PEER 
+#' factors we are using
+#' @param num_pcs an integer value from 0 to 2 indicating the number of principal
+#' components we are using
+#' @param randomize a TRUE/ FALSE value indicating whether or not we are randomizing
+#' our dependent variable (expression or methylation)
+create_output_filename <- function(test, tester_name, run_name, targets_name, expression_df_name,
+                                   cna_bucketing, mutation_regprot_df_name, meth_bucketing,
+                                   meth_type, patient_df_name, num_PEER, num_pcs, randomize) {
+  outfn <- "output_results"
+  
+  # Add the name of the regulatory protein/ group of regulatory proteins
+  if(test) {
+    outfn <- paste(outfn, tester_name, sep = "_")
+  } else {outfn <- paste(outfn, run_name, sep = "_")} 
+  
+  # Add the name of the target group
+  outfn <- paste(outfn, targets_name, sep = "_")
+  
+  # Add the decisions for expression normalization, CNA bucketing, mutation restriction, 
+  # methylation bucketing, and immune cell deconvolution bucketing 
+  expr_norm <- unlist(strsplit(expression_df_name, "_", fixed = TRUE))[2]
+  cna_bucketing <- "rawCNA"
+  if (cna_bucketing != "rawCNA") {cna_bucketing <- paste("CNA", cna_bucketing, sep = "")}
+  mutation_restr <- unlist(strsplit(mutation_regprot_df_name, "_", fixed = TRUE))[1]
+  meth_b_lab <- "Raw"
+  if(meth_bucketing) {
+    meth_b_lab <- "Bucketed"
+  }
+  meth_label <- paste("meth", paste(meth_type, meth_b_lab, sep = ""), sep = "")
+  ici_label_spl <- unlist(strsplit(patient_df_name, "_", fixed = TRUE))
+  ici_label <- ici_label_spl[4]
+  if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
+  if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
+  
+  outfn <- paste(outfn, paste(mutation_restr, paste(expr_norm, paste(cna_bucketing, paste(meth_label, ici_label, sep = "_"), 
+                                                                     sep = "_"), sep = "_"), sep = "_"), sep = "_")
+  
+  # Add PEER factors/ PCs if needed
+  if(!(num_PEER == 0)) {outfn <- paste(outfn, paste(num_PEER, "PEER", sep = ""), sep = "_")}
+  if(!(num_pcs == 0))  {outfn <- paste(outfn, paste(num_pcs, "PCs", sep = ""), sep = "_")}
+  
+  # Add "uncorrected" to the file name so we know MHT correction has not yet been done on these results
+  outfn <- paste(outfn, "_uncorrected", sep = "")
+  
+  # If we randomized expression, add "_RANDOMIZED" to the end of the file name
+  if (randomize) {outfn <- paste(outfn, "_RANDOMIZED", sep = "")}
+  
+  return(outfn)
+}
+
+
+############################################################
+#' A function to combine the collinearity diagnostic statistics,
+#' specifically the tolerance, VIF, eigenvalue, and condition index
+#' values for each covariate, and returns these aggregate statistics.
+#' @param path a path to the folder with all of the collinearity
+#' output files
+#' NOTE: any condition index over 30 indicates strong collinearity
+combine_collinearity_diagnostics <- function(path) {
+  vif_tabs <- list.files(path, pattern = "vif_tab")
+  eig_cindex_tabs <- list.files(path, pattern = "eig_cindex_tab")
+  
+  tmp <- fread(paste(path, vif_tabs[1], sep = "/"), header = TRUE)
+  results_table <- data.table(matrix(ncol= 4, nrow = nrow(tmp)))
+  colnames(results_table) <- c("Tolerance", "VIF", "Eigenvalue", "Condition_Index")
+  rownames(results_table) <- tmp$Variables
+  
+  for (i in 1:length(vif_tabs)) {
+    combo <- paste(unlist(strsplit(vif_tabs[i], "_", fixed = TRUE))[1:2], collapse = "_")
+    vif_tab <- fread(paste(path, vif_tabs[1], sep = "/"), header = TRUE)
+    eig_cindex_tab <- fread(paste(path, grepl(combo, eig_cindex_tabs), sep = "/"), 
+                            header = TRUE)
+    
+    results_table[, 'Tolerance'] <- mean(results_table[, 'Tolerance'], vif_tab$Tolerance,
+                                         na.rm = TRUE)
+    results_table[, 'VIF'] <- mean(results_table[, 'VIF'], vif_tab$VIF,
+                                         na.rm = TRUE)
+    results_table[, 'Eigenvalue'] <- mean(results_table[, 'Eigenvalue'], eig_cindex_tab$Eigenvalue,
+                                         na.rm = TRUE)
+    results_table[, 'Condition_Index'] <- mean(results_table[, 'Condition_Index'], 
+                                               eig_cindex_tab$`Condition Index`, na.rm = TRUE)
+  }
+  return(results_table)
+}
+
 
 
 ############################################################

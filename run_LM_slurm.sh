@@ -2,7 +2,7 @@
 #SBATCH --mem=8192
 #SBATCH --qos=1wk
 #SBATCH --nodes=1
-#SBATCH --job-name=lm_run_cancerRelated_noPEER_metabolicTargs_tmm_CNAinclAmp_bucketBeta_eQTL
+#SBATCH --job-name=lm_run_cancerRelated_noPEER_tenTesterTargs_tmm_rawCNA_M_eQTL
 #SBATCH --mail-user=scamilli@princeton.edu
 #SBATCH --mail-type=fail,time_limit
 
@@ -13,7 +13,7 @@
 #--mutation_targ_df "mut_count_matrix_missense_tnm.csv" --mutation_regprot_df "iprotein_results_missense_tnm.csv" \
 #--cna_df "CNV_DF_AllGenes_tnm.csv" --patient_df "combined_patient_sample_DF_cibersort_total_frac_tmm_tnm.csv" \
 #--target_df "allgene_targets.csv" --cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "Beta" \
-#--targets_name "allGenes" --num_peer 10 --num_pcs 0 --debug "FALSE"
+#--targets_name "allGenes" --num_PEER 10 --num_pcs 0 --debug "FALSE" --collinearity_diagn "TRUE"
 
 # SAMPLE RUN: TP53 and all targets/ ChIP-eat targets (NON-TNM)
 #Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" \
@@ -22,7 +22,7 @@
 #--mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatients.csv" --cna_df "CNA_AllGenes_Bucketed_InclAmp_CancerOnly_IntersectPatients.csv" \
 #--patient_df "combined_patient_sample_cibersort_total_frac_tmm_IntersectPatients.csv" --target_df "tp53_chipeat_targets.csv" \
 #--cna_bucketing "bucket_inclAmp" --meth_bucketing "TRUE" --meth_type "Beta" --targets_name "chipeat" --num_PEER 0 \
-#--num_pcs 0 --debug "FALSE" 
+#--num_pcs 0 --debug "FALSE" --collinearity_diagn "TRUE"
 
 # SAMPLE RUN: USH2A and all targets (NON-TNM) -- NEGATIVE CONTROL
 #Rscript linear_model.R --QTLtype "meQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" \
@@ -31,18 +31,18 @@
 #--methylation_df_meQTL "methylation_Beta_CancerOnly_IntersectPatients.csv" --mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatients.csv" \
 #--mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatients.csv" --cna_df "CNA_AllGenes_Bucketed_InclAmp_CancerOnly_IntersectPatients.csv" \
 #--patient_df "combined_patient_sample_cibersort_total_frac_tmm_IntersectPatients.csv" --target_df "allgene_targets.csv" \
-#--cna_bucketing "bucket_inclAmp" --meth_bucketing "TRUE" --meth_type "Beta" --targets_name "allGenes" --num_peer 0 --num_pcs 0 --debug "FALSE"
+#--cna_bucketing "bucket_inclAmp" --meth_bucketing "TRUE" --meth_type "Beta" --targets_name "allGenes" --num_PEER 0 --num_pcs 0 \
+#--debug "FALSE" --collinearity_diagn "TRUE"
 
 
 # SAMPLE RUN: Cancer Related Genes/ Highly Deleted TFs and Metabolic Targets (NON-TNM)
 Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" \
 --test "FALSE" --protein_ids_df "iprotein_protein_ids_df_cancerRelated.csv" --expression_df "expression_tmm_CancerOnly_IntersectPatients.csv" \
---methylation_df "methylation_bucketed_Beta_CancerOnly_IntersectPatients.csv" --methylation_df_meQTL "methylation_Beta_CancerOnly_IntersectPatients.csv"\
+--methylation_df "methylation_Beta_CancerOnly_IntersectPatients.csv" --methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatients.csv" \
 --mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatients.csv" --mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatients.csv" \
---cna_df "CNA_AllGenes_Bucketed_InclAmp_CancerOnly_IntersectPatients.csv" --patient_df "combined_patient_sample_cibersort_total_frac_tmm_IntersectPatients.csv" \
---target_df "metabolic_targets.csv" --cna_bucketing "bucket_inclAmp" --meth_bucketing "TRUE" --meth_type "Beta" --run_name "cancer_related_genes" \
---targets_name "metabolicTargs" --num_peer 0 --num_pcs 0 --debug "FALSE" 
-
+--cna_df "CNA_AllGenes_CancerOnly_IntersectPatients.csv" --patient_df "combined_patient_sample_cibersort_total_frac_tmm_IntersectPatients.csv" \
+--target_df "ten_tester_targets.csv" --cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --run_name "cancerRelated" \
+--targets_name "tenTesterTargs" --num_PEER 0 --num_pcs 0 --debug "TRUE" --collinearity_diagn "TRUE"
 
 
 
@@ -158,6 +158,13 @@ Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "B
 # Option 1: Curated Targets
 # TP53 Curated Targets: "tp53_curated_targets.csv"
 # FOXA1 Curated Targets: "foxa1_curated_targets.csv"
+
+# Option 2: Target Lists (Generic)
+# Oncogenes and Tumor Suppressors Retrieved from: https://cancerres.aacrjournals.org/content/canres/suppl/2012/01/23/0008-5472.CAN-11-2266.DC1/T3_74K.pdf
+# Oncogenes: "oncogene_targets.csv"
+# Tumor-suppressors: "tumor_suppressor_targets.csv"
+# Metabolic targets: "metabolic_targets.csv"
+# All gene targets: "allgene_targets.csv"
 
 # Option 2: ChIP-eat Targets
 # TP53 ChIP-eat Targets: "tp53_chipeat_targets.csv"
