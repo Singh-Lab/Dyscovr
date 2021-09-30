@@ -159,31 +159,33 @@ collinearity_diagn <- str2bool(args$collinearity_diagn)
 ############################################################
 # SET MAIN PATH AND IMPORT GENERALLY NEEDED FILES
 ############################################################
+input_file_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/"
+
 # Set the paths
 if(args$cancerType == "BRCA") {
-  prot_path <- paste(source_path, "input_files/BRCA/", sep = "")
-  targ_path <- paste(source_path, "input_files/BRCA/target_lists/", sep = "")
+  prot_path <- paste(input_file_path, "BRCA/", sep = "")
+  targ_path <- paste(input_file_path, "BRCA/target_lists/", sep = "")
   
   if(!tumNormMatched) {
-    main_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/BRCA/tumor_only/"
+    main_path <- paste(input_file_path, "BRCA/tumor_only/", sep = "")
   } else {
-    main_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/BRCA/tumor_normal_matched/"
+    main_path <- paste(input_file_path, "BRCA/tumor_normal_matched/", sep = "") 
   }
 } else {
-  prot_path <- paste(source_path, "input_files/Pan-Cancer/", sep = "")
-  targ_path <- paste(source_path, "input_files/Pan-Cancer/target_lists/", sep = "")
+  prot_path <- paste(source_path, "Pan-Cancer/", sep = "")
+  targ_path <- paste(source_path, "Pan-Cancer/target_lists/", sep = "")
   if(!tumNormMatched) {
-    main_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/Pan-Cancer/tumor_only/"
+    main_path <- paste(input_file_path, "Pan-Cancer/tumor_only/", sep = "")
   } else {
-    main_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/Pan-Cancer/tumor_normal_matched/"
+    main_path <- paste(input_file_path, "Pan-Cancer/tumor_normal_matched/", sep = "")
   }
 }
 
 # If we are looking at tester targets, we need to go one directory deeper
 if(grepl("curated", args$targets_name)) {
-  targ_path <- paste(source_path, "input_files/BRCA/target_lists/curated_targets/", sep = "")
+  targ_path <- paste(targ_path, "curated_targets/", sep = "")
 } else if (grepl("chipeat", args$targets_name)) {
-  targ_path <- paste(source_path, "input_files/BRCA/target_lists/chipeat_targets/", sep = "")
+  targ_path <- paste(targ_path, "chipeat_targets/", sep = "")
 } else {targ_path <- targ_path}
 
 # Generalized ID conversion table from BiomaRt
@@ -225,6 +227,9 @@ if(debug) {
   print(head(expression_df))
 }
 
+# Determine what type of expression this is from the filename
+is_rank_or_quant_norm <- FALSE
+if(grepl("rank", args$expression_df) | grepl("quantile", args$expression_df)) {is_rank_or_quant_norm <- TRUE}
 
 
 ############################################################
@@ -346,17 +351,17 @@ if(debug) {
 ### PATIENT CHARACTERISTICS ###
 # Gender : Gender of all samples 1..j..M (0 if male, 1 if female) -- ONLY INCLUDE IF NOT BRCA
 # Age : Age of all samples 1..j..M in years 
-# Buckets: 1 if 0-9, 2 if 10-19, 3 if 20-29, 4 if 30-39, 5 if 40-49, 6 if 50-59, 7 if 60-69, 8 if 70-79, 9 if 80-89, 10 if 90+
-# Race : Race/ Ethnicity of all samples 1..j..M 
-# Buckets: 1 if White (not Latinx), 2 if White (Latinx), 3 if black or African, 4 if Asian, 5 if other
+	# If Buckets: 1 if 0-9, 2 if 10-19, 3 if 20-29, 4 if 30-39, 5 if 40-49, 6 if 50-59, 7 if 60-69, 8 if 70-79, 9 if 80-89, 10 if 90+
+# Race : Race/ Ethnicity of all samples 1..j..M -- CURRENTLY EXCLUDING
+	# Buckets: 1 if White (not Latinx), 2 if White (Latinx), 3 if black or African, 4 if Asian, 5 if other
 # Prior_malig : If all samples 1..j..M had a prior malignancy (0 if no, 1 if yes)
 # Treatment_rad : If all samples 1..j..M were treated with radiation (0 is not treated, 1 is treated) 
 # Treatment_pharm : If all samples 1..j..M were treated with pharmaceutical therapy (0 is not treated, 1 is treated) 
 # TotalNumMut : Total number of missense mutations each patient j has (across all samples 1..j..M)
 # Tumor_purity : An estimate of the 'purity' of the tumor (fraction of tumor cells within tumor sample) 
-# Buckets: 1 if low purity (0-0.5), 2 if medium purity (0.5-0.75), 3 if high purity (0.75-1.0)
+	# Buckets: 1 if low purity (0-0.5), 2 if medium purity (0.5-0.75), 3 if high purity (0.75-1.0)
 # Total_IC_Frac : An estimate of the fraction of tumor cells in the sample, from CIBERSORT Abs
-# Buckets: 1 if low ICI (0-0.3), 2 if medium ICI (0.3-0.7), 3 if high ICI (0.7-1.0)
+	# Buckets: 1 if low ICI (0-0.3), 2 if medium ICI (0.3-0.7), 3 if high ICI (0.7-1.0)
 # Tumor Type/ Subtype : The type or subtype classification of the tumor sample (buckets equivalent to the number of types/ subtypes)
 
 ### REGULATORY PROTEIN i CHARACTERISTICS ###
@@ -369,13 +374,16 @@ if(debug) {
 # MutStat_k : The mutation status of gene k (0 if not mutated, 1 if mutated) across all samples 1..j..M
 # CNA_k : the copy number for target gene k across all samples 1..j..M
 
-
 ### DEPENDENT VARIABLE ###
-# log2(Exp_k,c) or log2(Meth_k,c) : the cancer expression or methylation value 
+# log2(Exp_k,c) or log2(Meth_k,c) : the cancer expression or methylation value (tumor-only)
+# log2(Exp_k,c/Exp_k,n) or log2(Meth_k,c/ Meth_k,n) : the cancer differential expression or methylation value (tumor-normal matched)
+
 
 ### OFFSETS/ SCALING FACTORS ###
 # log2(N_j) : log of effective library size (sample-specific scaling factor); the total number of reads for 
-# tumor sample j after cross-sample normalization, across all samples 1..j..M
+	# tumor sample j after cross-sample normalization, across all samples 1..j..M (tumor-only)
+# log2(N_j,c / N_j,n) log of differential effective library size (sample-specific scaling factor); the total number of reads for 
+	# tumor sample j divided by normal sample j after cross-sample normalization, across all matched samples 1..j..M (tumor-normal-matched)
 # NOTE: This is important only for TMM and FPKM expression, not for rank- or quantile-normalized expression
 
 
@@ -403,6 +411,9 @@ if(debug) {
 #' entries are CNA values)
 #' @param expression_df table of expression (rows are genes, columns are patients, 
 #' entries are expression values)
+#' @param is_rank_or_quant_norm a TRUE/FALSE value indicating whether this is rank-
+#' or quantile-normalized data (i.e. whether we need to include library size as an
+#' offset)
 #' @param analysis_type a string label that reads either "eQTL" or "meQTL" to 
 #' determine what kind of model we should run
 #' @param tumNormMatched a TRUE/FALSE value indicating whether or not the analysis is 
@@ -427,7 +438,7 @@ if(debug) {
 #' of the given run; can be modified to write files within this function
 run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df, 
                              mutation_df_targ, mutation_df_regprot, methylation_df, 
-                             methylation_df_meQTL, cna_df, expression_df, 
+                             methylation_df_meQTL, cna_df, expression_df, is_rank_or_quant_norm,
                              analysis_type, tumNormMatched, randomize, cna_bucketing, 
                              meth_bucketing, num_PEER, num_pcs, debug, collinearity_diagn,
                              outpath, outfn) {
@@ -530,8 +541,12 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
         if(!tumNormMatched) {
           lm_fit <- tryCatch( 
             { 
-              speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
-                                data = lm_input_table)
+	      if(is_rank_or_quant_norm) {
+              	speedglm::speedlm(formula = formula, data = lm_input_table)
+	      } else {
+              	speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
+                                	data = lm_input_table)
+	      }
             }, error = function(cond) {
               message("There was a problem with this linear model run:")
               message(cond)
@@ -540,8 +555,12 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
         } else {
           lm_fit <- tryCatch(
             {
-              speedglm::speedlm(formula = formula, offset = log2(Lib_Size_Tum / Lib_Size_Norm), 
-                                data = lm_input_table)
+	      if(is_rank_or_quant_norm) {
+              	speedglm::speedlm(formula = formula, data = lm_input_table)
+	      } else {
+              	speedglm::speedlm(formula = formula, offset = log2(Lib_Size_Tum / Lib_Size_Norm), 
+                                	data = lm_input_table)
+	      }
             }, error = function(cond) {
               message("There was a problem with this linear model run:")
               message(cond)
@@ -980,6 +999,7 @@ master_df <- run_linear_model(protein_ids_df = protein_ids_df,
                               methylation_df_meQTL = methylation_df_meQTL,
                               cna_df = cna_df,
                               expression_df = expression_df, 
+			      is_rank_or_quant_norm = is_rank_or_quant_norm,
                               analysis_type = args$QTLtype,
                               tumNormMatched = tumNormMatched,
                               randomize = randomize,
