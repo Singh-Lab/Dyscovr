@@ -5,7 +5,7 @@
 
 #!/usr/bin/env Rscript
 
-library(biomaRt)
+#library(biomaRt)
 library(parallel)
 library(rlang)
 library(dplyr)
@@ -14,6 +14,7 @@ library(data.table)
 library(speedglm)
 library(argparse)
 library(stringr)
+library(glmnet)
 
 
 # Source other files needed
@@ -113,13 +114,24 @@ parser$add_argument("--num_PEER", default = 0, type = "integer",
 parser$add_argument("--num_pcs", default = 2, type = "integer",
                     help = "A value between 0 and 2 indicating the number of principal components we are using as covariates in our model. Default is 2.")
 
-# Add a flag for debugging
-parser$add_argument("--debug", default = "FALSE", type = "character",
-                    help = "A TRUE/ FALSE value indicating whether or not we want detailed printing for debugging purposes. Default is FALSE.")
 
 # Add a flag for running collinearity diagnostics; can be useful but adds to runtime.
 parser$add_argument("--collinearity_diagn", default = "FALSE", type = "character",
                     help = "A TRUE/ FALSE value indicating whether or not we want detailed collinearity diagnostics. Can be useful but adds to runtime; not suggested for large runs. Default is FALSE.")
+# Add a flag for adding a regularization method
+parser$add_argument("--regularization", default = "None", type = "character",
+                    help = "The name of the regularization method being used. Currently only implemented for L2. Default is None.")
+
+# Add a flag for debugging
+parser$add_argument("--debug", default = "FALSE", type = "character",
+                    help = "A TRUE/ FALSE value indicating whether or not we want detailed printing for debugging purposes. Default is FALSE.")
+
+
+# Add a flag for including only select covariates in the model, given as a character list with each item separated by a semicolon
+parser$add_argument("--select_args", default = "ALL", type = "character",
+                    help = "Option to provide a semicolon-separated character string listing all covariates to include, e.g. MutStat_i;CNAStat_i, etc. If this option is chosen, dependent variable must also be listed. [default %(default)s]")
+parser$add_argument("--select_args_label", default = "", type = "character",
+                    help = "If we are providing a character string for --select_args, this is an option to provide a label for what arguments we are selecting for labeling the output files and visualizations.")
 
 
 # Parse the given arguments
@@ -159,9 +171,9 @@ collinearity_diagn <- str2bool(args$collinearity_diagn)
 ############################################################
 # SET MAIN PATH AND IMPORT GENERALLY NEEDED FILES
 ############################################################
+# Set the paths
 input_file_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/"
 
-# Set the paths
 if(args$cancerType == "BRCA") {
   prot_path <- paste(input_file_path, "BRCA/", sep = "")
   targ_path <- paste(input_file_path, "BRCA/target_lists/", sep = "")
@@ -172,12 +184,12 @@ if(args$cancerType == "BRCA") {
     main_path <- paste(input_file_path, "BRCA/tumor_normal_matched/", sep = "") 
   }
 } else {
-  prot_path <- paste(source_path, "Pan-Cancer/", sep = "")
-  targ_path <- paste(source_path, "Pan-Cancer/target_lists/", sep = "")
+  prot_path <- paste(input_file_path, "PanCancer/", sep = "")
+  targ_path <- paste(input_file_path, "PanCancer/target_lists/", sep = "")
   if(!tumNormMatched) {
-    main_path <- paste(input_file_path, "Pan-Cancer/tumor_only/", sep = "")
+    main_path <- paste(input_file_path, "PanCancer/tumor_only/", sep = "")
   } else {
-    main_path <- paste(input_file_path, "Pan-Cancer/tumor_normal_matched/", sep = "")
+    main_path <- paste(input_file_path, "PanCancer/tumor_normal_matched/", sep = "")
   }
 }
 
@@ -351,17 +363,17 @@ if(debug) {
 ### PATIENT CHARACTERISTICS ###
 # Gender : Gender of all samples 1..j..M (0 if male, 1 if female) -- ONLY INCLUDE IF NOT BRCA
 # Age : Age of all samples 1..j..M in years 
-	# If Buckets: 1 if 0-9, 2 if 10-19, 3 if 20-29, 4 if 30-39, 5 if 40-49, 6 if 50-59, 7 if 60-69, 8 if 70-79, 9 if 80-89, 10 if 90+
+# If Buckets: 1 if 0-9, 2 if 10-19, 3 if 20-29, 4 if 30-39, 5 if 40-49, 6 if 50-59, 7 if 60-69, 8 if 70-79, 9 if 80-89, 10 if 90+
 # Race : Race/ Ethnicity of all samples 1..j..M -- CURRENTLY EXCLUDING
-	# Buckets: 1 if White (not Latinx), 2 if White (Latinx), 3 if black or African, 4 if Asian, 5 if other
+# Buckets: 1 if White (not Latinx), 2 if White (Latinx), 3 if black or African, 4 if Asian, 5 if other
 # Prior_malig : If all samples 1..j..M had a prior malignancy (0 if no, 1 if yes)
 # Treatment_rad : If all samples 1..j..M were treated with radiation (0 is not treated, 1 is treated) 
 # Treatment_pharm : If all samples 1..j..M were treated with pharmaceutical therapy (0 is not treated, 1 is treated) 
 # TotalNumMut : Total number of missense mutations each patient j has (across all samples 1..j..M)
 # Tumor_purity : An estimate of the 'purity' of the tumor (fraction of tumor cells within tumor sample) 
-	# Buckets: 1 if low purity (0-0.5), 2 if medium purity (0.5-0.75), 3 if high purity (0.75-1.0)
+# Buckets: 1 if low purity (0-0.5), 2 if medium purity (0.5-0.75), 3 if high purity (0.75-1.0)
 # Total_IC_Frac : An estimate of the fraction of tumor cells in the sample, from CIBERSORT Abs
-	# Buckets: 1 if low ICI (0-0.3), 2 if medium ICI (0.3-0.7), 3 if high ICI (0.7-1.0)
+# Buckets: 1 if low ICI (0-0.3), 2 if medium ICI (0.3-0.7), 3 if high ICI (0.7-1.0)
 # Tumor Type/ Subtype : The type or subtype classification of the tumor sample (buckets equivalent to the number of types/ subtypes)
 
 ### REGULATORY PROTEIN i CHARACTERISTICS ###
@@ -375,15 +387,14 @@ if(debug) {
 # CNA_k : the copy number for target gene k across all samples 1..j..M
 
 ### DEPENDENT VARIABLE ###
-# log2(Exp_k,c) or log2(Meth_k,c) : the cancer expression or methylation value (tumor-only)
-# log2(Exp_k,c/Exp_k,n) or log2(Meth_k,c/ Meth_k,n) : the cancer differential expression or methylation value (tumor-normal matched)
-
+# log2(ExpStat_k,c) or log2(Meth_k,c) : the cancer expression or methylation value (tumor-only)
+# log2(ExpStat_k,c/Exp_k,n) or log2(Meth_k,c/ Meth_k,n) : the cancer differential expression or methylation value (tumor-normal matched)
 
 ### OFFSETS/ SCALING FACTORS ###
 # log2(N_j) : log of effective library size (sample-specific scaling factor); the total number of reads for 
-	# tumor sample j after cross-sample normalization, across all samples 1..j..M (tumor-only)
+# tumor sample j after cross-sample normalization, across all samples 1..j..M (tumor-only)
 # log2(N_j,c / N_j,n) log of differential effective library size (sample-specific scaling factor); the total number of reads for 
-	# tumor sample j divided by normal sample j after cross-sample normalization, across all matched samples 1..j..M (tumor-normal-matched)
+# tumor sample j divided by normal sample j after cross-sample normalization, across all matched samples 1..j..M (tumor-normal-matched)
 # NOTE: This is important only for TMM and FPKM expression, not for rank- or quantile-normalized expression
 
 
@@ -436,12 +447,16 @@ if(debug) {
 #' we'll be writing from inside the function
 #' @param outfn a string with a generic output filename based on the characteristics
 #' of the given run; can be modified to write files within this function
+#' @param regularization a string with the type of regularization to be used; currently
+#' only implemented for "L2" or "None"
+#' @param covs_to_incl a vector of covariates that we want to include, or ALL if we
+#' want to include all implemented covariates
 run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df, 
                              mutation_df_targ, mutation_df_regprot, methylation_df, 
                              methylation_df_meQTL, cna_df, expression_df, is_rank_or_quant_norm,
                              analysis_type, tumNormMatched, randomize, cna_bucketing, 
                              meth_bucketing, num_PEER, num_pcs, debug, collinearity_diagn,
-                             outpath, outfn) {
+                             outpath, outfn, regularization, covs_to_incl) {
   
   # We need to get a mini-table for every r_i, t_k combo that we rbind into a master table of results
   results_df_list <- lapply(1:protein_ids_df[, .N], function(i) {
@@ -516,10 +531,6 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
         if(debug) {
           print("LM Input Table")
           print(head(lm_input_table))
-          #print(is.character(lm_input_table))
-          #print(length(lm_input_table))
-          #print(is.na(lm_input_table))
-          #print(typeof(lm_input_table))
           new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "lm_input_table", 
                                                                               sep = "_"), sep = "_"))
           fwrite(lm_input_table, paste(outpath, paste(new_fn, ".csv", sep = ""), sep = "/"))
@@ -533,39 +544,49 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
         }
         
         formula <- construct_formula(lm_input_table, analysis_type, num_PEER, num_pcs,
-                                     cna_bucketing, meth_bucketing)
-        if(debug) {
-          print(paste("Formula:", formula))
-        }
+                                     cna_bucketing, meth_bucketing, covs_to_incl)
         
-        if(!tumNormMatched) {
-          lm_fit <- tryCatch( 
-            { 
-	      if(is_rank_or_quant_norm) {
-              	speedglm::speedlm(formula = formula, data = lm_input_table)
-	      } else {
-              	speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
-                                	data = lm_input_table)
-	      }
-            }, error = function(cond) {
-              message("There was a problem with this linear model run:")
-              message(cond)
-              return(NA)
-            })
+        if (regularization == "None") {
+          
+          if(debug) {
+            print(paste("Formula:", formula))
+          }
+          
+          if(!tumNormMatched) {
+            lm_fit <- tryCatch( 
+              { 
+                if(is_rank_or_quant_norm) {
+                  speedglm::speedlm(formula = formula, data = lm_input_table)
+                } else {
+                  speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
+                                    data = lm_input_table)
+                }
+              }, error = function(cond) {
+                message("There was a problem with this linear model run:")
+                message(cond)
+                return(NA)
+              })
+          } else {
+            lm_fit <- tryCatch(
+              {
+                if(is_rank_or_quant_norm) {
+                  speedglm::speedlm(formula = formula, data = lm_input_table)
+                } else {
+                  speedglm::speedlm(formula = formula, offset = log2(Lib_Size_Tum / Lib_Size_Norm), 
+                                    data = lm_input_table)
+                }
+              }, error = function(cond) {
+                message("There was a problem with this linear model run:")
+                message(cond)
+                return(NA)
+              })
+          }
+        } else if (regularization == "L2" | regularization == "ridge") {
+          lm_fit <- run_regularization_model(formula, lm_input_table)
+          
         } else {
-          lm_fit <- tryCatch(
-            {
-	      if(is_rank_or_quant_norm) {
-              	speedglm::speedlm(formula = formula, data = lm_input_table)
-	      } else {
-              	speedglm::speedlm(formula = formula, offset = log2(Lib_Size_Tum / Lib_Size_Norm), 
-                                	data = lm_input_table)
-	      }
-            }, error = function(cond) {
-              message("There was a problem with this linear model run:")
-              message(cond)
-              return(NA)
-            })
+          lm_fit <- NA
+          print("Model only has L2 or None implemented for regularization. Please provide one of these two options.")
         }
         
         # Tidy the output
@@ -619,27 +640,27 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
     return(regprot_i_results_df)
   })
         
-        # Now we have a list of the results tables, one table per regulatory protein, 
-        # with entries for each target. Bind these all together into one master table.
-        if(debug) {
-          print("Results DF list")
-          print(head(results_df_list))
-        }
+  # Now we have a list of the results tables, one table per regulatory protein, 
+  # with entries for each target. Bind these all together into one master table.
+  if(debug) {
+    print("Results DF list")
+    print(head(results_df_list))
+  }
         
-        # Check that none of the DF entries are NA or empty data.tables
-        results_df_list <- results_df_list[!is.na(results_df_list)]
-        results_df_list <- Filter(function(dt) nrow(dt) != 0, results_df_list)
+  # Check that none of the DF entries are NA or empty data.tables
+  results_df_list <- results_df_list[!is.na(results_df_list)]
+  results_df_list <- Filter(function(dt) nrow(dt) != 0, results_df_list)
         
-        master_df <- rbindlist(results_df_list, use.names = TRUE, fill = TRUE)
-        #master_df <- do.call(rbind, results_df_list)
+  master_df <- rbindlist(results_df_list, use.names = TRUE, fill = TRUE)
+  #master_df <- do.call(rbind, results_df_list)
         
-        if(debug) {
-          print("Master DF")
-          print(head(master_df))
-        }
+  if(debug) {
+    print("Master DF")
+    print(head(master_df))
+  }
         
-        # Return this master DF
-        return(master_df)
+  # Return this master DF
+  return(master_df)
 }
 
 
@@ -797,10 +818,6 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
     methylation_df <- filter_meth_by_ensg(methylation_df, targ_k_ensg)
     exp_rows_to_keep <- unique(unlist(lapply(targ_k_ensg, function(x) grep(x, expression_df$ensg_id))))
     expression_df <- expression_df[exp_rows_to_keep,]
-    if(debug) {
-      print("Expression DF filt by ENSG ID")
-      print(expression_df)
-    }
     
     # Continue only if all of these data frames contain information about this target gene k
     if(!(expression_df[, .N] == 0 | cna_df[, .N] == 0 | methylation_df[, .N] == 0 | 
@@ -895,22 +912,24 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
 #' values are "bucketInclAmp", "bucketExclAmp", and "rawCNA"
 #' @param meth_bucketing a TRUE/FALSE value indicating whether or not we are bucketing
 #' methylation values
+#' @param covs_to_incl a vector, either c("ALL") to include all covariates, or a vector
+#' of all the covariates we want to keep
 construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
-                              cna_bucketing, meth_bucketing) {
+                              cna_bucketing, meth_bucketing, covs_to_incl) {
   colnames_to_incl <- colnames(lm_input_table)[2:ncol(lm_input_table)]
-  
+
   # Note: currently excluding age b1 and age b2 since no patients fall into these categories
   colnames_to_incl <- colnames_to_incl[!((colnames_to_incl == "Age_b1") | (colnames_to_incl == "Age_b2"))]
   
   # Remove the race variable entirely
   colnames_to_incl <- colnames_to_incl[!(grepl("Race", colnames_to_incl))]
   
-  # Remove PEER if we are not including it
+  # Remove the PEER factors we are not using
   peer_factors <- colnames_to_incl[grepl("PEER", colnames_to_incl)]
   peer_fact_to_remove <- setdiff(peer_factors, peer_factors[0:num_PEER])
   colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% peer_fact_to_remove)]
   
-  # Remove the PCs if we are not including them
+  # Remove the PCs we are not using
   pcs <- colnames_to_incl[grepl("PC", colnames_to_incl)]
   pcs_to_remove <- setdiff(pcs, pcs[0:num_pcs])
   colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% pcs_to_remove)]  
@@ -941,6 +960,13 @@ construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
   # Exclude the library size, as we are using this as an offset instead
   colnames_to_incl <- colnames_to_incl[!(colnames_to_incl == "Lib_Size")]
   
+  # Now, of the variables we have left, include only those given in the covs_to_include parameter
+  if(!(covs_to_incl[1] == "ALL")) {
+    colnames_to_incl <- unlist(lapply(colnames_to_incl, function(x) {
+      if(any(unlist(lapply(covs_to_incl, function(y) grepl(y, x))))) {return(x)}
+    }))
+  }
+
   if (analysis_type == "eQTL") {      
     colnames_to_incl <- colnames_to_incl[!(colnames_to_incl == "ExpStat_k")]
     formula <- paste(colnames_to_incl, collapse = " + ") 
@@ -969,13 +995,14 @@ if(debug) {
   print(paste("Outpath:", outpath))
 }
 
+
 # Create an appropriate output file name
 outfn <- create_output_filename(test = test, tester_name = args$tester_name, run_name = args$run_name,
                                 targets_name = args$targets_name, expression_df_name = args$expression_df,
                                 cna_bucketing = args$cna_bucketing, mutation_regprot_df_name = args$mutation_regprot_df, 
                                 meth_bucketing = meth_bucketing, meth_type = args$meth_type, 
                                 patient_df_name = args$patient_df, num_PEER = args$num_PEER, 
-                                num_pcs = args$num_pcs, randomize = randomize)
+                                num_pcs = args$num_pcs, randomize = randomize, covs_to_incl_label = args$select_args_label)
 
 if(debug) {
   print(paste("Outfile Name:", outfn))
@@ -989,6 +1016,15 @@ if(debug) {
 rm(all_genes_id_conv)
 gc()
 
+# Convert covariates to include from a semicolon-separated character to a vector
+tryCatch({
+  covs_to_incl <- unlist(strsplit(args$select_args, ";", fixed = TRUE))
+}, error = function(cond) {
+  print(cond)
+  print("Invalid input covariate list. Make sure covariates are semi-colon separated. Running with all covariates.")
+  covs_to_incl <- c("ALL")
+})
+
 # Run the function itself
 master_df <- run_linear_model(protein_ids_df = protein_ids_df, 
                               downstream_target_df = targets_DF, 
@@ -999,7 +1035,7 @@ master_df <- run_linear_model(protein_ids_df = protein_ids_df,
                               methylation_df_meQTL = methylation_df_meQTL,
                               cna_df = cna_df,
                               expression_df = expression_df, 
-			      is_rank_or_quant_norm = is_rank_or_quant_norm,
+                              is_rank_or_quant_norm = is_rank_or_quant_norm,
                               analysis_type = args$QTLtype,
                               tumNormMatched = tumNormMatched,
                               randomize = randomize,
@@ -1009,14 +1045,17 @@ master_df <- run_linear_model(protein_ids_df = protein_ids_df,
                               num_pcs = args$num_pcs,
                               debug = debug,
                               collinearity_diagn = collinearity_diagn,
-                              outpath = outpath, outfn = outfn)
+                              outpath = outpath, outfn = outfn,
+                              regularization = args$regularization,
+                              covs_to_incl = covs_to_incl)
 
 
 ############################################################
 #### INITIAL PROCESSING OF RAW FILE & WRITING
 ############################################################
 # Order the file by p-value
-master_df <- master_df[order(p.value)]
+print(head(master_df))
+master_df <- master_df[order(p.value),]
 
 # Write the results to the given file
 fwrite(master_df, paste(outpath, paste(outfn, ".csv", sep = ""), sep = "/"))
@@ -1031,7 +1070,7 @@ fwrite(master_df_cna, paste(outpath, paste(outfn, "_CNA.csv", sep = ""), sep = "
 
 # Combine the collinearity results and write to a file
 if(collinearity_diagn) {
-  collinearity_df <- combine_collinearity_diagnostics(outpath)
+  collinearity_df <- combine_collinearity_diagnostics(outpath, outfn, debug, randomize)
   # Adjust the output file name for collinearity results
   collin_fn <- str_replace(outfn, "output_results", "collinearity_results")
   if(debug) {print(paste("Collinearity Output FN:", collin_fn))}

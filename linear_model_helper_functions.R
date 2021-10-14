@@ -333,9 +333,11 @@ create_file_outpath <- function(cancerType, test, tester_name, run_name,
 #' components we are using
 #' @param randomize a TRUE/ FALSE value indicating whether or not we are randomizing
 #' our dependent variable (expression or methylation)
+#' @param covs_to_incl_label a label indicating what covariates we've included in this run
 create_output_filename <- function(test, tester_name, run_name, targets_name, expression_df_name,
                                    cna_bucketing, mutation_regprot_df_name, meth_bucketing,
-                                   meth_type, patient_df_name, num_PEER, num_pcs, randomize) {
+                                   meth_type, patient_df_name, num_PEER, num_pcs, randomize,
+                                   covs_to_incl_label) {
   outfn <- "output_results"
   
   # Add the name of the regulatory protein/ group of regulatory proteins
@@ -369,6 +371,9 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   if(!(num_PEER == 0)) {outfn <- paste(outfn, paste(num_PEER, "PEER", sep = ""), sep = "_")}
   if(!(num_pcs == 0))  {outfn <- paste(outfn, paste(num_pcs, "PCs", sep = ""), sep = "_")}
   
+  # If we've restricted the number of covariates, add that label
+  if(!(covs_to_incl_label == "")) {outfn <- paste(outfn, covs_to_incl_label, sep = "_")}
+  
   # Add "uncorrected" to the file name so we know MHT correction has not yet been done on these results
   outfn <- paste(outfn, "_uncorrected", sep = "")
   
@@ -378,6 +383,47 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   return(outfn)
 }
 
+############################################################
+#' If we are doing a regularized version of our model, run the details here
+#' using functions from glmnet package
+#' @param formula the string version of the formula we would like to use for our
+#' regression model
+#' @param lm_input_table the input table with values corresponding to all 
+#' variables in the formula
+run_regularization_model <- function(formula, lm_input_table) {
+  
+  # Get the data of interest using the formula
+  spl_formula <- unlist(strsplit(formula, "~", fixed = TRUE))
+  y_var <- trimws(spl_formula[1], which = "both")
+  y_data <- lm_input_table[,colnames(lm_input_table) == y_var]
+  x_vars <- unlist(strsplit(trimws(spl_formula[2], which="both"), " + ", fixed = TRUE))
+  x_data <- as.matrix(lm_input_table[,colnames(lm_input_table) %fin% x_vars])
+  
+  # Fit the model
+  #model <- glmnet(x_data, y_data, alpha = 0)
+  
+  #if(debug) {
+    #print("Summary of Regularized Model")
+    #print(summary(model))
+  #}
+  
+  # Use a cross validation glmnet to get the best lambda value; alpha = 0 
+  # indicates that we are doing L2-regularization
+  lambdas <- 10^seq(2, -3, by = -.1)
+  ridge.cv <- cv.glmnet(x_data, y_data, alpha = 0, lambda = lambdas)
+  optimal_lambda <- ridge.cv$lambda.min
+  if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
+  
+  # Run the model with the best lambda
+  best_model <- glmnet(x_data, y_data, alpha = 0, lambda = optimal_lambda)
+  
+  if(debug) {
+    print("Summary of Best Regularized Model")
+    print(summary(best_model))
+  }
+  return(best_model)
+}
+
 
 ############################################################
 #' A function to combine the collinearity diagnostic statistics,
@@ -385,30 +431,86 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
 #' values for each covariate, and returns these aggregate statistics.
 #' @param path a path to the folder with all of the collinearity
 #' output files
+#' @param outfn the file name for the output files, which has all the details of 
+#' the current run
+#' @param debug if we are in debug mode and should add additional prints
 #' NOTE: any condition index over 30 indicates strong collinearity
-combine_collinearity_diagnostics <- function(path) {
+#' @param randomize whether we have randomized this run or not
+combine_collinearity_diagnostics <- function(path, outfn, debug, randomize) {
   vif_tabs <- list.files(path, pattern = "vif_tab")
   eig_cindex_tabs <- list.files(path, pattern = "eig_cindex_tab")
   
+  
+  # Get only the tables that match the rest of the run as well
+  outfn_spl <- unlist(strsplit(outfn, "_", fixed = TRUE))
+  outfn_sub <- paste(outfn_spl[3:length(outfn_spl)], collapse = "_")
+  
+  vif_tabs <- vif_tabs[grepl(outfn_sub, vif_tabs)]
+  eig_cindex_tabs <- eig_cindex_tabs[grepl(outfn_sub, eig_cindex_tabs)]
+  
+  if(randomize) {
+    vif_tabs <- vif_tabs[grepl("RANDOMIZED", vif_tabs)]
+    eig_cindex_tabs <- eig_cindex_tabs[grepl("RANDOMIZED", eig_cindex_tabs)]
+  } else {
+    vif_tabs <- vif_tabs[!grepl("RANDOMIZED", vif_tabs)]
+    eig_cindex_tabs <- eig_cindex_tabs[!grepl("RANDOMIZED", eig_cindex_tabs)]
+  }
+  
+  
+  if(debug) {
+    print("VIF Tabs")
+    print(head(vif_tabs))
+    print("Eig Cindex Tabs")
+    print(head(eig_cindex_tabs))
+  }
+  
   tmp <- fread(paste(path, vif_tabs[1], sep = "/"), header = TRUE)
-  results_table <- data.table(matrix(ncol= 4, nrow = nrow(tmp)))
-  colnames(results_table) <- c("Tolerance", "VIF", "Eigenvalue", "Condition_Index")
-  rownames(results_table) <- tmp$Variables
+  results_table <- data.frame(matrix(ncol= 5, nrow = nrow(tmp)+1))
+  colnames(results_table) <- c("Covariate", "Tolerance", "VIF", "Eigenvalue", "Condition_Index")
+  results_table$Covariate <- c(tmp$Variables, "--")
+  
+  if(debug) {print(head(results_table))}
   
   for (i in 1:length(vif_tabs)) {
     combo <- paste(unlist(strsplit(vif_tabs[i], "_", fixed = TRUE))[1:2], collapse = "_")
-    vif_tab <- fread(paste(path, vif_tabs[1], sep = "/"), header = TRUE)
-    eig_cindex_tab <- fread(paste(path, grepl(combo, eig_cindex_tabs), sep = "/"), 
-                            header = TRUE)
+    if(debug) {print(paste("TargGene and Regprot Combo:", combo))}
+    vif_tab <- fread(paste(path, vif_tabs[i], sep = "/"), header = TRUE)
+    tryCatch({
+      eig_cindex_tab <- fread(paste(path, eig_cindex_tabs[grepl(combo, eig_cindex_tabs)], sep = "/"), 
+                              header = TRUE)
+    }, error=function(cond){
+      print(cond)
+      tab_name <- eig_cindex_tabs[grepl(combo, eig_cindex_tabs)]
+      print("Eig cindex tab name:", tab_name)
+      eig_cindex_tab <- fread(paste(path, tab_name[[1]], sep = "/"), 
+                              header = TRUE)
+    })
     
-    results_table[, 'Tolerance'] <- mean(results_table[, 'Tolerance'], vif_tab$Tolerance,
-                                         na.rm = TRUE)
-    results_table[, 'VIF'] <- mean(results_table[, 'VIF'], vif_tab$VIF,
-                                         na.rm = TRUE)
-    results_table[, 'Eigenvalue'] <- mean(results_table[, 'Eigenvalue'], eig_cindex_tab$Eigenvalue,
-                                         na.rm = TRUE)
-    results_table[, 'Condition_Index'] <- mean(results_table[, 'Condition_Index'], 
-                                               eig_cindex_tab$`Condition Index`, na.rm = TRUE)
+
+    for(i in 1:nrow(results_table)) {
+      var <- results_table$Covariate[i]
+      
+      if (!var == "--") {
+        tolerance <- as.numeric(vif_tab[vif_tab$Variable == var, 'Tolerance'])
+        if(debug) {print(paste("Tolerance", tolerance))}
+        if(length(tolerance) > 0) {
+          results_table[i, 'Tolerance'] <- mean(c(as.numeric(results_table[i, 'Tolerance']), tolerance),
+                                                na.rm = TRUE)
+        } 
+        vif <- as.numeric(vif_tab[vif_tab$Variable == var, 'VIF'])
+        if(length(vif) > 0) {
+          results_table[i, 'VIF'] <- mean(c(as.numeric(results_table[i, 'VIF']), vif), na.rm = TRUE)
+        }
+        
+      } 
+      
+      results_table[i, 'Eigenvalue'] <- mean(c(as.numeric(results_table[i, 'Eigenvalue']), 
+                                               as.numeric(eig_cindex_tab$Eigenvalue[i])),
+                                             na.rm = TRUE)
+      results_table[i, 'Condition_Index'] <- mean(c(as.numeric(results_table[i, 'Condition_Index']), 
+                                                    as.numeric(eig_cindex_tab$`Condition Index`[i])), 
+                                                  na.rm = TRUE)
+    }
   }
   return(results_table)
 }
@@ -490,3 +592,4 @@ filter_expression_df <- function(expression_df, starter_df, ensg) {
   print(paste("Nrow filtered starter", nrow(starter_df_filt)))
   return(starter_df_filt)
 }
+

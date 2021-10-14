@@ -2,47 +2,48 @@
 #SBATCH --mem=8192
 #SBATCH --qos=1wk
 #SBATCH --nodes=1
-#SBATCH --job-name=lm_run_cancerRelated_noPEER_tenTesterTargs_tmm_rawCNA_M_eQTL
+#SBATCH --job-name=lm_run_tp53_noPEER_chipeatTargs_rn_rawCNA_M_eQTL
 #SBATCH --mail-user=scamilli@princeton.edu
 #SBATCH --mail-type=fail,time_limit
 
 
 #SAMPLE RUN: TP53 and all targets (TNM)
-#Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "TRUE" --cancerType "BRCA" --randomize "FALSE" \
+#Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "TRUE" --cancerType "PanCancer" --randomize "FALSE" \
 #--test "TRUE" --expression_df "expression_tmm_DF_tnm.csv" --methylation_df "methylation_DF_Beta_tnm.csv" \
 #--mutation_targ_df "mut_count_matrix_missense_tnm.csv" --mutation_regprot_df "iprotein_results_missense_tnm.csv" \
 #--cna_df "CNV_DF_AllGenes_tnm.csv" --patient_df "combined_patient_sample_DF_cibersort_total_frac_tmm_tnm.csv" \
 #--target_df "allgene_targets.csv" --cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "Beta" \
-#--targets_name "allGenes" --num_PEER 10 --num_pcs 0 --debug "FALSE" --collinearity_diagn "TRUE"
+#--targets_name "allGenes" --num_PEER 10 --num_pcs 0 --debug "FALSE" --collinearity_diagn "TRUE" --regularization "None"
 
 # SAMPLE RUN: TP53 and all targets/ ChIP-eat targets (NON-TNM)
-#Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" \
-#--test "TRUE" --expression_df "expression_quantile_norm_CancerOnly_IntersectPatients.csv" --methylation_df "methylation_bucketed_Beta_CancerOnly_IntersectPatients.csv" \
-#--methylation_df_meQTL "methylation_Beta_CancerOnly_IntersectPatients.csv" --mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatients.csv" \
-#--mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatients.csv" --cna_df "CNA_AllGenes_Bucketed_InclAmp_CancerOnly_IntersectPatients.csv" \
-#--patient_df "combined_patient_sample_cibersort_total_frac_tmm_IntersectPatients.csv" --target_df "tp53_chipeat_targets.csv" \
-#--cna_bucketing "bucket_inclAmp" --meth_bucketing "TRUE" --meth_type "Beta" --targets_name "chipeat" --num_PEER 0 \
-#--num_pcs 0 --debug "FALSE" --collinearity_diagn "TRUE"
+Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "PanCancer" --randomize "FALSE" \
+--test "TRUE" --expression_df "expression_rank_norm_CancerOnly_IntersectPatientsRN.csv" --methylation_df "methylation_M_CancerOnly_IntersectPatientsRN.csv" \
+--methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatientsRN.csv" --mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatientsRN.csv" \
+--mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatientsRN.csv" --cna_df "CNA_AllGenes_CancerOnly_IntersectPatientsRN.csv" \
+--patient_df "combined_patient_sample_rank_norm_cibersort_total_frac_IntersectPatientsRN.csv" --target_df "tp53_chipeat_targets.csv" \
+--cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --targets_name "chipeat" --num_PEER 0 \
+--num_pcs 0 --debug "TRUE" --collinearity_diagn "FALSE" --regularization "None" --select_args "ALL" --select_args_label "" 
 
 # SAMPLE RUN: USH2A and all targets (NON-TNM) -- NEGATIVE CONTROL
-#Rscript linear_model.R --QTLtype "meQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" \
+#Rscript linear_model.R --QTLtype "meQTL" --tumNormMatched "FALSE" --cancerType "PanCancer" --randomize "FALSE" \
 #--test "TRUE" --tester_name "USH2A" --tester_uniprot_id "O75445" --tester_ensg_id "ENSG00000042781" \
 #--expression_df "expression_tmm_CancerOnly_IntersectPatients.csv" --methylation_df "methylation_bucketed_Beta_CancerOnly_IntersectPatients.csv" \
 #--methylation_df_meQTL "methylation_Beta_CancerOnly_IntersectPatients.csv" --mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatients.csv" \
 #--mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatients.csv" --cna_df "CNA_AllGenes_Bucketed_InclAmp_CancerOnly_IntersectPatients.csv" \
 #--patient_df "combined_patient_sample_cibersort_total_frac_tmm_IntersectPatients.csv" --target_df "allgene_targets.csv" \
 #--cna_bucketing "bucket_inclAmp" --meth_bucketing "TRUE" --meth_type "Beta" --targets_name "allGenes" --num_PEER 0 --num_pcs 0 \
-#--debug "FALSE" --collinearity_diagn "TRUE"
+#--debug "FALSE" --collinearity_diagn "TRUE" --regularization "None" --select_args "MutStat_i;ExpStat_k"
 
 
 # SAMPLE RUN: Cancer Related Genes/ Highly Deleted TFs and Metabolic Targets (NON-TNM)
-Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" \
---test "FALSE" --protein_ids_df "iprotein_protein_ids_df_cancerRelated.csv" --expression_df "expression_tmm_CancerOnly_IntersectPatients.csv" \
---methylation_df "methylation_Beta_CancerOnly_IntersectPatients.csv" --methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatients.csv" \
---mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatients.csv" --mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatients.csv" \
---cna_df "CNA_AllGenes_CancerOnly_IntersectPatients.csv" --patient_df "combined_patient_sample_cibersort_total_frac_tmm_IntersectPatients.csv" \
---target_df "ten_tester_targets.csv" --cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --run_name "cancerRelated" \
---targets_name "tenTesterTargs" --num_PEER 0 --num_pcs 0 --debug "TRUE" --collinearity_diagn "TRUE"
+#Rscript linear_model.R --QTLtype "meQTL" --tumNormMatched "FALSE" --cancerType "PanCancer" --randomize "FALSE" \
+#--test "FALSE" --protein_ids_df "iprotein_protein_ids_df_cancerRelated.csv" --expression_df "expression_tmm_CancerOnly_IntersectPatients.csv" \
+#--methylation_df "methylation_M_CancerOnly_IntersectPatients.csv" --methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatients.csv" \
+#--mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatients.csv" --mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatients.csv" \
+#--cna_df "CNA_AllGenes_CancerOnly_IntersectPatients.csv" --patient_df "combined_patient_sample_cibersort_total_frac_tmm_normAge_IntersectPatients.csv" \
+#--target_df "metabolic_targets.csv" --cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --run_name "cancerRelated" \
+#--targets_name "metabolicTargs" --num_PEER 0 --num_pcs 0 --debug "FALSE" --collinearity_diagn "FALSE" --regularization "None" \
+#--select_args "MethStat_k;MutStat_i;CNAStat_i;MethStat_i;MutStat_k;CNAStat_k;Tumor_purity" --select_args_label "addTumPurity"
 
 
 
@@ -65,32 +66,40 @@ Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "B
 ###########################################################################################
 # Expression DF
 ###########################################################################################
-# FPKM: "expression_fpkm_CancerOnly_IntersectPatients.csv"  # fpkm-normalized and filtered
-# TMM: "expression_tmm_CancerOnly_IntersectPatients.csv"
-# Quantile-Normalized: "expression_quantile_norm_CancerOnly_IntersectPatients.csv"
-# Rank-Normalized: "expression_rank_norm_CancerOnly_IntersectPatients.csv"
+# FPKM: "expression_fpkm_CancerOnly_IntersectPatientsFPKM.csv"  # fpkm-normalized and filtered
+# Rank-Normalized: "expression_rank_norm_CancerOnly_IntersectPatientsRN.csv"
 
 ###########################################################################################
 # Methylation DF
 ###########################################################################################
-# Beta Values, Cancer Only: "methylation_Beta_CancerOnly_IntersectPatients.csv"
-# M-Values, Cancer Only: "methylation_M_CancerOnly_IntersectPatients.csv"
+# Beta Values, Cancer Only, FPKM-Norm Exp: "methylation_Beta_CancerOnly_IntersectPatientsFPKM.csv"
+# Beta Values, Cancer Only, Rank-Norm Exp: "methylation_Beta_CancerOnly_IntersectPatientsRN.csv"
 
-# Beta (Bucketed, 3 Buckets), Cancer Only: "methylation_bucketed_Beta_CancerOnly_IntersectPatients.csv"
-# M (Bucketed, 3 Buckets), Cancer Only: "methylation_bucketed_M_CancerOnly_IntersectPatients.csv"
+# M-Values, Cancer Only, FPKM-Norm Exp: "methylation_M_CancerOnly_IntersectPatientsFPKM.csv"
+# M-Values, Cancer Only, Rank-Norm Exp: "methylation_M_CancerOnly_IntersectPatientsRN.csv"
 
-# Threshold (Beta > 0.8), Cancer Only: "methylation_Beta_0.8_CancerOnly_IntersectPatients.csv"
-# Threshold (Beta > 0.5), Cancer Only: "methylation_Beta_0.5_CancerOnly_IntersectPatients.csv"
+# Beta (Bucketed, 3 Buckets), Cancer Only, FPKM-Norm Exp: "methylation_bucketed_Beta_CancerOnly_IntersectPatientsFPKM.csv"
+# Beta (Bucketed, 3 Buckets), Cancer Only, Rank-Norm Exp: "methylation_bucketed_Beta_CancerOnly_IntersectPatientsRN.csv"
+
+# M (Bucketed, 3 Buckets), Cancer Only, FPKM-Norm Exp: "methylation_bucketed_M_CancerOnly_IntersectPatientsFPKM.csv"
+# M (Bucketed, 3 Buckets), Cancer Only, Rank-Norm Exp: "methylation_bucketed_M_CancerOnly_IntersectPatientsRN.csv"
+
+# Threshold (Beta > 0.8), Cancer Only, FPKM-Norm Exp: "methylation_Beta_0.8_CancerOnly_IntersectPatientsFPKM.csv"
+# Threshold (Beta > 0.8), Cancer Only, Rank-Norm Exp: "methylation_Beta_0.8_CancerOnly_IntersectPatientsRN.csv"
 
 ###########################################################################################
 # Mutation Target DF
 ###########################################################################################
-# Missense: "mut_count_matrix_missense_IntersectPatients.csv"
+# Missense, FPKM-Norm Exp: "mut_count_matrix_missense_IntersectPatientsFPKM.csv"
+# Missense, Rank-Norm Exp: "mut_count_matrix_missense_IntersectPatientsRN.csv"
 
 ###########################################################################################
 # Regulatory Protein Mutation DF
 ###########################################################################################
-# I-Protein: "iprotein_results_missense_IntersectPatients.csv"
+# I-Protein, FPKM-Norm Exp: "iprotein_results_missense_IntersectPatientsFPKM.csv"
+# I-Protein, Rank-Norm Exp: "iprotein_results_missense_IntersectPatientsRN.csv"
+
+# TO BE CREATED:
 # I-Protein (Nucleic Acids): "iprotein_results_missense_nucacids_IntersectPatients.csv"
 # I-Domain: "idomain_results_missense_IntersectPatients.csv"
 # I-Domain (Nucleic Acids): "idomain_results_missense_nucacids_IntersectPatients.csv"
@@ -100,37 +109,32 @@ Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "B
 ###########################################################################################
 # CNA DF
 ###########################################################################################
-# All Genes: "CNA_AllGenes_IntersectPatients.csv"
-# All Genes (Cancer Samples Only): "CNA_AllGenes_CancerOnly_IntersectPatients.csv"
-# All Genes (Cancer Samples Only), Bucketed, Including Amplifications: "CNA_AllGenes_Bucketed_InclAmp_CancerOnly_IntersectPatients.csv"
+# All Genes (Cancer Samples Only), FPKM-Norm Exp: "CNA_AllGenes_CancerOnly_IntersectPatientsFPKM.csv"
+# All Genes (Cancer Samples Only), Rank-Norm Exp: "CNA_AllGenes_CancerOnly_IntersectPatientsRN.csv"
+
+# All Genes (Cancer Samples Only), Bucketed, Including Amplifications, FPKM-Norm Exp: "CNA_AllGenes_Bucketed_InclAmp_CancerOnly_IntersectPatientsFPKM.csv"
+# All Genes (Cancer Samples Only), Bucketed, Including Amplifications, Rank-Norm Exp: "CNA_AllGenes_Bucketed_InclAmp_CancerOnly_IntersectPatientsRN.csv"
+
+# All Genes (Cancer Samples Only), Bucketed, Excluding Amplifications, FPKM-Norm Exp: "CNA_AllGenes_Bucketed_ExclAmp_CancerOnly_IntersectPatientsFPKM.csv"
+# All Genes (Cancer Samples Only), Bucketed, Excluding Amplifications, Rank-Norm Exp: "CNA_AllGenes_Bucketed_ExclAmp_CancerOnly_IntersectPatientsRN.csv"
+
+# TO BE CREATED:
 # TFs Only: "CNA_TFsOnly_IntersectPatients.csv"
 
 ###########################################################################################
 # Patient DF
 ###########################################################################################
 # CIBERSORT Abs I.C.D.: 
-# 1. "combined_patient_sample_cibersort_abs_tmm_IntersectPatients.csv"
-# 2. "combined_patient_sample_cibersort_abs_fpkm_IntersectPatients.csv"
-# 3. "combined_patient_sample_cibersort_abs_fpkm_top10k_IntersectPatients.csv"
-# 4. "combined_patient_sample_cibersort_abs_qn_top10k_IntersectPatients.csv"
-# 5. "combined_patient_sample_cibersort_abs_rn_IntersectPatients.csv"
-# 6. "combined_patient_sample_cibersort_abs_rn_top10k_IntersectPatients.csv"
+# 1. "combined_patient_sample_cibersort_abs_fpkm_IntersectPatientsFPKM.csv"
+# 2. "combined_patient_sample_cibersort_abs_rank_norm_IntersectPatientsRN.csv"
 
 # TIMER I.C.D.: 
-# 1. "combined_patient_sample_timer_tmm_IntersectPatients.csv"
-# 2. "combined_patient_sample_timer_fpkm_IntersectPatients.csv"
-# 3. "combined_patient_sample_timer_fpkm_top10k_IntersectPatients.csv"
-# 4. "combined_patient_sample_timer_qn_top10k_IntersectPatients.csv"
-# 5. "combined_patient_sample_timer_rn_IntersectPatients.csv"
-# 6. "combined_patient_sample_timer_rn_top10k_IntersectPatients.csv"
+# 1. "combined_patient_sample_timer_fpkm_IntersectPatientsFPKM.csv"
+# 2. "combined_patient_sample_timer_rn_IntersectPatientsRN.csv"
 
 # CIBERSORT Total Frac. I.C.D.: 
-# 1. "combined_patient_sample_cibersort_total_frac_tmm_IntersectPatients.csv"
-# 2. "combined_patient_sample_cibersort_total_frac_fpkm_IntersectPatients.csv"
-# 3. "combined_patient_sample_cibersort_total_frac_fpkm_top10k_IntersectPatients.csv"
-# 4. "combined_patient_sample_cibersort_total_frac_qn_top10k_IntersectPatients.csv"
-# 5. "combined_patient_sample_cibersort_total_frac_rn_IntersectPatients.csv"
-# 6. "combined_patient_sample_cibersort_total_frac_rn_top10k_IntersectPatients.csv"
+# 1. "combined_patient_sample_cibersort_total_frac_fpkm_IntersectPatientsFPKM.csv"
+# 2. "combined_patient_sample_cibersort_total_frac_rn_IntersectPatientsRN.csv"
 
 ###########################################################################################
 # Sample Protein Info
