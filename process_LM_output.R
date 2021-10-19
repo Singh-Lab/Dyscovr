@@ -75,15 +75,18 @@ visualize_beta_distrib <- function(results_table) {
 
 
 # Create specific filenames
-fn_mut <- paste(output_vis_path, paste("Beta Distrib. (", paste(paste(outfn, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-fn_cna <- paste(output_vis_path, paste("Beta Distrib. (", paste(paste(outfn, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+fn_mut <- paste(output_vis_path, paste("BetaDistrib_", paste(paste(outfn, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+fn_cna <- paste(output_vis_path, paste("BetaDistrib_", paste(paste(outfn, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+
+print(paste("FN MUT:", fn_mut))
+print(paste("FN CNA:", fn_cna))
 
 # Call this function & save output
-png(fn_mut, width = 450, height = "350")
+png(fn_mut, width = 450, height = 350)
 visualize_beta_distrib(master_df_mut)
 dev.off()
 
-png(fn_cna, width = 450, height = "350")
+png(fn_cna, width = 450, height = 350)
 visualize_beta_distrib(master_df_cna)
 dev.off()
 
@@ -97,20 +100,20 @@ dev.off()
 visualize_pval_distrib <- function(results_table) {
   pvals <- results_table$p.value[!is.na(results_table$p.value) & 
                                    !is.infinite(results_table$p.value)]
-  hist(pvals, main = "Histogram of p-Values Across all Reg. Proteins",
+  hist(pvals, main = "Histogram of p-Values",
        xlab = "p-value", ylab = "Frequency", col = "blueviolet")
 }
 
 # Create specific filenames
-fn_mut <- paste(output_vis_path, paste("P-Value Distrib. (", paste(paste(outfn, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-fn_cna <- paste(output_vis_path, paste("P-Value Distrib. (", paste(paste(outfn, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+fn_mut <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+fn_cna <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
 
 # Call this function & save output
-png(fn_mut, width = 450, height = "350")
+png(fn_mut, width = 450, height = 350)
 visualize_pval_distrib(master_df_mut)
 dev.off()
 
-png(fn_cna, width = 450, height = "350")
+png(fn_cna, width = 450, height = 350)
 visualize_pval_distrib(master_df_cna)
 dev.off()
 
@@ -139,8 +142,6 @@ visualize_error_distrib <- function(results_table) {
 }
 
 
-
-
 ############################################################
 ############################################################
 #### PEFORM MULTIPLE HYPOTHESIS TESTING CORRECTION
@@ -161,11 +162,11 @@ mh_correct <- function(results_table, fn_qvalvis, fn_qvalsum) {
   qobj <- qvalue(p = results_table$p.value)
   
   # Plot some useful plots & print some useful information
-  png(fn_qvalvis, width = 450, height = "350")
+  png(fn_qvalvis, width = 450, height = 450)
   plot(qobj)
   dev.off()
   
-  png(fn_qvalsum, width = 450, height = "350")
+  png(fn_qvalsum, width = 450, height = 450)
   print(summary(qobj))
   dev.off()
   
@@ -180,57 +181,18 @@ mh_correct <- function(results_table, fn_qvalvis, fn_qvalsum) {
 }
 
 # Call this function
-
-fn_mut_qvalvis <- paste(output_vis_path, paste("Q-Value Visualization (", paste(paste(outfn, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-fn_cna_qvalvis <- paste(output_vis_path, paste("Q-Value Visualization (", paste(paste(outfn, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-fn_mut_qvalsum <- paste(output_vis_path, paste("Q-Value Summary (", paste(paste(outfn, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-fn_cna_qvalsum <- paste(output_vis_path, paste("Q-Value Summary (", paste(paste(outfn, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+fn_mut_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(outfn, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+fn_cna_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(outfn, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+fn_mut_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+fn_cna_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
 
 master_df_mut_corrected <- mh_correct(master_df_mut, fn_mut_qvalvis, fn_mut_qvalsum)
 master_df_cna_corrected <- mh_correct(master_df_cna, fn_cna_qvalvis, fn_cna_qvalsum)
 
-# Write this to a new file
-outfn <- str_replace(outfn, "uncorrected", "corrected") 
-fwrite(master_df_mut_corrected, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
-fwrite(master_df_cna_corrected, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
-
-#fwrite(master_df_mut_corrected, paste(main_path, "TP53/Non-Tumor-Normal Matched/iprotein_output_results_TP53_TMM_bucketCNA_iprot_iciTotFrac_MUT_corrected.csv", sep = ""))
-#fwrite(master_df_cna_corrected, paste(main_path, "TP53/Non-Tumor-Normal Matched/iprotein_output_results_TP53_TMM_bucketCNA_iprot_iciTotFrac_CNA_corrected.csv", sep = ""))
-
 
 ############################################################
 ############################################################
-#### OBTAIN SIGNIFICANT CORRELATIONS
-############################################################
-############################################################
-#' Function takes in an output results table with q-values and 
-#' restricts it to only models that exceed the q-value threshold
-#' (are statistically significant correlations). Then ranks the 
-#' remaining by q-values and returns the ranked top hits list.
-#' @param results_table a master DF produced from run_linear_model() that has q-values added
-#' from the mh_correct() function
-#' @param qval_thres a threshold for significance for q-values
-get_signif_correl <- function(results_table, qval_thres) {
-  
-  # Limit to only entries that exceed the given qvalue threshold
-  results_table_sig <- results_table %>% filter(q.value < qval_thres)
-  
-  # Sort the table by qvalue
-  results_table_sig_ordered <- results_table_sig[order(results_table_sig$q.value, 
-                                                       decreasing = FALSE),]
-  
-  return(results_table_sig_ordered)
-}
-
-# Call this function
-qval_thres <- 0.1
-master_df_mut_sig <- get_signif_correl(master_df_mut_corrected, qval_thres)
-master_df_cna_sig <- get_signif_correl(master_df_cna_corrected, qval_thres)
-
-
-############################################################
-############################################################
-#### ADD GENE NAMES TO FINAL FILE VERSION
+#### ADD GENE NAMES 
 ############################################################
 ############################################################
 #' Given a master data frame result from model, add a column for target gene name
@@ -250,22 +212,15 @@ add_targ_regprot_gns <- function(master_df_sig, all_genes_id_conv) {
 }
 
 # Call this function
-master_df_mut_sig <- add_targ_regprot_gns(master_df_mut_sig, all_genes_id_conv)
-master_df_cna_sig <- add_targ_regprot_gns(master_df_cna_sig, all_genes_id_conv)
+master_df_mut_corrected <- add_targ_regprot_gns(master_df_mut_corrected, all_genes_id_conv)
+master_df_cna_corrected <- add_targ_regprot_gns(master_df_cna_corrected, all_genes_id_conv)
 
+# Write this to a new file
+outfn <- str_replace(outfn, "uncorrected", "corrected") 
+print(paste("NEW FN:", outfn))
+fwrite(master_df_mut_corrected, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
+fwrite(master_df_cna_corrected, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
 
-# Write these results to a new file
-outfn <- str_replace(outfn, "corrected", "") 
-outfn <- str_replace(outfn, "output_results", "significant_output")
-if(length(master_df_mut_sig) > 0) {
-  fwrite(master_df_mut_sig, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
-}
-if(length(master_df_cna_sig) > 0) {
-  fwrite(master_df_cna_sig, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
-}
-
-#fwrite(master_df_mut_sig, paste(main_path, "TP53/Non-Tumor-Normal Matched/iprotein_significant_output_TP53_TMM_bucketCNA_iprot_iciTotFrac_MUT.csv", sep = ""))                                                                                                                     # 118 (including CNAi and Methi as covar.)
-#fwrite(master_df_cna_sig, paste(main_path, "TP53/Non-Tumor-Normal Matched/iprotein_significant_output_TP53_TMM_bucketCNA_iprot_iciTotFrac_CNA.csv", sep = ""))                                                                                                                     # 118 (including CNAi and Methi as covar.)
 
 ############################################################
 ############################################################
@@ -334,13 +289,52 @@ if(!test) {
   fn_cna <- paste(output_vis_path, paste("Heatmap (", paste(paste(outfn, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
   
   # Call this function
-  png(fn_mut, width = 450, height = "350")
+  png(fn_mut, width = 450, height = 450)
   create_heat_map(master_df_mut_corrected)
   dev.off()
   
-  png(fn_cna, width = 450, height = "350")
+  png(fn_cna, width = 450, height = 450)
   create_heat_map(master_df_cna_corrected)
   dev.off()
+}
+
+############################################################
+############################################################
+#### OBTAIN SIGNIFICANT CORRELATIONS
+############################################################
+############################################################
+#' Function takes in an output results table with q-values and 
+#' restricts it to only models that exceed the q-value threshold
+#' (are statistically significant correlations). Then ranks the 
+#' remaining by q-values and returns the ranked top hits list.
+#' @param results_table a master DF produced from run_linear_model() that has q-values added
+#' from the mh_correct() function
+#' @param qval_thres a threshold for significance for q-values
+get_signif_correl <- function(results_table, qval_thres) {
+  
+  # Limit to only entries that exceed the given qvalue threshold
+  results_table_sig <- results_table %>% filter(q.value < qval_thres)
+  
+  # Sort the table by qvalue
+  results_table_sig_ordered <- results_table_sig[order(results_table_sig$q.value, 
+                                                       decreasing = FALSE),]
+  
+  return(results_table_sig_ordered)
+}
+
+# Call this function
+qval_thres <- 0.1
+master_df_mut_sig <- get_signif_correl(master_df_mut_corrected, qval_thres)
+master_df_cna_sig <- get_signif_correl(master_df_cna_corrected, qval_thres)
+
+# Write these results to a new file
+outfn <- str_replace(outfn, "corrected", "") 
+outfn <- str_replace(outfn, "output_results", "significant_output")
+if(length(master_df_mut_sig) > 0) {
+  fwrite(master_df_mut_sig, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
+}
+if(length(master_df_cna_sig) > 0) {
+  fwrite(master_df_cna_sig, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
 }
 
 
@@ -354,7 +348,7 @@ if(!test) {
 #### IMPORT CANCER GENE LISTS 
 ############################################################
 # Import a table containing a compiled list of known cancer genes
-known_cancer_genes_table <- read.table("/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files//GRCh38_driver_gene_list.tsv", sep = "\t",
+known_cancer_genes_table <- read.table("/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/GRCh38_driver_gene_list.tsv", sep = "\t",
                                        header = TRUE, check.names = FALSE, comment.char = "#")
 
 # Import TF cancer data table(s), if using
@@ -491,12 +485,12 @@ fn_cna <- paste(output_vis_path, paste("Known Cancer Gene Enrichment (",
 
 
 # Run function
-png(fn, width = 450, height = "350")
+png(fn_mut, width = 450, height = 350)
 plot_cancer_enrichment(master_df_mut_sig, known_cancer_genes_table)
 #plot_cancer_enrichment(master_df_mut_sig, known_cancer_genes_table, tfcancer_df)
 dev.off()
 
-png(fn, width = 450, height = "350")
+png(fn_cna, width = 450, height = 350)
 plot_cancer_enrichment(master_df_cna_sig, known_cancer_genes_table)
 #plot_cancer_enrichment(master_df_cna_sig, known_cancer_genes_table, tfcancer_df)
 dev.off()
