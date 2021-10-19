@@ -279,7 +279,9 @@ get_tnm_fc <- function(df, sample) {
 ############################################################
 #' Create the appropriate output file path (add the cancer type, the regulatory protein group 
 #' or tester name, tumor-normal matched or tumor only, and the analysis type (eQTL or meQTL)
-#' @param cancerType the name of the type of cancer, or "Pan-Cancer" for all cancers
+#' @param cancerType the name of the type of cancer, or "PanCancer" for all cancers
+#' @param specificType if we are looking pan-cancer, but for specific cancer types 
+#' individually, the specific cancer type we are looking at is given
 #' @param test a TRUE/ FALSE value indicating whether this is a test on a single
 #' regulatory protein
 #' @param tester_name if this is a test, the name of the tester regulatory protein
@@ -288,25 +290,26 @@ get_tnm_fc <- function(df, sample) {
 #' @param tumNormMatched a TRUE/ FALSE value indicating whether or not this is a 
 #' tumor-normal matched run
 #' @param QTL_type either "eQTL" or "meQTL" depending on the type of run we are running
-create_file_outpath <- function(cancerType, test, tester_name, run_name, 
-                                tumNormMatched, QTLtype) {
+create_file_outpath <- function(cancerType, specificType, test, tester_name, 
+                                  run_name, tumNormMatched, QTLtype) {
   outpath <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/output_files"
-  
+    
   outpath <- paste(outpath, cancerType, sep = "/")
-  
+  if(!(specificType == "")) {outpath <- paste(outpath, specificType, sep = "/")}
+    
   if(test) {
     outpath <- paste(outpath, tester_name, sep = "/")
   } else {outpath <- paste(outpath, run_name, sep = "/")}
-  
+    
   if(tumNormMatched) {
     outpath <- paste(outpath, "tumor_normal_matched", sep = "/")
   } else {outpath <- paste(outpath, "tumor_only", sep = "/")}
-  
+    
   outpath <- paste(outpath, QTLtype, sep = "/")
-  
+    
   return(outpath)
 }
-
+  
 
 ############################################################
 #' Create the appropriate output file name for the master DF result based on the
