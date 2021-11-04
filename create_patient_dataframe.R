@@ -79,20 +79,24 @@ pc_smartpca_output_ntnm <- read.table(paste(main_path, "smartpca/Non-Tumor-Norma
 
 # Create data frame with all patient characteristics
 brca_patient_df_tnm <- create_patient_dataframe(clinical_df_tnm, is_brca, 
-                                                  brca_subtype, is_pc, brca_smartpca_output_tnm)
+                                                  brca_subtype, is_pc, brca_smartpca_output_tnm,
+                                                FALSE)
 brca_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
-                                                  brca_subtype, is_pc, brca_smartpca_output_ntnm)
+                                                  brca_subtype, is_pc, brca_smartpca_output_ntnm,
+                                                 FALSE)
 pc_patient_df_tnm <- create_patient_dataframe(clinical_df_tnm, is_brca, 
-                                                pc_subtype, is_pc, pc_smartpca_output_tnm)
+                                                pc_subtype, is_pc, pc_smartpca_output_tnm,
+                                              FALSE)
 pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
-                                                 pc_subtype, is_pc, pc_smartpca_output_ntnm)
+                                                 pc_subtype, is_pc, pc_smartpca_output_ntnm,
+                                               FALSE)
 
 
 # Write this to a CSV
 write.csv(brca_patient_df_tnm, paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_tnm.csv", sep = ""))
 write.csv(brca_patient_df_ntnm, paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm.csv", sep = ""))
 write.csv(pc_patient_df_tnm, paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_tnm.csv", sep = ""))
-write.csv(pc_patient_df_tnm, paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm.csv", sep = ""))
+write.csv(pc_patient_df_ntnm, paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm.csv", sep = ""))
 
 
 ############################################################
@@ -110,17 +114,27 @@ write.csv(pc_patient_df_tnm, paste(main_path, "Linear Model/Patient and Sample D
 #' each sample
 #' @param smartpca_output a file with output values for the top 10 PCs for each 
 #' sample, created from running smartpca
+#' @param age_bucketing a TRUE/FALSE value to indicate whether or not we are bucketing
+#' age (if not, we are normalizing it to be between 0 and 1)
 create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc,
-                                     smartpca_output) {
+                                     smartpca_output, age_bucketing) {
   
   # Create relational data frame to hold patient-dependent inputs to linear model
   # Columns: Linear model input variables 
   # Rows: Samples that have all necessary data types 1...j...L (Unique 4-digit ID)
-  patient_characteristics <- c("Gender", "Age_b1", "Age_b2", "Age_b3", "Age_b4", "Age_b5", "Age_b6",
-                               "Age_b7", "Age_b8", "Age_b9", "Age_b10", "Race_b1", "Race_b2", "Race_b3",
-                               "Race_b4", "Race_b5", "Prior_malig", "Treatment_rad", "Treatment_pharm",
-                               "Tot_Mut_b1", "Tot_Mut_b2", "Tot_Mut_b3", "PC1", "PC2")
-  patient_characteristics <- add_cancer_type(patient_characteristics, is_pc, subtype_file)
+  if(age_bucketing) {
+    patient_characteristics <- c("Gender", "Age_b1", "Age_b2", "Age_b3", "Age_b4", "Age_b5", "Age_b6",
+                                 "Age_b7", "Age_b8", "Age_b9", "Age_b10", "Race_b1", "Race_b2", "Race_b3",
+                                 "Race_b4", "Race_b5", "Prior_malig", "Treatment_rad", "Treatment_pharm",
+                                 "Tot_Mut_b1", "Tot_Mut_b2", "Tot_Mut_b3", "PC1", "PC2")
+  } else {
+    patient_characteristics <- c("Gender", "Age", "Race_b1", "Race_b2", "Race_b3","Race_b4", "Race_b5", 
+                                 "Prior_malig", "Treatment_rad", "Treatment_pharm",
+                                 "Tot_Mut_b1", "Tot_Mut_b2", "Tot_Mut_b3", "PC1", "PC2")
+  }
+
+  patient_characteristics <- add_cancer_type(patient_characteristics, is_pc, subtype_file,
+                                             clinical_df)
   unique_patient_ids <- unique(unlist(lapply(clinical_df$case_submitter_id, function(x) 
     unlist(strsplit(x, split = "-", fixed = TRUE))[3])))
   patient_dataframe <- data.frame(matrix(ncol = length(patient_characteristics), 
@@ -131,7 +145,7 @@ create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc,
   # Input all the patient-specific information 
   patient_dataframe <- input_patient_specific_info(patient_dataframe, clinical_df, 
                                                    is_brca, subtype_file, is_pc,
-                                                   smartpca_output)
+                                                   smartpca_output, age_bucketing)
   
   return(patient_dataframe)
 }
@@ -147,11 +161,15 @@ create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc,
 #' @param subtype_file a file from TCGAbiolinks that has information about subtypes
 #' or, alternatively (if pan-cancer) a file that identifies the cancer type of 
 #' each sample (TODO: make this file!)
-add_cancer_type <- function(patient_characteristics, is_pc, subtype_file) {
+#' @param clinical_df clinical data file from the TCGA for the given patient cohort
+add_cancer_type <- function(patient_characteristics, is_pc, subtype_file, clinical_df) {
   # Pan-Cancer: look at cancer type
   if (is_pc) {
     # Find how many unique cancer types there are in total
-    unique_cts <- unique(subtype_file$cancer.type)
+    #unique_cts <- unique(subtype_file$cancer.type)
+    #length_cts <- length(unique_cts)
+    unique_cts <- unique(clinical_df$project_id)
+    print(head(unique_cts))
     length_cts <- length(unique_cts)
   }
   # Not pan-cancer: look at cancer subtype
@@ -172,7 +190,6 @@ add_cancer_type <- function(patient_characteristics, is_pc, subtype_file) {
   return(patient_characteristics)
 }
 
-############################################################
 
 ############################################################
 
@@ -193,8 +210,10 @@ add_cancer_type <- function(patient_characteristics, is_pc, subtype_file) {
 #' @param is_pc a TRUE/FALSE value indicating whether the cohort is pan-cancer or not
 #' @param smartpca_output a file with output values for the top 10 PCs for each 
 #' sample, created from running smartpca
+#' @param age_bucketing a TRUE/FALSE value to indicate whether or not we are bucketing
+#' age (if not, we are normalizing it to be between 0 and 1)
 input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_file, 
-                                        is_pc, smartpca_output) {
+                                        is_pc, smartpca_output, age_bucketing) {
   input_dataframe_updated <- input_df
   
   # GENDER
@@ -204,9 +223,15 @@ input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_
     input_dataframe_updated[,'Gender'] <- gender_vect_binary
   } 
   # AGE
-  age_bin_df <- convert_age_to_bins(clinical_df$age_at_index)
-  input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
-                                                         age_bin_df)   
+  if(age_bucketing) {
+    age_bin_df <- convert_age_to_bins(clinical_df$age_at_index)
+    input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
+                                                           age_bin_df) 
+  } else {
+    age_vect <- as.numeric(clinical_df$age_at_index)[seq(1, length(clinical_df$age_at_index), 2)] / 100
+    input_dataframe_updated[,'Age'] <- age_vect
+  }
+  
   # RACE
   race_bin_df <- convert_race_to_bins(clinical_df$race, clinical_df$ethnicity)
   input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
@@ -223,7 +248,7 @@ input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_
   input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
                                                          treatment_bin_df)
   # CANCER TYPE OR SUBTYPE
-  cancer_type_bin_df <- convert_ct_to_bins(subtype_file, input_dataframe_updated, is_pc)
+  cancer_type_bin_df <- convert_ct_to_bins(subtype_file, clinical_df, input_dataframe_updated, is_pc)
   input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated,
                                                          cancer_type_bin_df)
   # TOTAL NUM MUTATIONS
@@ -233,7 +258,6 @@ input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_
   # SMARTPCA PCs
   smartpca_output <- reorg_smartpca_output(smartpca_output)
   smartpca_output <- pad_nas(smartpca_output, rownames(input_dataframe_updated))
-  print(dim(smartpca_output))
   input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated,
                                                          smartpca_output)
 
@@ -421,10 +445,11 @@ rad_or_pharm_helper <- function(rad_or_pharm, treatment, treatment_df, i) {
 #' @param subtype_file a file from TCGAbiolinks that has information about subtypes
 #' or, alternatively (if pan-cancer) a file that identifies the cancer type of 
 #' each sample (TODO: make this file!)
+#' @param clinical_df clinical data file from the TCGA for the given patient cohort
 #' @param input_dataframe_updated the work-in-progress input data frame with all
 #' the patient characteristics for the linear model
 #' @param is_pc a TRUE/FALSE value indicating whether the cohort is pan-cancer or not
-convert_ct_to_bins <- function(subtype_file, input_dataframe_updated, is_pc) {
+convert_ct_to_bins <- function(subtype_file, clinical_df, input_dataframe_updated, is_pc) {
   
   # Create a blank data frame with all the same patient IDs as the input data frame
   cancer_type_bin_df <- input_dataframe_updated[, grepl("Cancer_type", colnames(input_dataframe_updated))]
@@ -436,10 +461,13 @@ convert_ct_to_bins <- function(subtype_file, input_dataframe_updated, is_pc) {
   # Go through each patient and find their subtype/type info, then add to the appropriate bucket
   for (i in 1:nrow(cancer_type_bin_df)) {
     patient_id <- rownames(cancer_type_bin_df)[i]
+    print(patient_id)
     # Pan-cancer: get the cancer type
     if (is_pc) {
-      ct <- as.character(unlist(subtype_file[grepl(patient_id, subtype_file$patient), 
-                                             'cancer.type']))
+      ct <- as.character(unlist(clinical_df[grepl(patient_id, clinical_df$case_submitter_id), 
+                                             'project_id']))
+      ct <- unlist(strsplit(ct, "-", fixed = TRUE))[2]
+      print(ct)
     } 
     # Not pan-cancer: get the cancer subtype
     else {
@@ -567,7 +595,7 @@ pad_nas <- function(smartpca_output, patient_ids) {
   
   # Which patients are in the patient ID list but not the smartpca output?
   nonoverlap_patients <- setdiff(patient_ids, rownames(smartpca_output))
-  print(nonoverlap_patients)
+  #print(nonoverlap_patients)
   
   # Create a new entry for each of these with 'NA' values and add to smartpca df
   new_rows <- lapply(nonoverlap_patients, function(pat) {

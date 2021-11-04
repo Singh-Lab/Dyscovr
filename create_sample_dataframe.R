@@ -17,9 +17,12 @@ main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Ou
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
 
 input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
+#input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TCGA Data (ALL)/"
+
 
 is_brca <- TRUE
 # is_brca <- FALSE
+
 
 ############################################################
 ### IMPORT ALIQUOT AND PATIENT FILES
@@ -31,9 +34,9 @@ if(is_brca) {
 }
 
 # Import the patients of interest and subset the aliquot DF to only these patients
-patients <- read.table(paste(input_path, "unique_brca_patient_ids.txt", sep = ""), header = TRUE,
+patients <- read.table(paste(input_path, "unique_brca_patient_ids_2.txt", sep = ""), header = TRUE,
                      row.names = 1)[,1]
-# patients <- read.table(paste(input_path, "unique_patient_ids.txt", sep = ""), header = TRUE,
+# patients <- read.table(paste(input_path, "unique_patient_ids_2.txt", sep = ""), header = TRUE,
   # row.names = 1)[,1]
 
 aliquot_df$patient_id <- unlist(lapply(aliquot_df$sample_submitter_id, function(x) {
@@ -63,23 +66,23 @@ colnames(tumor_purity_df)[1] <- 'Sample.ID'
 ### IMPORT PEER FILES
 ############################################################
 # TMM
-peer_factors_tmm <- read.csv(paste(main_path, "PEER/peer_factors (TMM, noCov, noMean, allGenes).csv", sep = ""),
+peer_factors_tmm <- read.csv(paste(main_path, "PEER/TMM/peer_factors (TMM, noCov, noMean, allGenes).csv", sep = ""),
                              header = TRUE, row.names = 1, check.names = FALSE)
 
 # FPKM
-peer_factors_fpkm <- read.csv(paste(main_path, "PEER/peer_factors (FPKM, noCov, noMean, allGenes).csv", sep = ""),
+peer_factors_fpkm <- read.csv(paste(main_path, "PEER/FPKM/peer_factors (FPKM, noCov, noMean, allGenes).csv", sep = ""),
                               header = TRUE, row.names = 1, check.names = FALSE)
-peer_factors_fpkm_top10k <- read.csv(paste(main_path, "PEER/peer_factors (FPKM, noCov, noMean, top10k).csv", sep = ""),
+peer_factors_fpkm_top10k <- read.csv(paste(main_path, "PEER/FPKM/peer_factors (FPKM, noCov, noMean, top10k).csv", sep = ""),
                               header = TRUE, row.names = 1, check.names = FALSE)
 
 # Quantile-Normalized
-peer_factors_qn_top10k <- read.csv(paste(main_path, "PEER/peer_factors (Q-N, noCov, noMean, top10k).csv", sep = ""),
+peer_factors_qn_top10k <- read.csv(paste(main_path, "PEER/Q-N/TiebreakerMean/peer_factors (Q-N, noCov, noMean, top10k).csv", sep = ""),
                               header = TRUE, row.names = 1, check.names = FALSE)
 
 # Rank-Normalized
-peer_factors_rn <- read.csv(paste(main_path, "PEER/peer_factors (R-N, noCov, noMean, allGenes).csv", sep = ""),
+peer_factors_rn <- read.csv(paste(main_path, "PEER/R-N/TiebreakerMean/peer_factors (R-N_mean_MedGr10_TO, noCov, noMean, allGenes).csv", sep = ""),
                               header = TRUE, row.names = 1, check.names = FALSE)
-peer_factors_rn_top10k <- read.csv(paste(main_path, "PEER/peer_factors (R-N, noCov, noMean, top10k).csv", sep = ""),
+peer_factors_rn_top10k <- read.csv(paste(main_path, "PEER/R-N/TiebreakerMean/peer_factors (R-N_mean_MedGr10_TO, noCov, noMean, top10k).csv", sep = ""),
                             header = TRUE, row.names = 1, check.names = FALSE)
 
 ############################################################
@@ -259,7 +262,7 @@ input_sample_specific_info <- function(input_df, aliquot_df, expression_df,
   
   # OPTION 2: INCLUDE THE FRACTION OF EACH IMMUNE CELL TYPE AS INDIVIDUAL COVARIATES
   input_dataframe_updated <- add_immune_cell_fractions(input_dataframe_updated, 
-                                                       immune_cell_infl_df, ici_columns)
+                                                      immune_cell_infl_df, ici_columns)
   
   # PEER FACTORS
   input_dataframe_updated <- add_peer(input_dataframe_updated, peer_df)

@@ -316,7 +316,7 @@ create_methylation_df <- function(filenames, path, label, returnBeta,
   # Add the methylation arrays for this patient sample to the DF
   tic("combine into one DF")
   #methylation_df <- do.call("cbind", methylation_columns)
-  methylation_df <- Reduce(function(x, y) merge(x, y, by = "Gene_Symbol"), methylation_dfs)
+  methylation_df <- Reduce(function(x, y) merge(x, y, by = "Gene_Symbol", all = T), methylation_dfs)
   toc()
   
   print(head(methylation_df))
@@ -342,6 +342,8 @@ methylation_df <- create_methylation_df(filenames = cleaned_meth_filenames,
                                         path = outpath_clean,
                                         label = "full", returnBeta = TRUE)
 
+# Replace NAs with 0's
+methylation_df[is.na(methylation_df)] <- 0
 
 # Write this table to a CSV 
 # output_filename <- paste(output_path, paste("methylation_DF_Beta_", paste(beta_thres, ".csv", sep = ""), 
@@ -354,6 +356,8 @@ fwrite(methylation_df, output_filename)
 # Read back this CSV
 methylation_df <- fread(output_filename, header = TRUE)
 
+# OPT: check for missing values
+apply(methylation_df_Beta, 2, function(y) {if(length(y[y == 0]) > length(y)*0.5) print("missing > 50% of values")})
 
 ############################################################
 # CREATE A BUCKETED METHYLATION FILE
@@ -375,23 +379,25 @@ methylation_df <- fread(output_filename, header = TRUE)
 create_bucketed_methylation_df <- function(methylation_df, isBeta) {
   new_df <- as.data.frame(apply(methylation_df[,2:ncol(methylation_df)], 
                                 MARGIN = c(1,2), function(x) {
-    
+                                  
     # Establish the lower and upper bounds
     # Beta values
-    if (isBeta) {
-      lower_bound <- 0.3
-      upper_bound <- 0.7
+    lower_bound <- 0.3
+    upper_bound <- 0.7
     # M-values
-    } else {
+    if (!isBeta) {
       lower_bound <- -0.8
       upper_bound <- 0.8
     }
-    
+
     # Establish the bucket for this value and return it 
     if(x < lower_bound) {return("c(1,0,0)")}
     else if ((x >= lower_bound) & (x < upper_bound)) {return("c(0,1,0)")}
     else {return("c(0,0,1)")}
+   
   }))
+  new_df$Gene_Symbol <- methylation_df$Gene_Symbol
+  
   print(head(new_df))
   return(new_df)
 }

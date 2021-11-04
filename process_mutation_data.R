@@ -483,7 +483,9 @@ add_patient_ids <- function(iprotein_sub, maf) {
   curr_patients <- ""
   new_col <- c()
   for (i in 1:nrow(iprotein_sub)) {
-    prot <- unlist(strsplit(iprotein_sub[i, 'Query'], "|", fixed = TRUE))[2] 
+    #prot <- unlist(strsplit(iprotein_sub[i, 'Query'], "|", fixed = TRUE))[2] 
+    prot <- unlist(iprotein_sub[i, 'Swissprot'])
+    print(prot)
     if (prot == curr_prot) {
       new_col <- c(new_col, curr_patients)
     } else {
@@ -493,6 +495,7 @@ add_patient_ids <- function(iprotein_sub, maf) {
       patients <- unlist(lapply(maf_sub$Tumor_Sample_Barcode, function(x) 
         paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
       patients_char <- paste(patients, collapse = ";")
+      print(patients_char)
       new_col <- c(new_col, patients_char)
       
       curr_prot <- prot
@@ -506,7 +509,7 @@ add_patient_ids <- function(iprotein_sub, maf) {
 domains_missense_iprotein_sub <- add_patient_ids(domains_missense_iprotein_sub, maf_subset_df_missense)
 
 write.csv(domains_missense_iprotein_sub, file = paste(path, "Saved Output Data Files/BRCA/Mutation/iprotein_results_missense.csv", sep = ""))
-# write.csv(domains_missense_iprotein_sub, file = paste(path, "Saved Output Data Files/Pan-Cancer/Mutation/iprotein_results_missense.csv", sep = ""))
+write.csv(mutation_regprot_df, file = "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Mutation/iprotein_results_missense.csv")
 
 
 ############################################################

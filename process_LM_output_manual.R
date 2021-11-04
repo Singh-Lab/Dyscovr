@@ -216,10 +216,12 @@ create_heat_map <- function(results_table, outpath) {
   # Fill in this table with t-statistics
   for (i in 1:nrow(results_table)) {
     tstat <- results_table$statistic[i]
+    log_pstat <- log(results_table$p.value[i])
+    if(tstat < 1) {log_pstat <- log_pstat * -1}
     regprot <- results_table$R_i.name[i]
     targ <- results_table$T_k.name[i]
     
-    matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
+    matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- log_pstat
   }
   # NOTE: leave all the unfilled pairings as NA
   

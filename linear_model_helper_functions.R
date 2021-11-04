@@ -46,7 +46,7 @@ filter_cna_by_ensg <- function(cna_df, ensg_ids) {
 #' @param ensg_ids a list of ensembl IDs to keep in the DF
 filter_meth_by_ensg <- function(methylation_df, ensg_ids) {
   meth_rows_to_keep <- unique(unlist(lapply(ensg_ids, function(x) 
-    grep(x, methylation_df$ensg_id))))
+    grep(x, methylation_df$ensg_ids))))
   methylation_df <- methylation_df[meth_rows_to_keep,]
   #print("Meth filt by ENSG:") 
   #print(methylation_df)
@@ -336,11 +336,18 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
 #' @param randomize a TRUE/ FALSE value indicating whether or not we are randomizing
 #' our dependent variable (expression or methylation)
 #' @param covs_to_incl_label a label indicating what covariates we've included in this run
+#' @param patients_to_incl_label a label indicating the subpopulation we are restricting 
+#' to, if any
 create_output_filename <- function(test, tester_name, run_name, targets_name, expression_df_name,
                                    cna_bucketing, mutation_regprot_df_name, meth_bucketing,
                                    meth_type, patient_df_name, num_PEER, num_pcs, randomize,
-                                   covs_to_incl_label) {
+                                   covs_to_incl_label, patients_to_incl_label) {
   outfn <- "output_results"
+  
+  # Add the name of the patient population of interest, if there is one
+  if(!(patients_to_incl_label == "")) {
+    outfn <- paste(outfn, patients_to_incl_label, sep = "_")
+  }
   
   # Add the name of the regulatory protein/ group of regulatory proteins
   if(test) {
@@ -520,31 +527,31 @@ combine_collinearity_diagnostics <- function(path, outfn, debug, randomize) {
 
 
 ############################################################
-#' Given a list of intersecting patient IDs (XXXX, e.g. A0WY), it subsets a 
+#' Given a list of  patient IDs (XXXX, e.g. A0WY), it subsets a 
 #' given data frame with column/row names that contain sample IDs (XXXX-XXX, e.g. A0WY-01A)
 #' to include only those given patients
-#' @param intersecting_patients a vector of intersecting patient IDs
+#' @param patients a vector of patient IDs
 #' @param df the data frame to subset using the patient ids
 #' @param colNames a TRUE/FALSE value indicating whether the patient/sample IDs are
 #' found on the rows or the columns of the DF (TRUE is columns, FALSE is rows)
 #' @param tumNormMatched a TRUE/FALSE value indicating whether we are looking at 
 #' tumor-normal matched samples (if FALSE, restrict to only cancer samples)
-subset_by_intersecting_ids <- function(intersecting_patients, df, colNames, tumNormMatched) {
-   df <- as.data.frame(df)
-
+subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
+  df <- as.data.frame(df)
+  
   if(colNames == TRUE) {
     # Keep only intersecting patients
     label_col_indices <- which((colnames(df) == "ensg_id") | (colnames(df) == "Swissprot") | 
-				(colnames(df) == "gene_name"))
+                                 (colnames(df) == "gene_name"))
     just_patients <- unlist(lapply(colnames(df), function(x) 
-	unlist(strsplit(x, "-", fixed = TRUE))[1]))
-    df_adj <- df[, c(label_col_indices, which(just_patients %fin% intersecting_patients))]
+      unlist(strsplit(x, "-", fixed = TRUE))[1]))
+    df_adj <- df[, c(label_col_indices, which(just_patients %fin% patients))]
     print(head(df_adj))
     
     # Keep only cancer samples
     if(!tumNormMatched) {
       df_adj_label_col_indices <- which((colnames(df_adj) == "ensg_id") | (colnames(df_adj) == "Swissprot") | 
-				(colnames(df_adj) == "gene_name"))
+                                          (colnames(df_adj) == "gene_name"))
       df_adj <- df_adj[, c(df_adj_label_col_indices, which(grepl("-0", colnames(df_adj), fixed = TRUE)))]
     }
     
@@ -558,8 +565,8 @@ subset_by_intersecting_ids <- function(intersecting_patients, df, colNames, tumN
     }
     # Keep only intersecting patients
     just_patients <- unlist(lapply(df$sample_id, function(x) 
-	unlist(strsplit(x, "-", fixed = TRUE))[1]))
-    df_adj <- df[which(just_patients %fin% intersecting_patients),]
+      unlist(strsplit(x, "-", fixed = TRUE))[1]))
+    df_adj <- df[which(just_patients %fin% patients),]
     print(head(df_adj))
     
     # Keep only cancer samples
@@ -574,6 +581,7 @@ subset_by_intersecting_ids <- function(intersecting_patients, df, colNames, tumN
 }
 
 
+
 ############################################################
 #' Given a list of intersecting patient IDs (XXXX, e.g. A0WY), it subsets a 
 #' given regulatory protein data frame with row entries that contain semicolon-separated
@@ -582,8 +590,7 @@ subset_by_intersecting_ids <- function(intersecting_patients, df, colNames, tumN
 #' @param mutation_regprot_df the data frame to subset using the patient ids
 #' @param tumNormMatched a TRUE/FALSE value indicating whether we are looking at 
 #' tumor-normal matched samples (if FALSE, restrict to only cancer samples)
-subset_regprot_df_by_intersecting_ids <- function(intersecting_patients, mutation_regprot_df,
-                                                  tumNormMatched) {
+subset_regprot_df_by_ids <- function(patients, mutation_regprot_df, tumNormMatched) {
   
   # Adjust each row to remove patients not in the intersecting patients vector
   regprot_df_new_patient_labels <- lapply(mutation_regprot_df$Patient, function(x) {
@@ -594,7 +601,7 @@ subset_regprot_df_by_intersecting_ids <- function(intersecting_patients, mutatio
       unlist(strsplit(x, "-", fixed = TRUE))[1]))
     # Check if this patient is in the intersecting patients list and return TRUE if so, F o.w.
     matching_patient_ind <- unlist(lapply(spl_patients_nosamp, function(y) {
-      if(y %fin% intersecting_patients) {
+      if(y %fin% patients) {
         return(TRUE)
       } else {return(FALSE)}
     }))
@@ -638,7 +645,7 @@ subset_regprot_df_by_intersecting_ids <- function(intersecting_patients, mutatio
 #' @param expression_df an expression DF, unfiltered 
 #' @param starter_df a starter DF for the regulatory protein of interest i
 #' @param ensg the ensembl ID of the target gene k
-filter_expression_df <- function(expression_df, starter_df, ensg) {
+filter_expression_df_outliers <- function(expression_df, starter_df, ensg) {
   patients_mut <- rownames(starter_df[starter_df$MutStat_i == 1,])
   patients_nonmut <- setdiff(rownames(starter_df), patients_mut)
   

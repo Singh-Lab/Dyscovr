@@ -9,6 +9,11 @@
 
 BiocManager::install("maftools")
 library(maftools)
+library(TCGAbiolinks)
+library("gplots")
+library(ggplot2)
+
+path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Somatic_Mut_Data/"
 
 ##############################################################################
 ### BRCA DATA ###
@@ -16,7 +21,7 @@ library(maftools)
 
 # Read in maf file
 maf_filename <- "TCGA.BRCA.muse.b8ca5856-9819-459c-87c5-94e91aca4032.DR-10.0.somatic.maf"
-maf <- read.maf(maf = maf_filename) # clinicalData = mut_clin_file)
+maf <- read.maf(maf = paste0(path, maf_filename)) # clinicalData = mut_clin_file)
 
 # Print summaries of the maf
 print(maf)  # general summary
@@ -24,7 +29,26 @@ print(getSampleSummary(maf))  # sample summary
 print(getGeneSummary(maf))    # gene summary
 
 # Visualize maf file
-plotmafSummary(maf = maf, rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+plotmafSummary(maf = maf, rmOutlier = FALSE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+
+# Remove some of the top mutated proteins that are not driver genes
+maf_dt <- fread(paste0(path, maf_filename), header= TRUE)
+maf_df <- as.data.frame(maf_dt)
+maf_df_sub <- maf_df[maf_df$Hugo_Symbol %in% c("TP53", "PIK3CA", "KMT2C", "MAP2K4", "FOXA1", "FAT1", 
+                                               "ERBB2", "PTEN", "HUWE1", "MAPK1", "AKT1"),]
+maf_df_sub <- maf_df[!(maf_df$Hugo_Symbol %in% c("TTN", "MUC16", "HMCN1", "CDH1", "USH2A", "MUC4", 
+                                                 "RYR2", "FLG", "SYNE1", "MUC17", "SPTA1", "NCOR1", 
+                                                 "NEB", "ZFHX4", "RYR3", "DMD", "SYNE2", "CSMD3", "FAT3",
+                                                 "PKHD1L1", "DNAH11", "LRP2", "MDN1", "XIRP2", "ABCA13",
+                                                 "ADGRV1", "APOB", "CSMD1", "CCDC168", "OBSCN", 
+                                                 "PCLO", "DNAH17", "CACNA1E", "PRUNE2", "KIAA1109",
+                                                 "LRP1B", "AHNAK", "MYCBP2", "PRKDC", "DNAH9", "RELN", 
+                                                 "NF1", "CSMD2", "UTRN", "MXRA5", "HERC2", "FLG2")),]
+maf_sub <- read.maf(maf_df_sub)
+#write.table(maf_df_sub, paste0(path, "TCGA.BRCA.muse.b8ca5856-9819-459c-87c5-94e91aca4032.DR-10.0.somatic.topDrivers.maf"), 
+            #sep = "\t", quote = FALSE)
+plotmafSummary(maf = maf_sub, rmOutlier = FALSE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+
 
 # Draw an oncoplot/ waterfall plot for the maf file
 oncoplot(maf = maf, top = 10)
@@ -70,6 +94,7 @@ maf_subset_missense <- subsetMaf(maf = maf, query = "Variant_Classification == '
 #maf_subset_silent <- subsetMaf(maf = maf, query = "Variant_Classification == 'Silent'")
 #maf_subset_mis_and_sil <- subsetMaf(maf = maf, query = "Variant_Classification == 'Missense_Mutation' |
                                     #Variant_Classification == 'Silent'")
+
 
 ##############################################################################
 ### GBM DATA ###

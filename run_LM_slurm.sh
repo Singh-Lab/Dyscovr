@@ -2,7 +2,7 @@
 #SBATCH --mem=8192
 #SBATCH --qos=1wk
 #SBATCH --nodes=1
-#SBATCH --job-name=lm_run_tp53_noPEER_chipeatTargs_rn_rawCNA_M_eQTL
+#SBATCH --job-name=lm_run_idh1_noPEER_metabolicTargs_rn_rawCNA_M_eQTL
 #SBATCH --mail-user=scamilli@princeton.edu
 #SBATCH --mail-type=fail,time_limit
 
@@ -16,13 +16,24 @@
 #--targets_name "allGenes" --num_PEER 10 --num_pcs 0 --debug "FALSE" --collinearity_diagn "TRUE" --regularization "None"
 
 # SAMPLE RUN: TP53 and all targets/ ChIP-eat targets (NON-TNM)
-Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "PanCancer" --randomize "FALSE" \
---test "TRUE" --expression_df "expression_rank_norm_CancerOnly_IntersectPatientsRN.csv" --methylation_df "methylation_M_CancerOnly_IntersectPatientsRN.csv" \
---methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatientsRN.csv" --mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatientsRN.csv" \
---mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatientsRN.csv" --cna_df "CNA_AllGenes_CancerOnly_IntersectPatientsRN.csv" \
---patient_df "combined_patient_sample_rank_norm_cibersort_total_frac_IntersectPatientsRN.csv" --target_df "tp53_chipeat_targets.csv" \
---cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --targets_name "chipeat" --num_PEER 0 \
+#Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "PanCancer" --specificTypes "LGG;THCA" --clinical_df "clinical.csv" --randomize "FALSE" \
+#--test "TRUE" --expression_df "expression_rank_norm_CancerOnly_IntersectPatientsRN.csv" --methylation_df "methylation_M_CancerOnly_IntersectPatientsRN.csv" \
+#--methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatientsRN.csv" --mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatientsRN.csv" \
+#--mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatientsRN.csv" --cna_df "CNA_AllGenes_CancerOnly_IntersectPatientsRN.csv" \
+#--patient_df "combined_patient_sample_rank_norm_cibersort_total_frac_IntersectPatientsRN.csv" --target_df "tp53_chipeat_targets.csv" \
+#--cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --targets_name "chipeat" --num_PEER 0 \
+#--num_pcs 0 --debug "TRUE" --collinearity_diagn "FALSE" --regularization "None" --select_args "ALL" --select_args_label "" 
+
+# SAMPLE RUN: TP53 and all targets/ ChIP-eat targets (NON-TNM) -- PER-CANCER
+Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "PanCancer" --specificTypes "GBM" --clinical_df "clinical.csv" --randomize "FALSE" \
+--test "TRUE" --tester_name "IDH1" --tester_uniprot_id "O75874" --tester_ensg_id "ENSG00000138413"  \
+--expression_df "expression_rank_norm_mean_MedGr10_perCT_TO.csv" --methylation_df "methylation_DF_M_cancer_only.csv" \
+--methylation_df_meQTL "methylation_DF_M_cancer_only.csv" --mutation_targ_df "mut_count_matrix_missense.csv" \
+--mutation_regprot_df "iprotein_results_missense.csv" --cna_df "CNA_DF_AllGenes.csv" \
+--patient_df "combined_patient_sample_rank_norm_cibersort_total_frac.csv" --target_df "metabolic_targets.csv" \
+--cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --targets_name "metabolicTargs" --num_PEER 0 \
 --num_pcs 0 --debug "TRUE" --collinearity_diagn "FALSE" --regularization "None" --select_args "ALL" --select_args_label "" 
+
 
 # SAMPLE RUN: USH2A and all targets (NON-TNM) -- NEGATIVE CONTROL
 #Rscript linear_model.R --QTLtype "meQTL" --tumNormMatched "FALSE" --cancerType "PanCancer" --randomize "FALSE" \

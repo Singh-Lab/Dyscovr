@@ -7,6 +7,12 @@ library(maftools)
 library(stats)
 library(ggplot2)
 library(dplyr)
+library(tidytext)
+library(TCGAbiolinks)
+library("RColorBrewer")
+library("gplots")
+library(data.table)
+
 
 # Generalized ID conversion table from BiomaRt
 all_genes_id_conv <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/all_genes_id_conv.csv", header = TRUE)
@@ -669,6 +675,290 @@ get_num_proteins_that_bind_each_lig_type(domains_missense_idomain_sub, interacdo
 get_num_proteins_that_bind_each_lig_type(domains_missense_idomain_sub, interacdome_domainweights, canbind_df_sub, ligand_groups, "I-Binding Position", ibinding_ids = swissprot_ids_missense_ibindingpos)
 
 get_num_proteins_that_bind_each_lig_type(domains_missense, interacdome_conf, canbind_df_sub, ligand_groups)  # Also look across all domains, for reference
+
+
+############################################################
+
+#' GET MOST MUTATED DRIVER GENES PER CANCER TYPE
+#' Uses a regulatory protein mutation data frame created from process_mutation_data.R
+#' as well as a list of known driver genes to output a table of the top N most
+#' frequently mutated cancer genes in each cancer type
+#' @param cancer_types a vector of cancer types we are interested in getting the
+#' top mutated cancer genes for
+#' @param clinical_df a clinical data frame to link patients to their cancer type
+#' @param regprot_mut_df a regulatory protein mutation data frame of any 
+#' given specificity
+#' @param driver_gene_df a data frame containing known driver genes from 
+#' CGC/Vogelstein
+#' @param N the number of top genes to retrieve
+#' @param all_genes_id_conv ID conversion data frame from BioMart
+get_most_mutated_drivers_per_ct <- function(cancer_types, clinical_df, regprot_mut_df, 
+                                            driver_gene_df, N, all_genes_id_conv) {
+  
+  top_mutated_genes_per_ct <- lapply(cancer_types, function(ct) {
+    # Get the patients that are of this cancer type
+    ct_patients <- unlist(clinical_df[grepl(ct, clinical_df$project_id), 'case_submitter_id'])
+    ct_patients <- unlist(lapply(ct_patients, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
+    
+    # Get all the genes that have mutations in at least one of these patients
+    regprot_mut_df_sub_patients <- data.frame(matrix(nrow = 0, ncol = 2))
+    colnames(regprot_mut_df_sub_patients) <- c("Swissprot", "Patient")
+    
+    for (i in 1:nrow(regprot_mut_df)) {
+      print(paste(i, paste("/", nrow(regprot_mut_df))))
+      
+      # Get the patients with a mutation here
+      pats <- regprot_mut_df[i, 'Patient']
+      new_pats <- c()
+      overlap <- FALSE
+      # Check each patient in this cancer type; if they are listed here, keep them,
+      # and discard all other patients
+      for(j in ct_patients) {
+        if(TRUE %in% grepl(j, pats)) {
+          overlap <- TRUE
+          new_pats <- unique(c(new_pats, j))
+        } 
+      }
+      # If there are no patients from this cancer type in the given row, eliminate it
+      if(overlap == TRUE) {
+        regprot_mut_df_sub_patients <- rbind(regprot_mut_df_sub_patients, 
+                                             data.frame("Swissprot" = regprot_mut_df$Swissprot[i],
+                                                        "Patient" = paste(new_pats, collapse = ";")))
+      } 
+    }
+    
+    # Aggregate patients for the same protein and get a count matrix
+    count_tab <- data.frame(protein = unique(regprot_mut_df_sub_patients$Swissprot),
+                            num_patients_with_mutation = rep(NA, length(unique(regprot_mut_df_sub_patients$Swissprot))))
+    for (prot in unique(regprot_mut_df_sub_patients$Swissprot)) {
+      pats <- regprot_mut_df_sub_patients[grepl(prot, regprot_mut_df_sub_patients$Swissprot),'Patient']
+      unique_pats <- unique(unlist(strsplit(pats, ";", fixed = TRUE)))
+      count_tab[count_tab$protein == prot, 'num_patients_with_mutation'] <- length(unique_pats)
+    }
+    
+    print(count_tab)
+    
+    # Filter to only include genes in the driver gene list
+    count_tab$ensg <- unlist(lapply(count_tab$protein, function(x)
+      paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == x,
+                                            'ensembl_gene_id'])), collapse = ";")))
+    count_tab_list <- lapply(1:nrow(count_tab), function(i) {
+      ensg_ids <- unlist(strsplit(count_tab$ensg[i], ";", fixed = TRUE))
+      if(any(ensg_ids %fin% driver_gene_df$ensembl_gene_id)) {return(count_tab[i,])}
+    })
+    count_tab_drivers <- rbindlist(count_tab_list[!is.null(count_tab_list)])
+    
+    # Get the names of the top N genes and return
+    ordered_count_tab <- count_tab_drivers[order(-count_tab_drivers$num_patients_with_mutation),]
+    top_n <- ordered_count_tab[1:10,]
+    
+    return(top_n)
+    
+  })
+  names(top_mutated_genes_per_ct) <- cancer_types
+  
+  return(top_mutated_genes_per_ct)
+}
+
+cancer_types_of_interest <- c("BRCA", "LGG", "THCA", "PRAD", "HNSC", "LIHC", "LUAD",
+                              "BLCA", "UCEC", "STAD", "KIRP", "KIRC", "CESC", "LUSC",
+                              "COAD", "SARC", "PCPG", "ESCA", "PAAD", "TGCT")
+
+clinical_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TCGA Data (ALL)/clinical_wMutCounts.csv",
+                        header = TRUE, check.names = FALSE)
+
+path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
+regprot_mut_df <- read.csv(paste(path, "Mutation/iprotein_results_missense.csv", sep = ""), 
+                           header = TRUE, check.names = FALSE)
+
+driver_gene_df <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/GRCh38_driver_gene_list.tsv",
+                           header = TRUE, check.names = FALSE)
+
+# Generalized ID conversion table from BiomaRt
+all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/all_genes_id_conv.csv", header = TRUE)
+
+
+# Call function
+top_drivers_per_ct <- get_most_mutated_drivers_per_ct(cancer_types_of_interest, clinical_df, regprot_mut_df,
+                                driver_gene_df, 10, all_genes_id_conv)
+
+# Optionally convert to DF and add the gene name
+top_drivers_per_ct_df <- as.data.frame(top_drivers_per_ct)
+protein_sub <- top_drivers_per_ct_df[,grepl(".protein", colnames(top_drivers_per_ct_df))]
+new_cols <- lapply(1:ncol(protein_sub), function(i) {
+  col <- protein_sub[,i]
+  names <- unlist(lapply(col, function(x) {paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == x,
+                                          'external_gene_name'])), collapse = ";")}))
+  return(names)
+})
+new_cols_df <- do.call(cbind, new_cols)
+colnames(new_cols_df) <- unlist(lapply(cancer_types_of_interest, function(ct) paste(ct, "geneName", sep = ".")))
+top_drivers_per_ct_df <- cbind(top_drivers_per_ct_df, new_cols_df)
+
+# Visualize per cancer type using horizontal bar charts
+# Reorganize the data frame first, so that cancer type is a column
+top_drivers_per_ct_df2 <- do.call(rbind, top_drivers_per_ct)
+top_drivers_per_ct_df2$cancer_type <- rep(cancer_types_of_interest, each = 10)
+top_drivers_per_ct_df2$gene_name <- unlist(lapply(top_drivers_per_ct_df2$protein, function(x) {
+  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == x, 'external_gene_name'])), 
+        collapse = ";")}))
+
+ggplot(top_drivers_per_ct_df2, aes(y = reorder_within(gene_name, by = num_patients_with_mutation, within = cancer_type, sep = "_"), 
+                                   x = num_patients_with_mutation)) + geom_bar(stat = "identity") + 
+  labs(x = "Driver Gene", y = "Num. Patients with Mutation") + facet_wrap(~cancer_type, scales = "free")
+
+
+############################################################
+#' DETERMINE CORRELATION BETWEEN MUTATION STATUS OF KEY GENES AND CANCER SUBTYPE IN BRCA
+#' Creates a heat map that displays the count of patients that have a given subtype 
+#' and a corresponding mutation in a particular gene of interest
+#' @param subtype_file contains the subtypes for the given cancer along with the 
+#' corresponding patient IDs
+#' @param mutation_regprot_df a data frame with the mutation status of patients in 
+#' the given cancer type for the genes of interest
+#' @param genes_of_interest a vector of genes of interest, swissprot IDs
+#' @param totOrFrac either "total" or "fraction" to denote whether we want the total
+#' count of mutated patients for each gene, or the fraction of patients that have
+#' a mutation in this gene
+visualize_mutation_corr_to_subtype <- function(subtype_file, mutation_regprot_df, 
+                                               genes_of_interest, totOrFrac) {
+  
+  # Get all the unique subtypes for BRCA
+  unique_subtypes <- unique(unlist(subtype_file$BRCA_Subtype_PAM50))
+  unique_subtypes <- unique_subtypes[!(unique_subtypes == "NA")]
+  patients <- unlist(subtype_file$patient)
+  
+  # Create the blank count matrix
+  count_mat <- data.frame(matrix(nrow = length(genes_of_interest), ncol = length(unique_subtypes)))
+  colnames(count_mat) <- unique_subtypes
+  rownames(count_mat) <- genes_of_interest
+  count_mat[is.na(count_mat)] <- 0
+  
+  if(totOrFrac == "fraction") {
+    total_counts <- list("Basal" = 0, "Her2" = 0, "LumB" = 0, "LumA" = 0,"Normal" = 0)
+  }
+  
+  #print(count_mat)
+  
+  for (i in 1:length(genes_of_interest)) {
+    gene <- genes_of_interest[i]
+    print(gene)
+    
+    for (j in 1:length(patients)) {
+      patient <- patients[j]
+      subtype <- as.character(unlist(subtype_file[subtype_file$patient == patient, 'BRCA_Subtype_PAM50']))
+      print(subtype)
+      
+      if (!(subtype == "NA")) {
+        pat_id <- unlist(strsplit(patient, "-", fixed = TRUE))[3]
+        #print(pat_id)
+        
+        # If this patient has a mutation in this gene, add to count
+        mutation_regprot_df_sub <- mutation_regprot_df[mutation_regprot_df$Swissprot == gene,]
+        if(any(grepl(pat_id, mutation_regprot_df_sub$Patient))) {
+          count_mat[i, colnames(count_mat) == subtype] <- count_mat[i, colnames(count_mat) == subtype] + 1
+        }
+        if(totOrFrac == "fraction") {
+          total_counts[names(total_counts) == subtype] <- as.integer(total_counts[names(total_counts) == subtype]) + 1
+        }
+      }
+    }
+  }
+  
+  # OPTIONAL: divide them all by the number of patients with that subtype to get 
+  # a percentage
+  if(totOrFrac == "fraction") {
+    print(total_counts)
+    for (y in 1:ncol(count_mat)) {
+      colnam_y <- colnames(count_mat)[y]
+      tot_counts <- total_counts[[colnam_y]]
+      count_mat[,y] <- round(count_mat[,y] / tot_counts, digits = 5)
+    }
+  }
+  
+  print(count_mat)
+  
+  # Convert from data frame to matrix
+  count_mat <- data.matrix(count_mat)
+  labels <- apply(count_mat, c(1,2), as.character)
+  
+  # Visualize using a heat map with counts displayed
+  #col <- colorRampPalette(brewer.pal(10, "RdYlBu"))(256)
+  #heatmap(count_mat, scale = "none", col = bluered(100))
+  #heatmap(count_mat, scale = "none", col = bluered(100), trace = "none",
+            #density.info = "none", cellnote = labels, notecol = "black") # cl
+  count_mat_melt <- reshape2::melt(count_mat)
+  count_mat_melt$Gene.name <- unlist(lapply(count_mat_melt$Var1, function(x) 
+    paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == x, 'external_gene_name']), collapse = ";")))
+  colnames(count_mat_melt) <- c("Swissprot", "Subtype", "Mutation.Count", "Gene.name")
+  p <- ggplot(count_mat_melt, aes(x = Subtype, y = Gene.name, fill = Mutation.Count)) + 
+    geom_tile() + geom_text(aes(label = Mutation.Count), color = "black", size = 6) + 
+    theme(axis.title.y=element_blank(), axis.text = element_text(size = 14), 
+          axis.title.x = element_text(size = 16)) + scale_fill_gradient(low = "dark orange", high = "yellow", guide = "colorbar")
+  print(p)
+  
+  return(count_mat_melt)
+}
+
+# Import subtype file using TCGA Biolinks
+brca_subtype <- TCGAquery_subtype(tumor = "BRCA")
+
+# Import regulatory protein mutation data frame
+mutation_regprot_df <- fread(paste("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Mutation/iprotein_results_missense.csv", sep = ""),
+                             header = TRUE)   # I-Protein, all ligands
+mutation_regprot_df$Swissprot <- unlist(lapply(mutation_regprot_df$Query, function(x) 
+  unlist(strsplit(x, "|", fixed = TRUE))[2]))
+
+# Get the genes of interest
+genes_of_interest_brca <- c("FOXA1", "HUWE1", "PTEN", "AKT1", "FAT1", "TP53", 
+                            "MAP2K4", "MAP3K1", "KMT2C", "PIK3CA", "ERBB2")
+genes_of_interest_brca_swissprot <- c("P42336", "P04637", "P31749", "Q8NEZ4", "Q13233",
+                                      "P60484", "Q14517", "P45985", "P04626", "Q7Z6Z7", "P55317") 
+
+count_matrix <- visualize_mutation_corr_to_subtype(brca_subtype, mutation_regprot_df, 
+                                                   genes_of_interest_brca_swissprot,
+                                                   "total")
+count_matrix_frac <- visualize_mutation_corr_to_subtype(brca_subtype, mutation_regprot_df, 
+                                                   genes_of_interest_brca_swissprot,
+                                                   "fraction")
+
+
+############################################################
+#' GET A FILE OF PATIENTS THAT POSSESS A GIVEN CANCER SUBTYPE
+#' Creates header-less text file that has a simple line-separated list of all the
+#' patients (4-letter TCGA ID, ####) that are a member of the provided subtype(s)
+#' @param subtype_file contains the subtypes for the given cancer along with the 
+#' corresponding patient IDs
+#' @param subtypes_of_interest a list of all the subtypes of interest we want to
+#' put in the output file
+#' @param outpath a path to where we should write the new file
+#' @param subtypes_label a character label of what subtype(s) we're looking at in
+#' order to appropriately name the new file
+get_subtype_patient_list <- function(subtype_file, subtypes_of_interest, outpath,
+                                     subtypes_label) {
+  output_patient_ids <- c()
+  
+  for (subtype in subtypes_of_interest) {
+    new_ids <- subtype_file[subtype_file$BRCA_Subtype_PAM50 == subtype, "patient"]  #TODO: make this generalizable beyond BRCA
+    new_ids_short <- unlist(lapply(new_ids$patient, function(id) unlist(strsplit(id, "-", fixed = TRUE))[3]))
+    output_patient_ids <- c(output_patient_ids, new_ids_short)
+  }
+  
+  fwrite(as.data.table(output_patient_ids), paste0(outpath, paste0(subtypes_label, "_patient_ids.txt")))
+}
+
+
+# Import subtype file using TCGA Biolinks
+brca_subtype <- TCGAquery_subtype(tumor = "BRCA")
+
+# List the outpath
+outpath <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
+
+# Call function
+get_subtype_patient_list(brca_subtype, c("LumA", "LumB"), outpath, "Luminal.A.B")
+get_subtype_patient_list(brca_subtype, "LumA", outpath, "Luminal.A")
+
+
 
 #
 #

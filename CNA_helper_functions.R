@@ -9,7 +9,7 @@ path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Fi
 #path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TCGA Data (ALL)/"
 
 output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/CNV/Gene-Level Raw/"
-#output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/CNA/Gene-Level Raw/"
+#output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/CNV/Gene-level Raw/"
 
 # Generalized ID conversion table from BiomaRt
 all_genes_id_conv <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/all_genes_id_conv.csv", header = TRUE)
@@ -308,6 +308,61 @@ get_genes_with_most_cna_events <- function(cna_df, output_path, all_genes_id_con
           xlab = "Gene", ylab = "Total Number of Deletion Events", col = "green", 
           names.arg = tab_del_sorted$gene.name[1:x], las = 2)
 }
+
+
+############################################################
+# VISUALIZE FREQUENCY OF SAMPLES WITH X PERCENTAGE OF GENES
+# THAT ARE AMPLIFIED
+############################################################
+#' Creates a histogram pan-cancer or per-cancer that displays the number of samples
+#' that have a copy number of >= 3 across X percentage of genes
+#' @param cna_df a copy number alteration DF (samples are columns, genes are rows)
+#' @param panOrPer whether we want to look pan (all cancers aggregated) or per (each
+#' cancer type individually)
+#' @param clinical_df if we are looking per cancer, we need a clinical DF to link
+#' the sample IDs to their cancer type
+visualize_patients_perc_genes_amplif <- function(cna_df, panOrPer, clinical_df) {
+  
+  cna_df <- apply(cna_df[,2:ncol(cna_df)], as.integer)
+  
+  # Create a new T/F data frame that indicates whether the copy # is 3 or more
+  cna_df_TF <- apply(cna_df[,2:ncol(cna_df)], MARGIN = c(1,2), function(x) {
+    if(!is.na(x)) {
+      if(x > 2) {return(TRUE)}
+      else {return(FALSE)}
+    } else {return(FALSE)}
+  })
+  
+  # Get the percentage of T
+  cna_df_percT <- apply(cna_df_TF[,2:ncol(cna_df_TF)], MARGIN = 2, function(y) {
+    y <- unlist(y)
+    sumT <- length(y[y == TRUE])
+    return(sumT / length(y))
+  })
+  cna_df_percT_df <- as.data.frame(cna_df_percT)
+
+  # Plot histogram
+  if(panOrPer == "pan") {
+    hist(cna_df_percT_df, xlab = "% of Genes with CNA >= 3", ylab = "Number of Samples")
+  } else {
+    cna_df_percT_df$cancer_type <- unlist(lapply(rownames(cna_df_percT_df), function(pat_id) {
+      pat_id <- unlist(strsplit(pat_id, "-", fixed = TRUE))[1]
+      ct <- unique(unlist(clinical_df[grepl(pat_id, clinical_df$case_submitter_id), 'project_id'])) 
+      ct <- unlist(strsplit(ct, "-", fixed = TRUE))[2] 
+      if(is.null(ct)) {return(NA)}
+      return(ct)
+    }))
+    cna_df_percT_df <- cna_df_percT_df[!is.na(cna_df_percT_df$cancer_type),]
+    ggplot(cna_df_percT_df, aes(cna_df_percT)) + geom_histogram() + 
+      labs(x = "% of Genes with CNA >= 3", y = "Num. Patients with Mutation") + 
+      facet_wrap(~cancer_type, scales = "free")
+  }
+  
+
+}
+
+clinical_df <- read.csv(paste(path, "clinical_wMutCounts.csv", sep = ""), header = TRUE,
+                        check.names = FALSE)
 
 
 
