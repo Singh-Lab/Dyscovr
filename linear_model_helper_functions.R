@@ -46,7 +46,7 @@ filter_cna_by_ensg <- function(cna_df, ensg_ids) {
 #' @param ensg_ids a list of ensembl IDs to keep in the DF
 filter_meth_by_ensg <- function(methylation_df, ensg_ids) {
   meth_rows_to_keep <- unique(unlist(lapply(ensg_ids, function(x) 
-    grep(x, methylation_df$ensg_ids))))
+    grep(x, methylation_df$ensg_id))))
   methylation_df <- methylation_df[meth_rows_to_keep,]
   #print("Meth filt by ENSG:") 
   #print(methylation_df)
@@ -275,7 +275,6 @@ get_tnm_fc <- function(df, sample) {
 }
 
 
-
 ############################################################
 #' Create the appropriate output file path (add the cancer type, the regulatory protein group 
 #' or tester name, tumor-normal matched or tumor only, and the analysis type (eQTL or meQTL)
@@ -291,26 +290,26 @@ get_tnm_fc <- function(df, sample) {
 #' tumor-normal matched run
 #' @param QTL_type either "eQTL" or "meQTL" depending on the type of run we are running
 create_file_outpath <- function(cancerType, specificType, test, tester_name, 
-                                  run_name, tumNormMatched, QTLtype) {
+                                run_name, tumNormMatched, QTLtype) {
   outpath <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/output_files"
-    
+  
   outpath <- paste(outpath, cancerType, sep = "/")
   if(!(specificType == "")) {outpath <- paste(outpath, specificType, sep = "/")}
-    
+  
   if(test) {
     outpath <- paste(outpath, tester_name, sep = "/")
   } else {outpath <- paste(outpath, run_name, sep = "/")}
-    
+  
   if(tumNormMatched) {
     outpath <- paste(outpath, "tumor_normal_matched", sep = "/")
   } else {outpath <- paste(outpath, "tumor_only", sep = "/")}
-    
+  
   outpath <- paste(outpath, QTLtype, sep = "/")
-    
+  
   return(outpath)
 }
   
-
+  
 ############################################################
 #' Create the appropriate output file name for the master DF result based on the
 #' conditions of the given run
@@ -406,8 +405,8 @@ run_regularization_model <- function(formula, lm_input_table) {
   #model <- glmnet(x_data, y_data, alpha = 0)
   
   #if(debug) {
-    #print("Summary of Regularized Model")
-    #print(summary(model))
+  #print("Summary of Regularized Model")
+  #print(summary(model))
   #}
   
   # Use a cross validation glmnet to get the best lambda value; alpha = 0 
@@ -427,7 +426,7 @@ run_regularization_model <- function(formula, lm_input_table) {
   return(best_model)
 }
 
-
+  
 ############################################################
 #' A function to combine the collinearity diagnostic statistics,
 #' specifically the tolerance, VIF, eigenvalue, and condition index
@@ -473,7 +472,7 @@ combine_collinearity_diagnostics <- function(path, outfn, debug, randomize) {
   results_table$Covariate <- c(tmp$Variables, "--")
   
   if(debug) {print(head(results_table))}
-  
+    
   for (i in 1:length(vif_tabs)) {
     combo <- paste(unlist(strsplit(vif_tabs[i], "_", fixed = TRUE))[1:2], collapse = "_")
     if(debug) {print(paste("TargGene and Regprot Combo:", combo))}
@@ -488,8 +487,8 @@ combine_collinearity_diagnostics <- function(path, outfn, debug, randomize) {
       eig_cindex_tab <- fread(paste(path, tab_name[[1]], sep = "/"), 
                               header = TRUE)
     })
-    
-
+      
+      
     for(i in 1:nrow(results_table)) {
       var <- results_table$Covariate[i]
       
@@ -516,6 +515,117 @@ combine_collinearity_diagnostics <- function(path, outfn, debug, randomize) {
     }
   }
   return(results_table)
+
+}
+
+
+############################################################
+#' Given a list of intersecting patient IDs (XXXX, e.g. A0WY), it subsets a 
+#' given data frame with column/row names that contain sample IDs (XXXX-XXX, e.g. A0WY-01A)
+#' to include only those given patients
+#' @param intersecting_patients a vector of intersecting patient IDs
+#' @param df the data frame to subset using the patient ids
+#' @param colNames a TRUE/FALSE value indicating whether the patient/sample IDs are
+#' found on the rows or the columns of the DF (TRUE is columns, FALSE is rows)
+#' @param tumNormMatched a TRUE/FALSE value indicating whether we are looking at 
+#' tumor-normal matched samples (if FALSE, restrict to only cancer samples)
+subset_by_intersecting_ids <- function(intersecting_patients, df, colNames, tumNormMatched) {
+   df <- as.data.frame(df)
+
+  if(colNames == TRUE) {
+    # Keep only intersecting patients
+    label_col_indices <- which((colnames(df) == "ensg_id") | (colnames(df) == "Swissprot") | 
+				(colnames(df) == "gene_name"))
+    just_patients <- unlist(lapply(colnames(df), function(x) 
+	unlist(strsplit(x, "-", fixed = TRUE))[1]))
+    df_adj <- df[, c(label_col_indices, which(just_patients %fin% intersecting_patients))]
+    print(head(df_adj))
+    
+    # Keep only cancer samples
+    if(!tumNormMatched) {
+      df_adj_label_col_indices <- which((colnames(df_adj) == "ensg_id") | (colnames(df_adj) == "Swissprot") | 
+				(colnames(df_adj) == "gene_name"))
+      df_adj <- df_adj[, c(df_adj_label_col_indices, which(grepl("-0", colnames(df_adj), fixed = TRUE)))]
+    }
+    
+    # Remove any duplicate samples
+    df_adj <- df_adj[, !(grepl("-1", colnames(df_adj), fixed = TRUE))]
+    
+  } else {
+    if(length(unlist(strsplit(df$sample_id[1], "-", fixed = TRUE))) == 4) {
+      df$sample_id <- unlist(lapply(df$sample_id, function(x) paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], 
+                                                                    collapse = "-")))
+    }
+    # Keep only intersecting patients
+    just_patients <- unlist(lapply(df$sample_id, function(x) 
+	unlist(strsplit(x, "-", fixed = TRUE))[1]))
+    df_adj <- df[which(just_patients %fin% intersecting_patients),]
+    print(head(df_adj))
+    
+    # Keep only cancer samples
+    if(!tumNormMatched) {
+      df_adj <- df_adj[which(grepl("-0", df_adj$sample_id, fixed = TRUE)),]
+    }
+    
+    # Remove any duplicate samples
+    df_adj <- df_adj[!(grepl('-1', df_adj$sample_id, fixed = TRUE)),]
+  }
+  return(as.data.table(df_adj))
+}
+
+
+############################################################
+#' Given a list of intersecting patient IDs (XXXX, e.g. A0WY), it subsets a 
+#' given regulatory protein data frame with row entries that contain semicolon-separated
+#' sample IDs (XXXX-XXX, e.g. A0WY-01A) to include only those given patients
+#' @param intersecting_patients a vector of intersecting patient IDs
+#' @param mutation_regprot_df the data frame to subset using the patient ids
+#' @param tumNormMatched a TRUE/FALSE value indicating whether we are looking at 
+#' tumor-normal matched samples (if FALSE, restrict to only cancer samples)
+subset_regprot_df_by_intersecting_ids <- function(intersecting_patients, mutation_regprot_df,
+                                                  tumNormMatched) {
+  
+  # Adjust each row to remove patients not in the intersecting patients vector
+  regprot_df_new_patient_labels <- lapply(mutation_regprot_df$Patient, function(x) {
+    # Split apart the semicolon separated sample IDs
+    spl_patients <- unlist(strsplit(x, ";", fixed = TRUE))
+    # Extract just the 4-digit patient ID
+    spl_patients_nosamp <- unlist(lapply(spl_patients, function(x) 
+      unlist(strsplit(x, "-", fixed = TRUE))[1]))
+    # Check if this patient is in the intersecting patients list and return TRUE if so, F o.w.
+    matching_patient_ind <- unlist(lapply(spl_patients_nosamp, function(y) {
+      if(y %fin% intersecting_patients) {
+        return(TRUE)
+      } else {return(FALSE)}
+    }))
+    # If there are overlapping patients in this row, then we want to keep this row
+    if(TRUE %in% matching_patient_ind) {
+      samps_to_keep <- spl_patients[matching_patient_ind]
+      
+      # Keep only cancer samples
+      if(!tumNormMatched) {
+        samp_ids <- unlist(lapply(samps_to_keep, function(x) unlist(strsplit(x, "-", fixed = TRUE))[2]))
+        samps_to_keep <- samps_to_keep[unlist(lapply(samp_ids, function(x) startsWith(x, "0")))]
+      }
+            
+      # Keep only non-duplicate samples
+      samps_to_keep <- samps_to_keep[!grepl(".1", samps_to_keep, fixed = TRUE)]
+      
+      # If we still have samples, return them in this row 
+      if(length(samps_to_keep) > 0) {
+        return(paste(samps_to_keep, collapse = ";"))
+      } else {return(NA)}
+    } else {return(NA)}
+  })
+  
+  # Remove NA
+  mutation_regprot_df_sub <- mutation_regprot_df[unlist(lapply(regprot_df_new_patient_labels, function(x) 
+    ifelse(is.na(x), FALSE, TRUE))),]
+  # Update the DF with the new intersecting patient labels
+  mutation_regprot_df_sub$Patient <- regprot_df_new_patient_labels[!is.na(regprot_df_new_patient_labels)]
+  mutation_regprot_df_sub$Patient <- unlist(lapply(mutation_regprot_df_sub$Patient, function(x) return(unlist(x))))
+  
+  return(mutation_regprot_df_sub)
 }
 
 

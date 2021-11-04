@@ -17,6 +17,7 @@
 # install.packages("gplots")
 # install.packages("pheatmap")
 # BiocManager::install("ComplexHeatmap")
+# BiocManager::install("pathview")
 library("gplots")
 library("pheatmap")
 library(ComplexHeatmap)
@@ -27,6 +28,9 @@ library(stringr)
 library(dplyr)
 library(VennDiagram)
 library("RColorBrewer")
+library("pathview")
+library("gage")
+library(dendextend)
 
 # Path to output files
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
@@ -55,7 +59,7 @@ all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Proje
 #' @param results_table a master DF produced from run_linear_model()
 visualize_beta_distrib <- function(results_table) {
   betas <- results_table$estimate
-  hist(betas, main = "Histogram of Beta Coefficient Values Across all Reg. Proteins",
+  hist(betas, main = "Histogram of Beta Coefficient Values",
        xlab = "Beta Coefficient Value", ylab = "Frequency")
 }
 
@@ -80,7 +84,7 @@ dev.off()
 visualize_pval_distrib <- function(results_table) {
   pvals <- results_table$p.value[!is.na(results_table$p.value) & 
                                    !is.infinite(results_table$p.value)]
-  hist(pvals, main = "Histogram of p-Values Across all Reg. Proteins",
+  hist(pvals, main = "Histogram of p-Values",
        xlab = "p-value", ylab = "Frequency", col = "blueviolet")
 }
 
@@ -220,19 +224,19 @@ create_heat_map <- function(results_table, outpath) {
   # NOTE: leave all the unfilled pairings as NA
   
   # Write to file
-  fwrite(matrix, paste(outpath, "Linear Model/Highly Deleted TFs/Non-Tumor-Normal Matched/tstatistic_matrix_delTFs_metabolicTargs_TMM_bucketCNA_iprot_iciTotFrac_uncorrected_MUT_RANDOMIZED.csv", sep = ""))
+  #fwrite(matrix, paste(outpath, "Linear Model/Highly Deleted TFs/Non-Tumor-Normal Matched/tstatistic_matrix_delTFs_metabolicTargs_TMM_bucketCNA_iprot_iciTotFrac_uncorrected_MUT_RANDOMIZED.csv", sep = ""))
   
   # Convert from data frame to matrix
   matrix <- data.matrix(matrix)
   print(head(matrix))
-  
+
   # Plot a default heatmap
   #col <- colorRampPalette(brewer.pal(10, "RdYlBu"))(256)
   #heatmap(matrix, scale = "none", col = col)
   
   # Plot an enhanced heatmap
   heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
-            density.info = "none") # clusters by default using hclust, but can specify others using param 'hclustfun'
+            density.info = "none", na.color = "gray", Rowv = FALSE, Colv = FALSE) # clusters by default using hclust, but can specify others using param 'hclustfun'
   
   # Plot a pretty heatmap
   # pheatmap(matrix, cutree_rows = 4) # options are available for changing clustering metric & method
@@ -246,6 +250,8 @@ create_heat_map <- function(results_table, outpath) {
   # e.g. "euclidean" or "pearson"),
   # clustering_method_rows, clustering_method_columns (the method for clustering, 
   # e.g. "complete" or "average")
+  
+  return(matrix)
 }
 
 # Call this function
@@ -260,6 +266,80 @@ fn <- paste(output_path, "ALL/Non-Tumor-Normal-Matched/CNA, eQTL/Heatmap (I-Prot
 png(fn, width = 550, height = 450)
 create_heat_map(master_df_cna_corrected, main_path)
 dev.off()
+
+
+# Additional playing with clustering
+matrix <- create_heat_map(master_df_mut_corrected, main_path)
+hm <- heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
+                density.info = "none")
+rownames(matrix)[hm$rowInd]
+row_clust <- hclust(dist(matrix, method = "euclidean"), method = 'ward.D2')
+plot(row_clust)
+h22_sort <- sort(cutree(row_clust, h = 22))
+plot(row_clust)
+abline(h = 22, col = "red2", lty = 2, lwd = 2)
+
+h22_sort_df <- as.data.frame(h22_sort)
+colnames(h22_sort_df)[1] <- "cluster"
+h22_sort_df$targ_gene <- rownames(h22_sort_df)
+
+dendrogram <- as.dendrogram(row_clust)
+cols_branches <- c("darkred", "forestgreen", "orange", "firebrick1", "yellow", 
+                   "deeppink1", "cyan2", "darkslategray", "chartreuse")
+# Set the colors of 9 branches
+dendrogram <- color_branches(dendrogram, k = 9, col = cols_branches)
+col_labels <- get_leaves_branches_col(dendrogram)
+#col_labels <- list("1" = "Serine glycine biosynthesis", "2" ="GABA-B receptor II signaling", 
+                  # "3" = "Fructose galactose metabolism/ Glycolysis", "4" = "N/A", 
+                  # "5" = "S-adenosylmethionine biosynthesis", "6" = "Sulfate assimilation", 
+                  # "7" = "Fructose galactose metabolism/ Androgen/etrogene/progesterone biosynthesis", 
+                  # "8" = "2-arachidonoylglycerol biosynthesis", "9" = "O-antigen biosynthesis")
+col_labels <- col_labels[order(order.dendrogram(dendrogram))]
+
+
+h22_sort_df$labels <- unlist(lapply(1:length(unique(h22_sort_df$cluster)), function(i) {
+  num_entries <- nrow(h22_sort_df[h22_sort_df$cluster == i,])
+  return(rep(col_labels[[i]], times = num_entries))
+}))
+h22_sort_df$colors <- unlist(lapply(1:length(unique(h22_sort_df$cluster)), function(i) {
+  num_entries <- nrow(h22_sort_df[h22_sort_df$cluster == i,])
+  return(rep(cols_branches[[i]], times = num_entries))
+}))
+
+
+heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none", density.info = "none",
+          Rowv = dendrogram, key.xlab = "T-statistic", RowSideColors = col_labels,
+          colRow = col_labels)
+
+
+############################################################
+############################################################
+#### VISUALIZE ON RELEVANT PATHWAYS
+############################################################
+############################################################
+#' Visualize our results on pathways using the Pathview package
+#' Link to vignette: https://pathview.r-forge.r-project.org/pathview.pdf
+#' 
+visualize_pathway <- function(master_df_corrected, pathway_id, label) {
+  gene_data <- master_df_corrected$estimate
+  names(gene_data) <- master_df_corrected$T_k.name
+  
+  # Run using pathview
+  pv.out <- pathview(gene.data = gene_data, pathway.id = pathway_id,
+                     species = "hsa", out.suffix = label, kegg.native = T,
+                     gene.idtype = "SYMBOL")
+}
+
+pathway_tp53 <- "04115"
+pathway_breastcancer <- "05224"
+pathway_cancerCarbonMetabolism <- "05230"
+pathway_cancerCholineMetabolism <- "05231"
+
+visualize_pathway(master_df_corrected, pathway_tp53, "cancerRelated_metabolicTargs")
+visualize_pathway(master_df_corrected, pathway_breastcancer, "cancerRelated_metabolicTargs")
+visualize_pathway(master_df_corrected, pathway_cancerCarbonMetabolism, "cancerRelated_metabolicTargs")
+visualize_pathway(master_df_corrected, pathway_cancerCholineMetabolism, "cancerRelated_metabolicTargs")
+
 
 
 ############################################################

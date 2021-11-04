@@ -43,6 +43,11 @@ parser$add_argument("--tumNormMatched", default = "FALSE", type = "character",
 # Cancer type we are looking like (or pan-cancer)
 parser$add_argument("--cancerType", default = "BRCA", type = "character",
                     help = "Type of cancer we're looking at, or pan-cancer. Default is BRCA.")
+parser$add_argument("--specificTypes", default = "ALL", type = "character",
+                    help = "If & only if the cancer type is pan-cancer, denotes which specific cancer types we're including (running per-cancer). If ALL, run pan-cancer.")
+parser$add_argument("--clinical_df", default = "clinical.csv", type = "character",
+                    help = "If & only if the cancer type is pan-cancer and specific types is not ALL, a clinical data frame name is given to link cancer types to patient IDs.")
+
 
 # Randomization
 parser$add_argument("--randomize", default = "FALSE", type = "character", 
@@ -101,7 +106,7 @@ parser$add_argument("--meth_type", default = "Beta", type = "character",
 
 # What type of test we are running, so we can write the results files to an appropriate directory. 
 # Only necessary if --test is F.
-parser$add_argument("--run_name", default = "cancer_related_genes", type = "character",
+parser$add_argument("--run_name", default = "cancerRelated", type = "character",
                     help = "Provide a name for the run, if not testing on just one regulatory protein, to write output files to appropriate directory. [default %(default)s]") 
 
 # A name for the group of targets being tested, for labeling the output file.
@@ -125,7 +130,6 @@ parser$add_argument("--regularization", default = "None", type = "character",
 # Add a flag for debugging
 parser$add_argument("--debug", default = "FALSE", type = "character",
                     help = "A TRUE/ FALSE value indicating whether or not we want detailed printing for debugging purposes. Default is FALSE.")
-
 
 # Add a flag for including only select covariates in the model, given as a character list with each item separated by a semicolon
 parser$add_argument("--select_args", default = "ALL", type = "character",
@@ -203,6 +207,7 @@ if(grepl("curated", args$targets_name)) {
 # Generalized ID conversion table from BiomaRt
 all_genes_id_conv <- fread("/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/all_genes_id_conv.csv", 
                            header = TRUE)
+
 
 ############################################################
 # IMPORT REGULATORY PROTEINS
@@ -503,8 +508,12 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
       
       if(length(intersect(targ_ensg, regprot_ensg)) == 0) {
         # Create a full input table to the linear model for this target
-        if(!is.na(methylation_df_meQTL)) {methylation_df_targ <- methylation_df_meQTL}
-        else {methylation_df_targ <- methylation_df}
+        print(methylation_df_meQTL)
+                if(!is.null(methylation_df_meQTL)) {
+          if(!is.na(methylation_df_meQTL)) {
+            methylation_df_targ <- methylation_df_meQTL
+          }
+        } else {methylation_df_targ <- methylation_df}
         
         lm_input_table <- fill_targ_inputs(starter_df = starter_df, targ_k = targ, 
                                            targ_k_ensg = targ_ensg, 
@@ -726,6 +735,7 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
     # Does this regulatory protein have a methylation marker in cancer, or differential 
     # methylation between tumor and normal?
     meth_stat <- get_meth_stat(methylation_df, sample, meth_bucketing, tumNormMatched)
+    print(meth_stat)
     if(meth_bucketing) {
       meth_stat <- as.integer(meth_stat[[1]])
       if(length(meth_stat) > 3) {meth_stat <- meth_stat[1:3]}
@@ -987,9 +997,26 @@ construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
 #### CREATE OUTPATH AND OUTFILE NAME 
 ############################################################
 # Create an appropriate file outpath
-outpath <- create_file_outpath(cancerType = args$cancerType, test = test, 
-                               tester_name = args$tester_name, run_name = args$run_name,
-                               tumNormMatched = tumNormMatched, QTLtype = args$QTLtype)
+if(args$cancerType == "PanCancer") {
+  if(!(args$specificTypes == "ALL")) {
+    cancer_types <- unlist(strsplit(args$specificTypes, ";", fixed = TRUE))
+    outpath <- lapply(cancer_types, function(ct) {
+      return(create_file_outpath(cancerType = args$cancerType, specificType = ct, test = test, 
+                                 tester_name = args$tester_name, run_name = args$run_name,
+                                 tumNormMatched = tumNormMatched, QTLtype = args$QTLtype))
+    })
+    names(outpath) <- cancer_types
+  } else {
+    outpath <- create_file_outpath(cancerType = args$cancerType, specificType = "", test = test, 
+                                   tester_name = args$tester_name, run_name = args$run_name,
+                                   tumNormMatched = tumNormMatched, QTLtype = args$QTLtype)
+  }
+} else {
+  outpath <- create_file_outpath(cancerType = args$cancerType, specificType = "", test = test, 
+                                 tester_name = args$tester_name, run_name = args$run_name,
+                                 tumNormMatched = tumNormMatched, QTLtype = args$QTLtype)
+}
+
 
 if(debug) {
   print(paste("Outpath:", outpath))
@@ -1010,6 +1037,39 @@ if(debug) {
 
 
 ############################################################
+# IF RUNNING PER-CANCER WITH SPECIFIC CANCER TYPES, GET 
+# THE PATIENTS OF THOSE CANCER TYPES 
+############################################################
+#' If we are running per-cancer on several individual cancer types, get a mapping
+#' between each cancer type and the IDs of the patients classified as that cancer type
+#' @param specificTypes a semicolon-separated string of the cancer types we are looking
+#' at in this run
+#' @param clinical_df a file name for a clinical data frame that can link patient IDs to
+#' their respective cancer types
+get_patient_cancer_mapping <- function(specificTypes, clinical_df) {
+    specific_types <- unlist(strsplit(specificTypes, ";", fixed = TRUE))
+    clinical_df <- as.data.frame(fread(paste(main_path, paste("clinical/", clinical_df, sep = ""), sep = ""), 
+                         header = TRUE))
+    patient_cancer_mapping <- lapply(specific_types, function(ct) {
+      pats <- clinical_df[grepl(ct, clinical_df$project_id),'case_submitter_id']
+      pats_ids <- unlist(lapply(pats, function(pat) unlist(strsplit(pat, "-", fixed = TRUE))[3]))
+      return(pats_ids)
+    })
+    names(patient_cancer_mapping) <- specific_types
+    return(patient_cancer_mapping)
+}
+
+# Call function, if applicable
+patient_cancer_mapping <- NA
+if(args$cancerType == "PanCancer") {
+  if(!(args$specificTypes == "ALL")) {
+    patient_cancer_mapping <- get_patient_cancer_mapping(specificTypes = args$specificTypes,
+                                                         clinical_df = args$clinical_df)
+    if(debug) {print(patient_cancer_mapping)}
+  }
+}
+
+############################################################
 #### CALL FUNCTION
 ############################################################
 # Run gc to free up any loose memory
@@ -1026,56 +1086,147 @@ tryCatch({
 })
 
 # Run the function itself
-master_df <- run_linear_model(protein_ids_df = protein_ids_df, 
-                              downstream_target_df = targets_DF, 
-                              patient_df = patient_df,
-                              mutation_df_targ =  mutation_targ_df,
-                              mutation_df_regprot = mutation_regprot_df, 
-                              methylation_df = methylation_df, 
-                              methylation_df_meQTL = methylation_df_meQTL,
-                              cna_df = cna_df,
-                              expression_df = expression_df, 
-                              is_rank_or_quant_norm = is_rank_or_quant_norm,
-                              analysis_type = args$QTLtype,
-                              tumNormMatched = tumNormMatched,
-                              randomize = randomize,
-                              cna_bucketing = args$cna_bucketing,
-                              meth_bucketing = meth_bucketing,
-                              num_PEER = args$num_PEER,
-                              num_pcs = args$num_pcs,
-                              debug = debug,
-                              collinearity_diagn = collinearity_diagn,
-                              outpath = outpath, outfn = outfn,
-                              regularization = args$regularization,
-                              covs_to_incl = covs_to_incl)
+if(is.na(patient_cancer_mapping)) {
+  master_df <- run_linear_model(protein_ids_df = protein_ids_df, 
+                                downstream_target_df = targets_DF, 
+                                patient_df = patient_df,
+                                mutation_df_targ =  mutation_targ_df,
+                                mutation_df_regprot = mutation_regprot_df, 
+                                methylation_df = methylation_df, 
+                                methylation_df_meQTL = methylation_df_meQTL,
+                                cna_df = cna_df,
+                                expression_df = expression_df, 
+                                is_rank_or_quant_norm = is_rank_or_quant_norm,
+                                analysis_type = args$QTLtype,
+                                tumNormMatched = tumNormMatched,
+                                randomize = randomize,
+                                cna_bucketing = args$cna_bucketing,
+                                meth_bucketing = meth_bucketing,
+                                num_PEER = args$num_PEER,
+                                num_pcs = args$num_pcs,
+                                debug = debug,
+                                collinearity_diagn = collinearity_diagn,
+                                outpath = outpath, outfn = outfn,
+                                regularization = args$regularization,
+                                covs_to_incl = covs_to_incl)
+} else {
+  # Handle the case of running multiple cancer types per-cancer
+  # Subset all the input files for each cancer type and run separately
+  master_df_list <- lapply(1:length(outpath), function(i) {
+    
+    # Get the patients for this cancer type
+    patient_ids <- unlist(patient_cancer_mapping[[i]])
+    
+    # Get the outpath for this cancer type
+    outpath_i <- outpath[[i]]
+    print(paste("outpath i:", outpath_i))
+    
+    # Subset files using patient_ids (using helper function)
+    patient_df_sub <- subset_by_intersecting_ids(patient_ids, patient_df, FALSE, tumNormMatched)
+    mutation_targ_df_sub <- subset_by_intersecting_ids(patient_ids, mutation_targ_df, TRUE, tumNormMatched)
+    mutation_regprot_df_sub <- subset_regprot_df_by_intersecting_ids(patient_ids, mutation_regprot_df, tumNormMatched)
+    methylation_df_sub <- subset_by_intersecting_ids(patient_ids, methylation_df, TRUE, tumNormMatched)
+    if(!is.na(methylation_df_meQTL)) {
+      methylation_df_meQTL_sub <- subset_by_intersecting_ids(patient_ids, methylation_df_meQTL, TRUE, tumNormMatched)
+    } else {methylation_df_meQTL_sub <- NA} 
+    cna_df_sub <- subset_by_intersecting_ids(patient_ids, cna_df, TRUE, tumNormMatched)
+    expression_df_sub <- subset_by_intersecting_ids(patient_ids, expression_df, TRUE, tumNormMatched)
+    
+    # Run the model with these subsetted files
+    master_df <- run_linear_model(protein_ids_df = protein_ids_df, 
+                                  downstream_target_df = targets_DF, 
+                                  patient_df = patient_df_sub,
+                                  mutation_df_targ =  mutation_targ_df_sub,
+                                  mutation_df_regprot = mutation_regprot_df_sub, 
+                                  methylation_df = methylation_df_sub, 
+                                  methylation_df_meQTL = methylation_df_meQTL_sub,
+                                  cna_df = cna_df_sub,
+                                  expression_df = expression_df_sub, 
+                                  is_rank_or_quant_norm = is_rank_or_quant_norm,
+                                  analysis_type = args$QTLtype,
+                                  tumNormMatched = tumNormMatched,
+                                  randomize = randomize,
+                                  cna_bucketing = args$cna_bucketing,
+                                  meth_bucketing = meth_bucketing,
+                                  num_PEER = args$num_PEER,
+                                  num_pcs = args$num_pcs,
+                                  debug = debug,
+                                  collinearity_diagn = collinearity_diagn,
+                                  outpath = outpath, outfn = outfn,
+                                  regularization = args$regularization,
+                                  covs_to_incl = covs_to_incl)
+    
+    return(master_df)
+  })
+}
+
 
 
 ############################################################
 #### INITIAL PROCESSING OF RAW FILE & WRITING
 ############################################################
-# Order the file by p-value
-print(head(master_df))
-master_df <- master_df[order(p.value),]
-
-# Write the results to the given file
-fwrite(master_df, paste(outpath, paste(outfn, ".csv", sep = ""), sep = "/"))
-
-# Limit the data frame to just the term of interest (typically either MutStat_i or CNAStat_i)
-master_df_mut <- master_df[master_df$term == "MutStat_i",]
-master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
-
-# Write these to files as well 
-fwrite(master_df_mut, paste(outpath, paste(outfn, "_MUT.csv", sep = ""), sep = "/")) 
-fwrite(master_df_cna, paste(outpath, paste(outfn, "_CNA.csv", sep = ""), sep = "/"))  
-
-# Combine the collinearity results and write to a file
-if(collinearity_diagn) {
-  collinearity_df <- combine_collinearity_diagnostics(outpath, outfn, debug, randomize)
-  # Adjust the output file name for collinearity results
-  collin_fn <- str_replace(outfn, "output_results", "collinearity_results")
-  if(debug) {print(paste("Collinearity Output FN:", collin_fn))}
-  fwrite(collinearity_df, paste(outpath, paste(collin_fn, ".csv", sep = ""), sep = "/"))
+#' Takes a master data frame produced from the main linear model function and 
+#' does some preliminary processing, including ordering by p-value, limiting to
+#' just MutStat_i and CNAStat_i terms of interest, and running collinearity 
+#' diagnostics if desired
+#' @param master_df a master data frame output result from main LM function
+#' @param outpath the outpath for the master DF to be written to
+#' @param outfn the generic output filename for the master DF
+#' @param collinearity_diagn a TRUE/FALSE value indicating whether we are running
+#' additional collinearity diagnostics
+#' @param debug a TRUE/FALSE value indicating whether or not we are in debug mode
+#' @param randomize a TRUE/FALSE value indicating whether or not this was a 
+#' randomized run
+process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn, 
+                                  debug, randomize) {
+  # Order the file by p-value
+  print(head(master_df))
+  master_df <- master_df[order(p.value),]
+  
+  # Write the results to the given file
+  fwrite(master_df, paste(outpath, paste(outfn, ".csv", sep = ""), sep = "/"))
+  
+  # Limit the data frame to just the term of interest (typically either MutStat_i or CNAStat_i)
+  master_df_mut <- master_df[master_df$term == "MutStat_i",]
+  master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
+  
+  # Write these to files as well 
+  fwrite(master_df_mut, paste(outpath, paste(outfn, "_MUT.csv", sep = ""), sep = "/")) 
+  fwrite(master_df_cna, paste(outpath, paste(outfn, "_CNA.csv", sep = ""), sep = "/"))  
+  
+  # Combine the collinearity results and write to a file
+  if(collinearity_diagn) {
+    collinearity_df <- combine_collinearity_diagnostics(outpath, outfn, debug, randomize)
+    # Adjust the output file name for collinearity results
+    collin_fn <- str_replace(outfn, "output_results", "collinearity_results")
+    if(debug) {print(paste("Collinearity Output FN:", collin_fn))}
+    fwrite(collinearity_df, paste(outpath, paste(collin_fn, ".csv", sep = ""), sep = "/"))
+  }
+  
+  return(master_df)
 }
 
-# Call the file to create output visualizations
-source(paste(source_path, "process_LM_output.R", sep = "")) 
+if(is.na(patient_cancer_mapping)) {
+  master_df <- process_raw_output_df(master_df = master_df, outpath = outpath, outfn = outfn, 
+                        collinearity_diagn = collinearity_diagn, debug = debug,
+                        randomize = randomize)
+  master_df_mut <- master_df[master_df$term == "MutStat_i",]
+  master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
+  
+  # Call the file to create output visualizations
+  source(paste(source_path, "process_LM_output.R", sep = "")) 
+                      
+} else {
+  for (master_df in master_df_list) {
+    master_df <- process_raw_output_df(master_df = master_df, outpath = outpath, outfn = outfn, 
+                          collinearity_diagn = collinearity_diagn, debug = debug,
+                          randomize = randomize)
+    master_df_mut <- master_df[master_df$term == "MutStat_i",]
+  	master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
+  	
+  	# Call the file to create output visualizations
+	source(paste(source_path, "process_LM_output.R", sep = "")) 
+  }
+}
+
+
