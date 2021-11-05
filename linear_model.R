@@ -40,7 +40,7 @@ parser$add_argument("--QTLtype", default = "eQTL", type = "character",
 parser$add_argument("--tumNormMatched", default = "FALSE", type = "character",
                     help = "TRUE/FALSE for whether or not we are looking at tumor-normal-matched data. Default is FALSE.")
 
-# Cancer type we are looking like (or pan-cancer), and patients we are looking at
+# Cancer type we are looking at (or pan-cancer), and patients we are looking at
 parser$add_argument("--cancerType", default = "BRCA", type = "character",
                     help = "Type of cancer we're looking at, or PanCancer. Default is BRCA.")
 parser$add_argument("--specificTypes", default = "ALL", type = "character",
@@ -122,13 +122,16 @@ parser$add_argument("--num_PEER", default = 0, type = "integer",
 parser$add_argument("--num_pcs", default = 2, type = "integer",
                     help = "A value between 0 and 2 indicating the number of principal components we are using as covariates in our model. Default is 2.")
 
-
 # Add a flag for running collinearity diagnostics; can be useful but adds to runtime.
 parser$add_argument("--collinearity_diagn", default = "FALSE", type = "character",
                     help = "A TRUE/ FALSE value indicating whether or not we want detailed collinearity diagnostics. Can be useful but adds to runtime; not suggested for large runs. Default is FALSE.")
 # Add a flag for adding a regularization method
 parser$add_argument("--regularization", default = "None", type = "character",
                     help = "The name of the regularization method being used. Currently only implemented for L2. Default is None.")
+# Add a flag for keeping only trans pairings
+parser$add_argument("--removeCis", default = "TRUE", type = "character",
+                    help = "A TRUE/ FALSE value to indicate whether or not we want to remove cis pairings and look only at trans pairings. Defaults to true, but can be set to false.")
+
 
 # Add a flag for debugging
 parser$add_argument("--debug", default = "FALSE", type = "character",
@@ -173,6 +176,7 @@ test <- str2bool(args$test)
 meth_bucketing <- str2bool(args$meth_bucketing)
 debug <- str2bool(args$debug)
 collinearity_diagn <- str2bool(args$collinearity_diagn)
+removeCis <- str2bool(args$removeCis)
 
 
 ############################################################
@@ -339,11 +343,14 @@ if(debug) {
 # Read if the patient IDs of interest, if provided
 patients_of_interest <- ""
 if(args$patientsOfInterest != "") {
-  patients_of_interest <- fread(paste(main_path, paste("patient/groups_of_interest/", 
+  patients_of_interest <- as.character(unlist(fread(paste(main_path, paste("patient/groups_of_interest/", 
                                                  args$patientsOfInterest, sep = ""), sep = ""), 
-                                header = FALSE)[,1]
+                                header = FALSE)[,1]))
 }
-
+if(debug) {
+  print("Patients of Interest")
+  print(head(patients_of_interest))
+}
 
 
 ############################################################
@@ -358,7 +365,6 @@ targets_DF <- targets_DF[!(targets_DF$swissprot == ""),]
 if(ncol(targets_DF) > 2) {
   targets_DF <- targets_DF[,2:3]
 }
-
 
 # Regardless of method, limit targets to only those that overlap the genes in the expression DF
 rows_to_keep <- unlist(lapply(1:length(targets_DF$ensg), function(i) {
@@ -468,12 +474,17 @@ if(debug) {
 #' only implemented for "L2" or "None"
 #' @param covs_to_incl a vector of covariates that we want to include, or ALL if we
 #' want to include all implemented covariates
+#' @param removeCis a TRUE/FALSE value indicating whether or not we are eliminating 
+#' all cis pairings
+#' @param all_genes_id_conv an ID conversion file from BioMart, for use in removing 
+#' cis pairings if needed
 run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df, 
                              mutation_df_targ, mutation_df_regprot, methylation_df, 
                              methylation_df_meQTL, cna_df, expression_df, is_rank_or_quant_norm,
                              analysis_type, tumNormMatched, randomize, cna_bucketing, 
                              meth_bucketing, num_PEER, num_pcs, debug, collinearity_diagn,
-                             outpath, outfn, regularization, covs_to_incl) {
+                             outpath, outfn, regularization, covs_to_incl, removeCis,
+                             all_genes_id_conv) {
   
   # We need to get a mini-table for every r_i, t_k combo that we rbind into a master table of results
   results_df_list <- lapply(1:protein_ids_df[, .N], function(i) {
@@ -499,9 +510,12 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
     if(debug) {
       print("Starter DF, with Regprot Inputs")
       print(head(starter_df))
-      
-      print(dim(downstream_target_df)) 
-      
+    }
+    
+    # If remove cis is TRUE, limit the downstream target DF to only trans pairings
+    if(removeCis) {
+      downstream_target_df <- subset_to_trans_targets(regprot_ensg, downstream_target_df,
+                                                      all_genes_id_conv)
     }
     
     # Loop through all the targets for this protein of interest and create a table 
@@ -520,9 +534,13 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
       
       if(length(intersect(targ_ensg, regprot_ensg)) == 0) {
         # Create a full input table to the linear model for this target
-        if(!is.na(methylation_df_meQTL)) {
-          methylation_df_targ <- methylation_df_meQTL
-        } else {methylation_df_targ <- methylation_df}
+        #print(methylation_df_meQTL)
+        methylation_df_targ <- methylation_df
+        if(!is.null(methylation_df_meQTL)) {
+          if(!is.na(methylation_df_meQTL)) {
+            methylation_df_targ <- methylation_df_meQTL
+          }
+        } 
         
         lm_input_table <- fill_targ_inputs(starter_df = starter_df, targ_k = targ, 
                                            targ_k_ensg = targ_ensg, 
@@ -1078,6 +1096,7 @@ if(args$cancerType == "PanCancer") {
   }
 }
 
+
 ############################################################
 #### CALL FUNCTION
 ############################################################
@@ -1133,7 +1152,9 @@ if(is.na(patient_cancer_mapping)) {
                                 collinearity_diagn = collinearity_diagn,
                                 outpath = outpath, outfn = outfn,
                                 regularization = args$regularization,
-                                covs_to_incl = covs_to_incl)
+                                covs_to_incl = covs_to_incl,
+                                removeCis = removeCis,
+                                all_genes_id_conv = all_genes_id_conv)
   
 # Case 2: If we're running on multiple cancer types separately
 } else if (!(is.na(patient_cancer_mapping))) {
@@ -1185,7 +1206,9 @@ if(is.na(patient_cancer_mapping)) {
                                   collinearity_diagn = collinearity_diagn,
                                   outpath = outpath, outfn = outfn,
                                   regularization = args$regularization,
-                                  covs_to_incl = covs_to_incl)
+                                  covs_to_incl = covs_to_incl,
+                                  removeCis = removeCis,
+                                  all_genes_id_conv = all_genes_id_conv)
     
     return(master_df)
   })
@@ -1216,7 +1239,8 @@ process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn,
                                   debug, randomize) {
   # Order the file by p-value
   print(head(master_df))
-  master_df <- master_df[order(p.value),]
+  #master_df <- master_df[order(p.value),]
+  master_df <- setorder(master_df, p.value)
   
   # Write the results to the given file
   fwrite(master_df, paste(outpath, paste(outfn, ".csv", sep = ""), sep = "/"))
