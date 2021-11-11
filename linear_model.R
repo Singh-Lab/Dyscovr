@@ -307,6 +307,8 @@ if(debug) {
 mutation_regprot_df <- fread(paste(main_path, paste("regprot_mutation/", args$mutation_regprot_df, sep = ""), sep = ""),
                              header = TRUE)
 mutation_regprot_df <- mutation_regprot_df[,5:ncol(mutation_regprot_df)]   # remove first few meaningless columns, if necessary
+mutation_regprot_df <- mutation_regprot_df[!duplicated(mutation_regprot_df),] # remove any duplicate rows
+
 
 if(debug) {
   print("Mutation Regprot DF")
@@ -567,9 +569,9 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
         if(debug) {
           print("LM Input Table")
           print(head(lm_input_table))
-          new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "lm_input_table", 
-                                                                              sep = "_"), sep = "_"))
-          fwrite(lm_input_table, paste(outpath, paste(new_fn, ".csv", sep = ""), sep = "/"))
+          #new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "lm_input_table", 
+                                                                              #sep = "_"), sep = "_"))
+          #fwrite(lm_input_table, paste(outpath, paste(new_fn, ".csv", sep = ""), sep = "/"))
         }
         
         # Randomize expression across cancer and normal, across all samples
@@ -638,10 +640,10 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
         if(debug) {
           print("Summary Table")
           print(head(summary_table))
-          new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "summary_table", 
-                                                                              sep = "_"), sep = "_"))
-          new_fn <- paste(new_fn, ".csv", sep = "")
-          fwrite(summary_table, paste(outpath, new_fn, sep = "/"))
+          #new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "summary_table", 
+                                                                              #sep = "_"), sep = "_"))
+          #new_fn <- paste(new_fn, ".csv", sep = "")
+          #fwrite(summary_table, paste(outpath, new_fn, sep = "/"))
         }
         
         # Run collinearity diagnostics 
@@ -717,7 +719,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
 #' @param methylation_df the methylation DF
 #' @param cna_df the copy number alteration DF
 #' @param cna_bucketing a string indicating if/how we are bucketing CNA values. Possible
-#' values are "bucketInclAmp", "bucketExclAmp", and "rawCNA"
+#' values are "bucket_inclAmp", "bucket_exclAmp", and "rawCNA"
 #' @param meth_bucketing a TRUE/FALSE value indicating whether or not we are bucketing
 #' methylation values
 #' @param tumNormMatched a TRUE/FALSE value indicating whether or not the analysis is 
@@ -1056,7 +1058,8 @@ outfn <- create_output_filename(test = test, tester_name = args$tester_name, run
                                 meth_bucketing = meth_bucketing, meth_type = args$meth_type, 
                                 patient_df_name = args$patient_df, num_PEER = args$num_PEER, 
                                 num_pcs = args$num_pcs, randomize = randomize, covs_to_incl_label = args$select_args_label,
-                                patients_to_incl_label = args$patientsOfInterestLabel)
+                                patients_to_incl_label = args$patientsOfInterestLabel, removeCis = removeCis)
+
 
 if(debug) {
   print(paste("Outfile Name:", outfn))
@@ -1101,7 +1104,6 @@ if(args$cancerType == "PanCancer") {
 #### CALL FUNCTION
 ############################################################
 # Run gc to free up any loose memory
-rm(all_genes_id_conv)
 gc()
 
 # Convert covariates to include from a semicolon-separated character to a vector
@@ -1112,6 +1114,7 @@ tryCatch({
   print("Invalid input covariate list. Make sure covariates are semi-colon separated. Running with all covariates.")
   covs_to_incl <- c("ALL")
 })
+
 
 # Run the function itself
 
@@ -1239,8 +1242,8 @@ process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn,
                                   debug, randomize) {
   # Order the file by p-value
   print(head(master_df))
-  #master_df <- master_df[order(p.value),]
-  master_df <- setorder(master_df, p.value)
+  master_df <- master_df[order(p.value)]
+  #master_df <- setorder(master_df, p.value)
   
   # Write the results to the given file
   fwrite(master_df, paste(outpath, paste(outfn, ".csv", sep = ""), sep = "/"))

@@ -141,7 +141,7 @@ get_meth_stat <- function(methylation_df, sample, meth_bucketing, tumNormMatched
     if (length(meth_stat) > 1) {meth_stat <- meth_stat[1]}
     if (is.nan(meth_stat)) {meth_stat <- NA}
   }
-  return(meth_stat)
+  return(as.numeric(meth_stat))
 }
 
 ############################################################
@@ -338,10 +338,12 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
 #' @param covs_to_incl_label a label indicating what covariates we've included in this run
 #' @param patients_to_incl_label a label indicating the subpopulation we are restricting 
 #' to, if any
+#' @param removeCis a TRUE/ FALSE value indicating whether or not we have removed
+#' cis gene pairings 
 create_output_filename <- function(test, tester_name, run_name, targets_name, expression_df_name,
                                    cna_bucketing, mutation_regprot_df_name, meth_bucketing,
                                    meth_type, patient_df_name, num_PEER, num_pcs, randomize,
-                                   covs_to_incl_label, patients_to_incl_label) {
+                                   covs_to_incl_label, patients_to_incl_label, removeCis) {
   outfn <- "output_results"
   
   # Add the name of the patient population of interest, if there is one
@@ -360,8 +362,8 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   # Add the decisions for expression normalization, CNA bucketing, mutation restriction, 
   # methylation bucketing, and immune cell deconvolution bucketing 
   expr_norm <- unlist(strsplit(expression_df_name, "_", fixed = TRUE))[2]
-  cna_bucketing <- "rawCNA"
-  if (cna_bucketing != "rawCNA") {cna_bucketing <- paste("CNA", cna_bucketing, sep = "")}
+  cna_bucketing_lab <- "rawCNA"
+  if (cna_bucketing != "rawCNA") {cna_bucketing_lab <- paste("CNA", cna_bucketing, sep = "")}
   mutation_restr <- unlist(strsplit(mutation_regprot_df_name, "_", fixed = TRUE))[1]
   meth_b_lab <- "Raw"
   if(meth_bucketing) {
@@ -373,12 +375,15 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
   if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
   
-  outfn <- paste(outfn, paste(mutation_restr, paste(expr_norm, paste(cna_bucketing, paste(meth_label, ici_label, sep = "_"), 
+  outfn <- paste(outfn, paste(mutation_restr, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
                                                                      sep = "_"), sep = "_"), sep = "_"), sep = "_")
   
   # Add PEER factors/ PCs if needed
   if(!(num_PEER == 0)) {outfn <- paste(outfn, paste(num_PEER, "PEER", sep = ""), sep = "_")}
   if(!(num_pcs == 0))  {outfn <- paste(outfn, paste(num_pcs, "PCs", sep = ""), sep = "_")}
+  
+  # If we are removing cis comparisons, add a label to denote this
+  if(removeCis) {outfn <- paste(outfn, "rmCis", sep = "_")}
   
   # If we've restricted the number of covariates, add that label
   if(!(covs_to_incl_label == "")) {outfn <- paste(outfn, covs_to_incl_label, sep = "_")}
@@ -539,20 +544,21 @@ combine_collinearity_diagnostics <- function(path, outfn, debug, randomize) {
 subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
   df <- as.data.frame(df)
   
+  column_names_to_keep <- c("ensg_id", "Swissprot", "swissprot", "gene_name", "ensg_ids")
+  
   if(colNames == TRUE) {
     # Keep only intersecting patients
-    label_col_indices <- which((colnames(df) == "ensg_id") | (colnames(df) == "Swissprot") | 
-                                 (colnames(df) == "gene_name"))
+    label_col_indices <- which(colnames(df) %fin% column_names_to_keep)
     just_patients <- unlist(lapply(colnames(df), function(x) 
       unlist(strsplit(x, "-", fixed = TRUE))[1]))
     df_adj <- df[, c(label_col_indices, which(just_patients %fin% patients))]
-    print(head(df_adj))
+    #print(head(df_adj))
     
     # Keep only cancer samples
     if(!tumNormMatched) {
-      df_adj_label_col_indices <- which((colnames(df_adj) == "ensg_id") | (colnames(df_adj) == "Swissprot") | 
-                                          (colnames(df_adj) == "gene_name"))
-      df_adj <- df_adj[, c(df_adj_label_col_indices, which(grepl("-0", colnames(df_adj), fixed = TRUE)))]
+      df_adj_label_col_indices <- which(colnames(df_adj) %fin% column_names_to_keep)
+      df_adj <- df_adj[, c(df_adj_label_col_indices, which(grepl("-0", colnames(df_adj), 
+                                                                 fixed = TRUE)))]
     }
     
     # Remove any duplicate samples
@@ -560,8 +566,8 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
     
   } else {
     if(length(unlist(strsplit(df$sample_id[1], "-", fixed = TRUE))) == 4) {
-      df$sample_id <- unlist(lapply(df$sample_id, function(x) paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], 
-                                                                    collapse = "-")))
+      df$sample_id <- unlist(lapply(df$sample_id, function(x) 
+        paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
     }
     # Keep only intersecting patients
     just_patients <- unlist(lapply(df$sample_id, function(x) 
@@ -590,7 +596,7 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
 #' @param mutation_regprot_df the data frame to subset using the patient ids
 #' @param tumNormMatched a TRUE/FALSE value indicating whether we are looking at 
 #' tumor-normal matched samples (if FALSE, restrict to only cancer samples)
-subset_regprot_df_by_ids <- function(patients, mutation_regprot_df, tumNormMatched) {
+subset_regprot_df_by_intersecting_ids <- function(patients, mutation_regprot_df, tumNormMatched) {
   
   # Adjust each row to remove patients not in the intersecting patients vector
   regprot_df_new_patient_labels <- lapply(mutation_regprot_df$Patient, function(x) {
@@ -635,6 +641,81 @@ subset_regprot_df_by_ids <- function(patients, mutation_regprot_df, tumNormMatch
   return(mutation_regprot_df_sub)
 }
 
+
+############################################################
+#' Subset the given targets to only genes that are trans to the current regulatory 
+#' protein (found more than X (10E6 default) BP away on the same chromosome or on another 
+#' chromosome entirely.
+#' @param regprot the regulatory protein in question, ENSG ID
+#' @param target_df the full data table of targets we want to subset
+#' @param all_genes_id_conv a conversion file from BioMart with information about
+#' chromosome number and position
+#' @param X the number of bases within which we will consider a gene 'cis'
+subset_to_trans_targets <- function(regprot, target_df, all_genes_id_conv, X = 10E6) {
+  
+  # Get the chromosome, starting position, and ending position (in BP) for the 
+  # regulatory protein
+  chr_regprot <- NA
+  start_position_regprot <- NA
+  end_position_regprot <- NA
+  
+  for (r in regprot) {
+    chr_regprot <- c(chr_regprot, as.numeric(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == r,
+                                                               'chromosome_name'])))
+    start_position_regprot <- c(start_position_regprot, 
+                                as.numeric(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == r, 
+                                                             'start_position'])))
+    end_position_regprot <- c(end_position_regprot, 
+                              as.numeric(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == r, 
+                                                           'end_position'])))
+  }
+  
+  chr_regprot <- unique(chr_regprot[!is.na(chr_regprot)])
+  start_position_regprot <- unique(start_position_regprot[!is.na(start_position_regprot)])
+  end_position_regprot <- unique(end_position_regprot[!is.na(end_position_regprot)])
+  
+  print(paste("Chr_regprot", chr_regprot))
+  print(paste("Start_pos_regprot", start_position_regprot))
+  print(paste("End_pos_regprot", end_position_regprot))
+  
+  # For each target, check if it is trans or not
+  trans_target_df_rows <- lapply(1:target_df[, .N], function(i) {
+    
+    # Get the target
+    t <- unlist(strsplit(target_df$ensg[i], ";", fixed = TRUE))
+    
+    # Get it's chromosome
+    if (length(t) > 1) {t <- t[1]}
+    chr_targ <- unique(as.numeric(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == t, 
+                                                    'chromosome_name'])))
+    
+    # If not the same chromosome, return it
+    if(is.na(chr_targ)) {return(target_df[i,])}              # NAs are induced by coersion for X & Y chrom.
+    if (chr_targ != chr_regprot) {return(target_df[i,])}
+    
+    # If on the same chromosome, check the distance apart
+    else {
+      start_position_targ <- unique(as.numeric(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == t, 
+                                                                 'start_position'])))
+      end_position_targ <- unique(as.numeric(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == t, 
+                                                               'end_position'])))
+      
+      print(paste("Chr_targ", chr_targ))
+      print(paste("Start_pos_targ", start_position_targ))
+      print(paste("End_pos_targ", end_position_targ))
+      
+      distance_min <- min(abs(start_position_targ - end_position_regprot),
+                          abs(start_position_regprot - end_position_targ),
+                          abs(start_position_targ - start_position_regprot),
+                          abs(end_position_regprot - end_position_targ))
+      if (distance_min > X) {return(target_df[i,])}
+    }
+  })
+ 
+  trans_target_df <- do.call(rbind, trans_target_df_rows)
+  
+  return(trans_target_df)
+}
 
 
 ############################################################
