@@ -52,7 +52,7 @@ print(paste("Output Visualization Path:", output_vis_path))
 all_genes_id_conv <- read.csv("/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/all_genes_id_conv.csv", header = TRUE)
 
 # Adjust the outfn for visualizations
-outfn_vis <- paste(unlist(strsplit(outfn, "_", fixed = TRUE))[4:length(unlist(strsplit(outfn, "_", fixed = TRUE)))], 
+outfn_vis <- paste(unlist(strsplit(outfn, "_", fixed = TRUE))[3:length(unlist(strsplit(outfn, "_", fixed = TRUE)))], 
                collapse = "_")
 print(paste("OUTFN VIS:", outfn_vis))
 

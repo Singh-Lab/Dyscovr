@@ -60,15 +60,35 @@ filter_meth_by_ensg <- function(methylation_df, ensg_ids) {
 #' @param cna_df a CNA data frame of interest
 #' @param sample the sample ID of the current sample
 #' @param cna_bucketing a string indicating if/how we are bucketing CNA values. 
-#' Possible values are "bucketInclAmp", "bucketExclAmp", and "rawCNA"
+#' Possible values are "bucket_inclAmp", "bucket_exclAmp", "bucket_justAmp",
+#' "bucket_justDel", and "rawCNA"
 get_cna_stat <- function(cna_df, sample, cna_bucketing) {
   
+  # Log2(CNA Stat + 1)
   if(cna_bucketing == "rawCNA") {
     cna_stat <- unique(as.integer(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE])))
     if (length(cna_stat) > 1) {cna_stat <- cna_stat[1]}
     cna_stat <- log2(cna_stat + 1)
     if(length(cna_stat) < 1) {cna_stat <- NA}
     if (is.nan(cna_stat)) {cna_stat <- NA}
+  
+  # 1 if amplified ("justAmp") or deleted ("justDel"), 0 if 2 copies
+  } else if ((cna_bucketing == "bucket_justAmp") | (cna_bucketing == "bucket_justDel")) {
+    cna_stat <- unique(as.integer(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE])))
+    if (length(cna_stat) > 1) {cna_stat <- cna_stat[1]}
+    else if(length(cna_stat) < 1) {cna_stat <- NA}
+    else if (is.nan(cna_stat) | is.na(cna_stat)) {cna_stat <- NA}
+    else {
+      if (cna_bucketing == "bucket_justAmp") {
+        if(cna_stat > 2) {cna_stat <- 1}
+        else {cna_stat <- 0}
+      } else {
+        if(cna_stat < 2) {cna_stat <- 1}
+        else {cna_stat <- 0}
+      }
+    }
+  
+  # 3 buckets for deleted, normal, and amplified
   } else {
     str_buckets <- as.character(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE]))
     if(!(length(str_buckets) == 0)) {
@@ -76,6 +96,7 @@ get_cna_stat <- function(cna_df, sample, cna_bucketing) {
       cna_stat <- list(as.integer(unlist(strsplit(buckets_list, ",", fixed = TRUE))))
     } else {cna_stat <- list(NA, NA, NA)}
   }  
+  
   return(cna_stat)
 }
 
@@ -122,7 +143,7 @@ get_meth_stat <- function(methylation_df, sample, meth_bucketing, tumNormMatched
         if(length(unique(str_buckets)) == 1) {str_buckets <- unique(str_buckets)}
         else {str_buckets <- str_buckets[1]}
       }
-      print(str_buckets)
+      #print(str_buckets)
       if(!(length(str_buckets) == 0)) {
         buckets_list <- unlist(strsplit(unlist(strsplit(str_buckets, "(", fixed = TRUE))[2], ")", fixed = TRUE))[1]
         meth_stat <- list(as.integer(unlist(strsplit(buckets_list, ",", fixed = TRUE))))
@@ -136,7 +157,7 @@ get_meth_stat <- function(methylation_df, sample, meth_bucketing, tumNormMatched
     }
   } else {
     meth_stat <- get_tnm_methylation(methylation_df, sample, meth_bucketing)
-    print(meth_stat)
+    #print(meth_stat)
     if(length(meth_stat) < 1) {meth_stat <- NA}
     if (length(meth_stat) > 1) {meth_stat <- meth_stat[1]}
     if (is.nan(meth_stat)) {meth_stat <- NA}
@@ -266,7 +287,7 @@ get_tnm_fc <- function(df, sample) {
     
   } else {print(paste("Unhandled case:", sample))}
   
-  print(paste("Fold change:", fc))
+  #print(paste("Fold change:", fc))
   
   # Take the log of the fold change, with a pseudocount
   logfc <- log2(fc + 1)
@@ -552,13 +573,13 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
     just_patients <- unlist(lapply(colnames(df), function(x) 
       unlist(strsplit(x, "-", fixed = TRUE))[1]))
     df_adj <- df[, c(label_col_indices, which(just_patients %fin% patients))]
-    #print(head(df_adj))
-    
+
     # Keep only cancer samples
     if(!tumNormMatched) {
       df_adj_label_col_indices <- which(colnames(df_adj) %fin% column_names_to_keep)
       df_adj <- df_adj[, c(df_adj_label_col_indices, which(grepl("-0", colnames(df_adj), 
                                                                  fixed = TRUE)))]
+      #print(head(df_adj))
     }
     
     # Remove any duplicate samples
@@ -573,7 +594,7 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
     just_patients <- unlist(lapply(df$sample_id, function(x) 
       unlist(strsplit(x, "-", fixed = TRUE))[1]))
     df_adj <- df[which(just_patients %fin% patients),]
-    print(head(df_adj))
+    #print(head(df_adj))
     
     # Keep only cancer samples
     if(!tumNormMatched) {
@@ -651,7 +672,8 @@ subset_regprot_df_by_intersecting_ids <- function(patients, mutation_regprot_df,
 #' @param all_genes_id_conv a conversion file from BioMart with information about
 #' chromosome number and position
 #' @param X the number of bases within which we will consider a gene 'cis'
-subset_to_trans_targets <- function(regprot, target_df, all_genes_id_conv, X = 10E6) {
+#' @param debug a TRUE/FALSE value indicating whether or not we are in debug mode
+subset_to_trans_targets <- function(regprot, target_df, all_genes_id_conv, debug, X = 10E6) {
   
   # Get the chromosome, starting position, and ending position (in BP) for the 
   # regulatory protein
@@ -674,10 +696,12 @@ subset_to_trans_targets <- function(regprot, target_df, all_genes_id_conv, X = 1
   start_position_regprot <- unique(start_position_regprot[!is.na(start_position_regprot)])
   end_position_regprot <- unique(end_position_regprot[!is.na(end_position_regprot)])
   
-  print(paste("Chr_regprot", chr_regprot))
-  print(paste("Start_pos_regprot", start_position_regprot))
-  print(paste("End_pos_regprot", end_position_regprot))
-  
+  if(debug) {
+    print(paste("Chr_regprot", chr_regprot))
+    print(paste("Start_pos_regprot", start_position_regprot))
+    print(paste("End_pos_regprot", end_position_regprot))
+  }
+
   # For each target, check if it is trans or not
   trans_target_df_rows <- lapply(1:target_df[, .N], function(i) {
     
@@ -690,8 +714,10 @@ subset_to_trans_targets <- function(regprot, target_df, all_genes_id_conv, X = 1
                                                     'chromosome_name'])))
     
     # If not the same chromosome, return it
+    if((length(chr_regprot) == 0) | (length(chr_targ) == 0)) {return(target_df[i,])}
     if(is.na(chr_targ)) {return(target_df[i,])}              # NAs are induced by coersion for X & Y chrom.
-    if (chr_targ != chr_regprot) {return(target_df[i,])}
+    if(chr_regprot == "") {return(target_df[i,])}
+    if (!(chr_targ == chr_regprot)) {return(target_df[i,])}
     
     # If on the same chromosome, check the distance apart
     else {
@@ -700,9 +726,11 @@ subset_to_trans_targets <- function(regprot, target_df, all_genes_id_conv, X = 1
       end_position_targ <- unique(as.numeric(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == t, 
                                                                'end_position'])))
       
-      print(paste("Chr_targ", chr_targ))
-      print(paste("Start_pos_targ", start_position_targ))
-      print(paste("End_pos_targ", end_position_targ))
+      if(debug) {
+        print(paste("Chr_targ", chr_targ))
+        print(paste("Start_pos_targ", start_position_targ))
+        print(paste("End_pos_targ", end_position_targ))
+      }
       
       distance_min <- min(abs(start_position_targ - end_position_regprot),
                           abs(start_position_regprot - end_position_targ),
@@ -754,8 +782,8 @@ filter_expression_df_outliers <- function(expression_df, starter_df, ensg) {
       expression_nonmut[[patient]] <- as.numeric(expression_df_upd_labels[,i])
     }
   }
-  print(expression_mut)
-  print(expression_nonmut)
+  #print(expression_mut)
+  #print(expression_nonmut)
   
   # Get the IQR, Q3, and expression thresholds for each group
   iqr_mut <- IQR(unlist(expression_mut), na.rm = TRUE)
@@ -763,9 +791,9 @@ filter_expression_df_outliers <- function(expression_df, starter_df, ensg) {
   q3_mut <- as.numeric(quantile(unlist(expression_mut), na.rm = TRUE)[4])
   q3_nonmut <- as.numeric(quantile(unlist(expression_nonmut), na.rm = TRUE)[4])
   threshold_mut <- as.numeric(q3_mut + (1.5 * iqr_mut))
-  print(paste("threshold mut:", threshold_mut))
+  #print(paste("threshold mut:", threshold_mut))
   threshold_nonmut <- as.numeric(q3_nonmut + (1.5 * iqr_nonmut))
-  print(paste("threshold nonmut:", threshold_nonmut))
+  #print(paste("threshold nonmut:", threshold_nonmut))
   # TODO: IF THERE ARE MULTIPLE ROWS, SHOULD I TAKE THE IQR SEPARATELY FOR EACH? 
   
   # Get patients that do not exceed threshold 
@@ -788,9 +816,9 @@ filter_expression_df_outliers <- function(expression_df, starter_df, ensg) {
   starter_df_filt <- starter_df[rownames(starter_df) %fin% patients_to_keep,]
   
   # Return the filtered starter DF
-  print(starter_df_filt)
-  print(paste("Nrow original starter", nrow(starter_df)))
-  print(paste("Nrow filtered starter", nrow(starter_df_filt)))
+  #print(starter_df_filt)
+  #print(paste("Nrow original starter", nrow(starter_df)))
+  #print(paste("Nrow filtered starter", nrow(starter_df_filt)))
   return(starter_df_filt)
 }
 

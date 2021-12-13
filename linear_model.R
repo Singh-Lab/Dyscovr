@@ -92,14 +92,13 @@ parser$add_argument("--cna_df", default = "CNA_AllGenes_CancerOnly_IntersectPati
 parser$add_argument("--patient_df", default = "combined_patient_sample_cibersort_total_frac_tmm_IntersectPatients.csv", 
                     type = "character",
                     help = "The name of the patient sample data frame input. [default %(default)s]")
-parser$add_argument("--target_df", default = "allgene_targets.csv", 
-                    type = "character",
+parser$add_argument("--target_df", default = "allgene_targets.csv", type = "character",
                     help = "The name of the ChIP-eat or curated targets data frame. [default %(default)s]")
 
 # The decision for if/ how to bucket CNAs and methylation
 parser$add_argument("--cna_bucketing", default = "bucket_inclAmp", 
                     type = "character",
-                    help = "If/ the type of bucketing we use for CNA values. Default is bucket_inclAmp, but rawCNA and bucket_exclAmp are also options.")
+                    help = "If/ the type of bucketing we use for CNA values. Default is bucket_inclAmp, but rawCNA, bucket_exclAmp, bucket_justAmp, and bucket_justDel are also options.")
 parser$add_argument("--meth_bucketing", default = TRUE, type = "character",
                     help = "If/ the type of bucketing we use for methylation values. Default is FALSE.")
 
@@ -241,7 +240,9 @@ if(!test) {
 expression_df <- fread(paste(main_path, paste("expression/", args$expression_df, sep = ""), sep = ""),
                        header = TRUE)
 
-expression_df <- expression_df[,2:ncol(expression_df)]
+if((colnames(expression_df)[1] == "") & (colnames(expression_df)[2] == "")) {
+  expression_df <- expression_df[,2:ncol(expression_df)]
+}
 if(!("ensg_id" %fin% colnames(expression_df))) {
   colnames(expression_df)[1] <- "ensg_id"
 }
@@ -308,7 +309,6 @@ mutation_regprot_df <- fread(paste(main_path, paste("regprot_mutation/", args$mu
                              header = TRUE)
 mutation_regprot_df <- mutation_regprot_df[,5:ncol(mutation_regprot_df)]   # remove first few meaningless columns, if necessary
 mutation_regprot_df <- mutation_regprot_df[!duplicated(mutation_regprot_df),] # remove any duplicate rows
-
 
 if(debug) {
   print("Mutation Regprot DF")
@@ -456,8 +456,9 @@ if(debug) {
 #' tumor-normal matched
 #' @param randomize a TRUE/FALSE value indicating whether or not we are randomizing 
 #' expression
-#' @param cna_bucketing a string indicating if/how we are bucketing CNA values. Possible
-#' values are "bucketInclAmp", "bucketExclAmp", and "rawCNA"
+#' @param cna_bucketing a string indicating if/how we are bucketing CNA values. 
+#' Possible values are "bucket_inclAmp", "bucket_exclAmp", "bucket_justAmp", 
+#' "bucket_justDel" and "rawCNA"
 #' @param meth_bucketing a TRUE/FALSE value indicating whether or not we are bucketing
 #' methylation values
 #' @param num_PEER a value from 0-10 indicating the number of PEER factors we 
@@ -517,7 +518,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
     # If remove cis is TRUE, limit the downstream target DF to only trans pairings
     if(removeCis) {
       downstream_target_df <- subset_to_trans_targets(regprot_ensg, downstream_target_df,
-                                                      all_genes_id_conv)
+                                                      all_genes_id_conv, debug)
     }
     
     # Loop through all the targets for this protein of interest and create a table 
@@ -759,7 +760,7 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
     
     # Does this regulatory protein have a CNA in cancer?
     cna_stat <- get_cna_stat(cna_df, sample, cna_bucketing)
-    if(cna_bucketing != "rawCNA") {cna_stat <- as.integer(cna_stat[[1]])}    
+    if(grepl("incl", cna_bucketing)) {cna_stat <- as.integer(cna_stat[[1]])}    
     
     # Does this regulatory protein have a methylation marker in cancer, or differential 
     # methylation between tumor and normal?
@@ -776,14 +777,14 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
     }
     
     if(!meth_bucketing) {
-      if (cna_bucketing == "rawCNA") {
+      if ((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing))) {
         return(data.table("MutStat_i" = mut_stat, "CNAStat_i" = cna_stat, "MethStat_i" = meth_stat))
       } else {
         return(data.table("MutStat_i" = mut_stat, "CNAStat_i_b1" = cna_stat[1], "CNAStat_i_b2" = cna_stat[2],
                           "CNAStat_i_b3" = cna_stat[3], "MethStat_i" = meth_stat))
       }
     } else {
-      if (cna_bucketing == "rawCNA") {
+      if ((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing))) {
         return(data.table("MutStat_i" = mut_stat, "CNAStat_i" = cna_stat, "MethStat_i_b1" = meth_stat[1],
                           "MethStat_i_b2" = meth_stat[2], "MethStat_i_b3" = meth_stat[3]))
       } else {
@@ -870,7 +871,7 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
         
         # Is this target amplified or deleted?
         cna_stat <- get_cna_stat(cna_df, sample, cna_bucketing)
-        if(cna_bucketing != "rawCNA") {cna_stat <- cna_stat[[1]]}    
+        if(grepl("incl", cna_bucketing)) {cna_stat <- cna_stat[[1]]}    
         
         # Is this target methylated, or differentially methylated?
         if(analysis_type == "meQTL") {meth_bucketing <- FALSE}
@@ -891,7 +892,7 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
         
         # Make row for this patient and return
         if(!meth_bucketing) {
-          if (cna_bucketing == "rawCNA") {
+          if ((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing))) {
             return(data.table("ExpStat_k" = exp_stat, "MutStat_k" = mut_stat, "CNAStat_k" = cna_stat, 
                               "MethStat_k" = meth_stat))
           } else {
@@ -899,7 +900,7 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
                               "CNAStat_k_b2" = cna_stat[2], "CNAStat_k_b3" = cna_stat[3], "MethStat_k" = meth_stat))
           }
         } else {
-          if (cna_bucketing == "rawCNA") {
+          if ((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing))) {
             return(data.table("ExpStat_k" = exp_stat, "MutStat_k" = mut_stat, "CNAStat_k" = cna_stat, 
                               "MethStat_k_b1" = meth_stat[1], "MethStat_k_b2" = meth_stat[2], "MethStat_k_b3" = meth_stat[3]))
           } else {
@@ -978,7 +979,9 @@ construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
     bucketed_vars <- c(bucketed_vars, "MethStat_k")
     if(analysis_type == "eQTL") {bucketed_vars <- c(bucketed_vars, "MethStat_i")}
   }
-  if(!(cna_bucketing == "rawCNA")) {bucketed_vars <- c(bucketed_vars, c("CNAStat_k", "CNAStat_i"))}
+  if(!((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing)))) {
+    bucketed_vars <- c(bucketed_vars, c("CNAStat_k", "CNAStat_i"))
+  }
   
   vals_to_remove <- unlist(lapply(bucketed_vars, function(var) {
     # Get the last bucket for this variable
@@ -1060,7 +1063,6 @@ outfn <- create_output_filename(test = test, tester_name = args$tester_name, run
                                 num_pcs = args$num_pcs, randomize = randomize, covs_to_incl_label = args$select_args_label,
                                 patients_to_incl_label = args$patientsOfInterestLabel, removeCis = removeCis)
 
-
 if(debug) {
   print(paste("Outfile Name:", outfn))
 }
@@ -1082,7 +1084,8 @@ get_patient_cancer_mapping <- function(specificTypes, clinical_df) {
                          header = TRUE)
     patient_cancer_mapping <- lapply(specific_types, function(ct) {
       pats <- clinical_df[grepl(ct, clinical_df$project_id),'case_submitter_id']
-      pats_ids <- unlist(lapply(pats, function(pat) unlist(strsplit(pat, "-", fixed = TRUE))[3]))
+      pats_ids <- unlist(lapply(pats$case_submitter_id, function(pat) 
+	unlist(strsplit(pat, "-", fixed = TRUE))[3]))
       return(pats_ids)
     })
     names(patient_cancer_mapping) <- specific_types
@@ -1114,7 +1117,6 @@ tryCatch({
   print("Invalid input covariate list. Make sure covariates are semi-colon separated. Running with all covariates.")
   covs_to_incl <- c("ALL")
 })
-
 
 # Run the function itself
 
@@ -1166,8 +1168,7 @@ if(is.na(patient_cancer_mapping)) {
   master_df_list <- lapply(1:length(outpath), function(i) {
     
     # Get the patients for this cancer type
-    patient_ids <- patient_cancer_mapping[[i]]
-    print(patient_ids)
+    patient_ids <- unique(unlist(patient_cancer_mapping[[i]]))
     
     if(patients_of_interest != "") {
       patient_ids <- patient_ids[patient_ids %fin% patients_of_interest]
@@ -1241,8 +1242,8 @@ if(is.na(patient_cancer_mapping)) {
 process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn, 
                                   debug, randomize) {
   # Order the file by p-value
-  print(head(master_df))
-  master_df <- master_df[order(p.value)]
+  if (debug) {print(head(master_df))}
+  try(master_df <- master_df[order(p.value)])
   #master_df <- setorder(master_df, p.value)
   
   # Write the results to the given file
