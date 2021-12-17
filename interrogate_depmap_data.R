@@ -10,80 +10,122 @@ library(rstatix)
 library(broom)
 library(ggrepel)
 
+# Functions to investigate drug sensitivity, knockout (dependency) information, and other phenotypes 
+# in the DepMap cell lines based on cell line mutation/ copy number status
+
 ###################################################################################
 # DRUG SENSITIVITY ANALYSIS
 ###################################################################################
-expression_metformin <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/depmap_metformin.csv", header = TRUE, check.names = FALSE)
-expression_brca_metformin <- expression_metformin[grepl("Breast", expression_metformin$Lineage),]
+# Import the drug sensitivity and CCLE mutation files
+metformin_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/depmap_metformin.csv", 
+                                  header = TRUE, check.names = FALSE)
+metformin_sensitivity_brca <- metformin_sensitivity[grepl("Breast", metformin_sensitivity$Lineage),]
 
-ccle_mutations <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/CCLE_mutations.csv", header = TRUE, check.names = FALSE)
+methotrexate_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/depmap_methotrexate.csv", 
+                                     header = TRUE, check.names = FALSE)
+methotrexate_sensitivity_brca <- methotrexate_sensitivity[grepl("Breast", methotrexate_sensitivity$Lineage),]
+
+fu_sensitivity_brca <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/5fluorouracil_sensitivity_brca.csv", 
+                             header = TRUE, check.names = FALSE)
+
+ccle_drug_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/drug_sensitivity_screen.csv", 
+                                  header = TRUE, check.names = FALSE)
+
+ccle_mutations <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/CCLE_mutations.csv", 
+                           header = TRUE, check.names = FALSE)
 ccle_missense_mutations <- ccle_mutations[ccle_mutations$Variant_Classification == "Missense_Mutation",]
-ccle_tp53_missense_mutations <- ccle_missense_mutations[ccle_missense_mutations$Hugo_Symbol == "TP53",]
-cell_lines_tp53_mut <- unique(ccle_tp53_missense_mutations$DepMap_ID)
-
-# Match mutation status to cell line
-expression_brca_metformin$TP53_Mut <- unlist(lapply(expression_brca_metformin$`Depmap ID`, function(id) {
-     if(id %in% cell_lines_tp53_mut) {return(TRUE)}
-     else {return(FALSE)}
-}))
 
 
-# Plot as a boxplot
-sensitivity_mutants <- unlist(expression_brca_metformin[expression_brca_metformin$TP53_Mut == TRUE, 2])
-sensitivity_normal <- unlist(expression_brca_metformin[expression_brca_metformin$TP53_Mut == FALSE, 2])
-boxplot(list("Mutation" = sensitivity_mutants, "No Mutation" = sensitivity_normal), 
-         ylab = "Drug sensitivity", main = "Sensitivity to Metformin in BRCA Cell Lines, by TP53 Missense Mutation Status")
+#' Analyze differential sensitivity between mutated/ nonmutated cell lines (of a particular given gene)
+#' using a boxplot and corresponding Wilcoxon test
+#' @param sensitivity_file a DepMap sensitivity file for a drug of interest, subsetted to the cell lines of interest
+#' @param mutation_file a DepMap mutation file
+#' @param gene the gene whose mutation status is of interest (Hugo Symbol)
+analyze_differential_sensitivity <- function(sensitivity_file, mutation_file, gene) {
+  # Subset the mutation file to the gene of interest
+  mutation_file_sub <- mutation_file[mutation_file$Hugo_Symbol == gene,]
+  
+  # Get the cell lines with a mutation in this gene
+  cell_lines_mut <- unique(mutation_file_sub$DepMap_ID)
+  
+  # Add this information to the drug sensitivity file
+  sensitivity_file$Mut <- unlist(lapply(sensitivity_file$`Depmap ID`, function(id) {
+    if(id %in% cell_lines_mut) {return(1)}
+    else {return(0)}
+  }))
+  
+  # Plot as a boxplot
+  sensitivity_mutants <- unlist(sensitivity_file[sensitivity_file$Mut == 1, 2])
+  sensitivity_normal <- unlist(sensitivity_file[sensitivity_file$Mut == 0, 2])
+  boxplot(list("Mutation" = sensitivity_mutants, "No Mutation" = sensitivity_normal), 
+          ylab = "Drug sensitivity", main = paste("Sensitivity by", paste(gene, "Missense Mutation Status")))
+  
+  # Wilcoxon
+  print(wilcox.test(sensitivity_mutants, y = sensitivity_normal))
+}
 
-# Wilcoxon
-wilcox.test(sensitivity_mutants, y = sensitivity_normal)
+# Call function
+analyze_differential_sensitivity(metformin_sensitivity_brca, ccle_missense_mutations, "TP53")
+analyze_differential_sensitivity(metformin_sensitivity_brca, ccle_missense_mutations, "PIK3CA")
 
-ccle_drug_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/drug_sensitivity_screen.csv", header = TRUE, check.names = FALSE)
-fu_sensitiv_brca <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/5fluorouracil_sensitivity_brca.csv", header = TRUE, check.names = FALSE)
-fu_sensitiv_brca$TP53_Mut <- unlist(lapply(fu_sensitiv_brca$`DepMap ID`, function(id) {
-     if(id %in% cell_lines_tp53_mut) {return(TRUE)}
-     else {return(FALSE)}
-}))
+analyze_differential_sensitivity(methotrexate_sensitivity_brca, ccle_missense_mutations, "TP53")
+analyze_differential_sensitivity(methotrexate_sensitivity_brca, ccle_missense_mutations, "PIK3CA")
 
-tp53_sensitivity_mutants <- unlist(fu_sensitiv_brca[fu_sensitiv_brca$TP53_Mut == TRUE, 2])
-tp53_sensitivity_normal <- unlist(fu_sensitiv_brca[fu_sensitiv_brca$TP53_Mut == FALSE, 2])
-boxplot(list("Mutation" = tp53_sensitivity_mutants, "No Mutation" = tp53_sensitivity_normal), 
-         ylab = "Drug sensitivity", main = "Sensitivity to 5-FU in BRCA Cell Lines, by TP53 Missense Mutation Status")
+analyze_differential_sensitivity(fu_sensitivity_brca, ccle_missense_mutations, "TP53")
+analyze_differential_sensitivity(fu_sensitivity_brca, ccle_missense_mutations, "PIK3CA")
 
-# Wilcoxon
-wilcox.test(tp53_sensitivity_mutants, y = tp53_sensitivity_normal)
 
-fu_sensitiv_brca$PIK3CA_Mut <- unlist(lapply(fu_sensitiv_brca$`DepMap ID`, function(id) {
-    if(id %in% cell_lines_pik3ca_mut) {return(TRUE)}
-    else {return(FALSE)}    
-}))
-pik3ca_sensitivity_mutants <- unlist(fu_sensitiv_brca[fu_sensitiv_brca$PIK3CA_Mut == TRUE, 2])
-pik3ca_sensitivity_normal <- unlist(fu_sensitiv_brca[fu_sensitiv_brca$PIK3CA_Mut == FALSE, 2])
-boxplot(list("Mutation" = pik3ca_sensitivity_mutants, "No Mutation" = pik3ca_sensitivity_normal), 
-         ylab = "Drug sensitivity", main = "Sensitivity to 5-FU in BRCA Cell Lines, by PIK3CA Missense Mutation Status")
-
-# Wilcoxon
-wilcox.test(pik3ca_sensitivity_mutants, y = pik3ca_sensitivity_normal)
-
-tp53_pik3ca_sensitivity_mutants <- unlist(fu_sensitiv_brca[(fu_sensitiv_brca$TP53_Mut == TRUE) & (fu_sensitiv_brca$PIK3CA_Mut == TRUE), 2])
-tp53_pik3ca_sensitivity_normal <- unlist(fu_sensitiv_brca[(fu_sensitiv_brca$TP53_Mut == FALSE) & (fu_sensitiv_brca$PIK3CA_Mut == FALSE), 2])
-
-tp53_excl_sensitivity_mutants <- setdiff(tp53_sensitivity_mutants, tp53_pik3ca_sensitivity_mutants)
-pik3ca_excl_sensitivity_mutants <- setdiff(pik3ca_sensitivity_mutants, tp53_pik3ca_sensitivity_mutants)
-
-boxplot(list("TP53 Mut Only" = tp53_excl_sensitivity_mutants, "PIK3CA Mut Only" = pik3ca_excl_sensitivity_mutants,
-              "Both" = tp53_pik3ca_sensitivity_mutants, "Neither" = tp53_pik3ca_sensitivity_normal), 
-         ylab = "Drug sensitivity", main = "Sensitivity to 5-FU in BRCA Cell Lines, by Missense Mutation Status")
-
-# ANOVA
-table_for_anova <- data.frame("sensitivity" = fu_sensitiv_brca$`5-fluorouracil sensitivity`, "status" = unlist(lapply(1:nrow(fu_sensitiv_brca), function(i) {
-    if(fu_sensitiv_brca$TP53_Mut[i] & fu_sensitiv_brca$PIK3CA_Mut[i]) {return("Both")}
-    else if(!fu_sensitiv_brca$TP53_Mut[i] & !fu_sensitiv_brca$PIK3CA_Mut[i]) {return("Neither")}
-    else if (fu_sensitiv_brca$TP53_Mut[i] & !fu_sensitiv_brca$PIK3CA_Mut[i]) {return("TP53.Mut")}
-    else if (!fu_sensitiv_brca$TP53_Mut[i] & fu_sensitiv_brca$PIK3CA_Mut[i]) {return("PIK3CA.Mut")}
+#' Analyze differential sensitivity across two genes, considering cases where cell lines have mutations
+#' exclusively in one or the other, both, or neither. Plots a boxplot and performs a corresponding 
+#' ANOVA test
+#' @param sensitivity_file a DepMap sensitivity file for a drug of interest, subsetted to the cell lines of interest
+#' @param mutation_file a DepMap mutation file
+#' @param gene1 the first gene whose mutation status is of interest (Hugo Symbol)
+#' @param gene2 the second gene whose mutation status is of interest (Hugo Symbol)
+analyze_differential_sensitivity_twoGenes <- function(sensitivity_file, mutation_file, gene1, gene2) {
+  # Subset the mutation file to the genes of interest
+  mutation_file_gene1 <- mutation_file[mutation_file$Hugo_Symbol == gene1,]
+  mutation_file_gene2 <- mutation_file[mutation_file$Hugo_Symbol == gene2,]
+  
+  # Get the cell lines with a mutation in each gene
+  cell_lines_mut_gene1 <- unique(mutation_file_gene1$DepMap_ID)
+  cell_lines_mut_gene2 <- unique(mutation_file_gene2$DepMap_ID)
+  
+  # Get the cell line overlap
+  cell_lines_mut_gene1_gene2 <- intersect(cell_lines_mut_gene1, cell_lines_mut_gene2)
+  
+  # Add this information to the drug sensitivity file
+  sensitivity_file$MutG1 <- unlist(lapply(sensitivity_file$`Depmap ID`, function(id) {
+    if(id %in% cell_lines_mut_gene1) {return(1)}
+    else {return(0)}
+  }))
+  sensitivity_file$MutG2 <- unlist(lapply(sensitivity_file$`Depmap ID`, function(id) {
+    if(id %in% cell_lines_mut_gene2) {return(1)}
+    else {return(0)}
+  }))
+  
+  # ANOVA
+  table_for_anova <- data.frame("sensitivity" = sensitivity_file[,2], "status" = unlist(lapply(1:nrow(sensitivity_file), function(i) {
+    if(sensitivity_file$MutG1[i] & sensitivity_file$MutG2[i]) {return("Both")}
+    else if(!sensitivity_file$MutG1[i] & !sensitivity_file$MutG2[i]) {return("Neither")}
+    else if (sensitivity_file$MutG1[i] & !sensitivity_file$MutG2[i]) {return("G1.Mut")}
+    else if (!sensitivity_file$MutG1[i] & sensitivity_file$MutG2[i]) {return("G2.Mut")}
     else {return(NA)}
-})))
-aov_res <- aov(sensitivity ~ status, data = table_for_anova)
-summary(aov_res)
+  })))
+  aov_res <- aov(sensitivity ~ status, data = table_for_anova)
+  summary(aov_res)
+  
+  boxplot(sensitivity ~ status, data = table_for_anova, ylab = "Drug sensitivity", 
+          main = "Sensitivity to 5-FU in BRCA Cell Lines, by Missense Mutation Status")
+ 
+}
+
+# Call function
+analyze_differential_sensitivity_twoGenes(metformin_sensitivity_brca, ccle_missense_mutations, "TP53", "PIK3CA")
+analyze_differential_sensitivity_twoGenes(methotrexate_sensitivity_brca, ccle_missense_mutations, "TP53", "PIK3CA")
+analyze_differential_sensitivity_twoGenes(fu_sensitivity_brca, ccle_missense_mutations, "TP53", "PIK3CA")
+
+
 
 
 ###################################################################################
@@ -123,97 +165,99 @@ ko_score_pik3ca_mut_excl <- mthfd1L_crispr_brca[mthfd1L_crispr_brca$Depmap.ID %i
 boxplot(list("TP53 Mut Excl" = ko_score_tp53_mut_excl, "PIK3CA Mut Excl" = ko_score_pik3ca_mut_excl), 
          ylab = "Expression of MTHFD1L", main = "MTHFD1 KO Score, by Missense Mutation Status")
 
+
 ###################################################################################
 # CRISPR KO DEPENDENCY DATA, ALL SIGNIF. GENES
 ###################################################################################
-
 # Use DepMap features to create an aggregate file for all BRCA cell lines and for a particular gene set of interest
-curr_dir <- getwd()
-signif_hits_crispr_data <- read.csv(paste0(curr_dir, "/2020-2021/Research Data/DepMap/CRISPR_(DepMap_21Q4_Public+Score,_Chronos)_subsetted.csv"),
+signif_hits_crispr_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/CRISPR_(DepMap_21Q4_Public+Score,_Chronos)_subsetted.csv",
                                 header = TRUE, check.names = FALSE)
-signif_hits_rnai_data <- read.csv(paste0(curr_dir, "/2020-2021/Research Data/DepMap/RNAi_(Achilles+DRIVE+Marcotte,_DEMETER2)_subsetted.csv"),
+signif_hits_rnai_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/RNAi_(Achilles+DRIVE+Marcotte,_DEMETER2)_subsetted.csv",
                                   header = TRUE, check.names = FALSE)
-signif_hits_expression_data <- read.csv(paste0(curr_dir, "/2020-2021/Research Data/DepMap/Expression_21Q4_Public_subsetted.csv"),
+signif_hits_expression_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Expression_21Q4_Public_subsetted.csv",
                                         header = TRUE, check.names = FALSE)
 
-# Melt data frames to get them ready for boxplots
-signif_hits_crispr_data_melt <- melt(signif_hits_crispr_data)
-signif_hits_rnai_data_melt <- melt(signif_hits_rnai_data)
-signif_hits_expression_data_melt <- melt(signif_hits_expression_data)
-
-# Adjust column names
-colnames(signif_hits_crispr_data_melt)[which(colnames(signif_hits_crispr_data_melt) == "variable")] <- "gene"
-colnames(signif_hits_rnai_data_melt)[which(colnames(signif_hits_rnai_data_melt) == "variable")] <- "gene"
-colnames(signif_hits_expression_data_melt)[which(colnames(signif_hits_expression_data_melt) == "variable")] <- "gene"
-
-# Make the "value" column numeric, the "gene" column a character
-signif_hits_crispr_data_melt$value <- as.numeric(unlist(signif_hits_crispr_data_melt$value))
-signif_hits_rnai_data_melt$value <- as.numeric(unlist(signif_hits_rnai_data_melt$value))
-signif_hits_expression_data_melt$value <- as.numeric(unlist(signif_hits_expression_data_melt$value))
-
-signif_hits_crispr_data_melt$gene <- as.character(unlist(signif_hits_crispr_data_melt$gene))
-signif_hits_rnai_data_melt$gene <- as.character(unlist(signif_hits_rnai_data_melt$gene))
-signif_hits_expression_data_melt$gene <- as.character(unlist(signif_hits_expression_data_melt$gene))
-
 # Get the mutations for TP53 & PIK3CA among these cell lines
-tp53_pik3ca_mutations <- read.csv(paste0(curr_dir, "/2020-2021/Research Data/DepMap/Mutation_21Q4_Public_subsetted.csv"),
+tp53_pik3ca_mutations <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Mutation_21Q4_Public_subsetted.csv",
                                   header = TRUE, check.names = FALSE)
 
-# Get the copy number changes for TP53 & PIK3CA among these cell lines
-tp53_pik3ca_cnas <- read.csv(paste0(curr_dir, "/2020-2021/Research Data/DepMap/Copy_Number_21Q4_Public_subsetted.csv"),
+# Get the relative copy number changes for TP53 & PIK3CA among these cell lines
+tp53_pik3ca_cnas <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Copy_Number_21Q4_Public_subsetted.csv",
                              header = TRUE, check.names = FALSE)
 # Adjust column names
 colnames(tp53_pik3ca_cnas)[ncol(tp53_pik3ca_cnas)-1] <- "TP53.CNA"
 colnames(tp53_pik3ca_cnas)[ncol(tp53_pik3ca_cnas)] <- "PIK3CA.CNA"
 
-# Add TP53 & PIK3CA mutation status & CNA status to the above data sets
-signif_hits_crispr_data_melt <- merge(signif_hits_crispr_data_melt, tp53_pik3ca_mutations[,c("depmap_id", "TP53", "PIK3CA")], by = "depmap_id")
-signif_hits_rnai_data_melt <- merge(signif_hits_rnai_data_melt, tp53_pik3ca_mutations[,c("depmap_id", "TP53", "PIK3CA")], by = "depmap_id")
-signif_hits_expression_data_melt <- merge(signif_hits_expression_data_melt, tp53_pik3ca_mutations[,c("depmap_id", "TP53", "PIK3CA")], by = "depmap_id")
+# Get the absolute copy number for TP53 & PIK3CA among these cell lines
+#tp53_pik3ca_cnas <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Copy_Number_(Absolute)_subsetted.csv",
+#header = TRUE, check.names = FALSE)
 
-signif_hits_crispr_data_melt <- merge(signif_hits_crispr_data_melt, tp53_pik3ca_cnas[,c("depmap_id", "TP53.CNA", "PIK3CA.CNA")], by = "depmap_id")
-signif_hits_rnai_data_melt <- merge(signif_hits_rnai_data_melt, tp53_pik3ca_cnas[,c("depmap_id", "TP53.CNA", "PIK3CA.CNA")], by = "depmap_id")
-signif_hits_expression_data_melt <- merge(signif_hits_expression_data_melt, tp53_pik3ca_cnas[,c("depmap_id", "TP53.CNA", "PIK3CA.CNA")], by = "depmap_id")
 
-# Make the TP53/ PIK3CA mutation columns factors
-signif_hits_crispr_data_melt$TP53 <- as.factor(unlist(signif_hits_crispr_data_melt$TP53))
-signif_hits_rnai_data_melt$TP53 <- as.factor(unlist(signif_hits_rnai_data_melt$TP53))
-signif_hits_expression_data_melt$TP53 <- as.factor(unlist(signif_hits_expression_data_melt$TP53))
-
-signif_hits_crispr_data_melt$PIK3CA <- as.factor(unlist(signif_hits_crispr_data_melt$PIK3CA))
-signif_hits_rnai_data_melt$PIK3CA <- as.factor(unlist(signif_hits_rnai_data_melt$PIK3CA))
-signif_hits_expression_data_melt$PIK3CA <- as.factor(unlist(signif_hits_expression_data_melt$PIK3CA))
-
-# Make the TP53/ PIK3CA CNA columns numeric
-#signif_hits_crispr_data_melt$TP53.CNA <- as.numeric(unlist(signif_hits_crispr_data_melt$TP53.CNA))
-#signif_hits_rnai_data_melt$TP53.CNA <- as.numeric(unlist(signif_hits_rnai_data_melt$TP53.CNA))
-#signif_hits_expression_data_melt$TP53.CNA <- as.numeric(unlist(signif_hits_expression_data_melt$TP53.CNA))
-
-#signif_hits_crispr_data_melt$PIK3CA.CNA <- as.numeric(unlist(signif_hits_crispr_data_melt$PIK3CA.CNA))
-#signif_hits_rnai_data_melt$PIK3CA.CNA <- as.numeric(unlist(signif_hits_rnai_data_melt$PIK3CA.CNA))
-#signif_hits_expression_data_melt$PIK3CA.CNA <- as.numeric(unlist(signif_hits_expression_data_melt$PIK3CA.CNA))
-
-# Alternatively, convert CNA to be bucketed (<1.098 is a deletion, 1.098-1.1 is around normal, > 1.1 is amplification)
-bucket_cna <- function(cna_vals, deletionOrAmp) {
-    bucketed_cna_vals <- unlist(lapply(cna_vals, function(x) {
-        if(deletionOrAmp == "deletion") {
-            if (x < 1.098) {return(0)}
-            else {return(1)}
-        } else {
-            if (x <= 1.099) {return(0)}
-            else {return(1)}
-        }
-    }))
-    return(bucketed_cna_vals)
+#' Adjust the knockout and expression data frames to "melt" them so that we can make boxplots from them,
+#' as well as adding the mutation and CNA data
+#' @param signif_hits_df a DepMap knockout or expression data frame, subsetted to only include genes that are 
+#' significant hits from a particular run of the LM
+#' @param mutation_df a DepMap mutation data frame
+#' @param cna_df a DepMap CNA data frame
+#' @param genes_of_interest a vector of the Hugo IDs of gene whose mutation/ CNA status is of interest
+#' @param del_or_amp_vect a vector of "deletion" and "amplification" strings corresponding to which
+#' we are interested for each given gene (should be same length as genes_of_interest)
+adjust_depmap_df <- function(signif_hits_df, mutation_df, cna_df, genes_of_interest, del_or_amp_vect) {
+  # Melt data frame to get it ready for boxplots
+  signif_hits_df_melt <- melt(signif_hits_df)
+  
+  # Adjust column names
+  colnames(signif_hits_df_melt)[which(colnames(signif_hits_df_melt) == "variable")] <- "gene"
+  
+  # Make the "value" column numeric, the "gene" column a character
+  signif_hits_df_melt$value <- as.numeric(unlist(signif_hits_df_melt$value))
+  signif_hits_df_melt$gene <- as.character(unlist(signif_hits_df_melt$gene))
+  
+  # Add mutation and CNA status of genes of interest to the data frame
+  genes_of_interest_cna <- unlist(lapply(genes_of_interest, function(x) paste0(x, ".CNA")))
+  signif_hits_df_melt <- merge(signif_hits_df_melt, mutation_df[,c("depmap_id", c(genes_of_interest, genes_of_interest_cna))], 
+                               by = "depmap_id")
+  
+  # Make the mutation columns factors
+  mutation_cols <- which(colnames(signif_hits_df_melt) %in% genes_of_interest)
+  signif_hits_df_melt[, mutation_cols] <- lapply(signif_hits_df_melt[, mutation_cols], as.factor)
+  
+  # Bucket the CNA columns and also make them factors
+  cna_cols <- which(colnames(signif_hits_df_melt) %in% genes_of_interest_cna)
+  signif_hits_df_melt[, cna_cols] <- lapply(1:length(cna_cols), function(i) {
+    col <- signif_hits_df_melt[, i]
+    bucketed_col <- bucket_cna(col, del_or_amp_vect[i])
+    bucketed_col <- as.factor(col)
+    return(bucketed_col)
+  })
+  
+  return(signif_hits_df_melt)
 }
 
-signif_hits_crispr_data_melt$TP53.CNA <- as.factor(bucket_cna(signif_hits_crispr_data_melt$TP53.CNA, "deletion"))
-signif_hits_rnai_data_melt$TP53.CNA <- as.factor(bucket_cna(signif_hits_rnai_data_melt$TP53.CNA, "deletion"))
-signif_hits_expression_data_melt$TP53.CNA <- as.factor(bucket_cna(signif_hits_expression_data_melt$TP53.CNA, "deletion"))
+#' Bucket CNA values, given whether we want to prioritize deletions or amplifications
+#' @param cna_vals vector of CNA values 
+#' @param deletionOrAmp either "deletion" or "amplification" to indicate which we are prioritizing
+bucket_cna <- function(cna_vals, deletionOrAmp) {
+  bucketed_cna_vals <- unlist(lapply(cna_vals, function(x) {
+    if(deletionOrAmp == "deletion") {
+      if (x < log2(3)) {return(1)}
+      else {return(0)}
+    } else {
+      if (x <= log2(3)) {return(0)}
+      else {return(1)}
+    }
+  }))
+  return(bucketed_cna_vals)
+}
 
-signif_hits_crispr_data_melt$PIK3CA.CNA <- as.factor(bucket_cna(signif_hits_crispr_data_melt$PIK3CA.CNA, "amplification"))
-signif_hits_rnai_data_melt$PIK3CA.CNA <- as.factor(bucket_cna(signif_hits_rnai_data_melt$PIK3CA.CNA, "amplification"))
-signif_hits_expression_data_melt$PIK3CA.CNA <- as.factor(bucket_cna(signif_hits_expression_data_melt$PIK3CA.CNA, "amplification"))
+
+signif_hits_crispr_data <- adjust_depmap_df(signif_hits_crispr_data, tp53_pik3ca_mutations, tp53_pik3ca_cnas,
+                                            c("TP53", "PIK3CA"), c("deletion", "amplification"))
+signif_hits_rnai_data <- adjust_depmap_df(signif_hits_rnai_data, tp53_pik3ca_mutations, tp53_pik3ca_cnas,
+                                            c("TP53", "PIK3CA"), c("deletion", "amplification"))
+signif_hits_expression_data <- adjust_depmap_df(signif_hits_expression_data, tp53_pik3ca_mutations, tp53_pik3ca_cnas,
+                                            c("TP53", "PIK3CA"), c("deletion", "amplification"))
+
 
 
 # Subset to just the top hits for TP53 & PIK3CA specifically
@@ -225,71 +269,123 @@ tp53_top_hits_specific <- c(tp53_top_hits, c("SARDH", "DLD", "MAT2A", "GLDC"))
 pik3ca_top_hits <- c("TYMS", "MTHFD1L", "PSPH", "GLDC")
 # additional hits from just TP53/ PIK3CA run: "SHMT2", "FTCD", "MAT1A", "MTHFR", "AHCY", "CHKB", "MAT2A", "BHMT2", "GCLM"
 pik3ca_top_hits_specific <- c(pik3ca_top_hits, c("SHMT2", "FTCD", "MAT1A", "MTHFR", "AHCY", "CHKB", "MAT2A", "BHMT2", "GCLM"))
-    
-signif_hits_crispr_data_melt_tp53 <- signif_hits_crispr_data_melt[signif_hits_crispr_data_melt$gene %in% tp53_top_hits,]
-signif_hits_rnai_data_melt_tp53 <- signif_hits_rnai_data_melt[signif_hits_rnai_data_melt$gene %in% tp53_top_hits,]
-signif_hits_expression_data_melt_tp53 <- signif_hits_expression_data_melt[signif_hits_expression_data_melt$gene %in% tp53_top_hits,]
 
-signif_hits_crispr_data_melt_pik3ca <- signif_hits_crispr_data_melt[signif_hits_crispr_data_melt$gene %in% pik3ca_top_hits,]
-signif_hits_rnai_data_melt_pik3ca <- signif_hits_rnai_data_melt[signif_hits_rnai_data_melt$gene %in% pik3ca_top_hits,]
-signif_hits_expression_data_melt_pik3ca <- signif_hits_expression_data_melt[signif_hits_expression_data_melt$gene %in% pik3ca_top_hits,]
 
-# Run a significance test for each combo
-run_ttest <- function(df) {
-    stat.test <- df %>%
-        group_by(gene) %>%
-        #wilcox.test(value ~ TP53) %>%
-        t_test(value ~ TP53) %>%
-        adjust_pvalue(method = "bonferroni") %>%
-        add_significance("p.adj")
-    return(stat.test)
+#' Given a list of top hits, subset the given DF to this list of hits
+#' @param signif_hits_df a DepMap knockout or expression data frame, subsetted to only include genes that are 
+#' significant hits from a particular run of the LM
+#' @param sig_hits_goi a vector of significant hits for only a particular gene of interest
+subset_to_gene_tophits <- function(signif_hits_df, sig_hits_goi) {
+  
+  signif_hits_df <- signif_hits_df[signif_hits_df$gene %fin% sig_hits_goi,]
+  
+  return(signif_hits_df)
 }
 
-ttest_crispr_tp53 <- run_ttest(signif_hits_crispr_data_melt_tp53)
-ttest_rnai_tp53 <- run_ttest(signif_hits_rnai_data_melt_tp53)
-ttest_expression_tp53 <- run_ttest(signif_hits_expression_data_melt_tp53)
 
-# Plot boxplots of each gene's dependency across BRCA cell lines, by TP53 or PIK3CA mutation status
-crispr_bxp_tp53 <- ggplot(signif_hits_crispr_data_melt_tp53, aes(x = gene, y = value, fill = TP53)) + geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-rnai_bxp_tp53 <- ggplot(signif_hits_rnai_data_melt_tp53, aes(x = gene, y = value, fill = TP53)) + geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-express_bxp_tp53 <- ggplot(signif_hits_expression_data_melt_tp53, aes(x = gene, y = value, fill = TP53)) + geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+signif_hits_crispr_data_tp53 <- subset_to_gene_tophits(signif_hits_crispr_data, tp53_top_hits_specific)
+signif_hits_rnai_data_tp53 <- subset_to_gene_tophits(signif_hits_rnai_data, tp53_top_hits_specific)
+signif_hits_expression_data_tp53 <- subset_to_gene_tophits(signif_hits_expression_data, tp53_top_hits_specific)
 
-crispr_bxp_pik3ca <- ggplot(signif_hits_crispr_data_melt_pik3ca, aes(x = gene, y = value, fill = PIK3CA)) + geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-rnai_bxp_pik3ca <- ggplot(signif_hits_rnai_data_melt_pik3ca, aes(x = gene, y = value, fill = PIK3CA)) + geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-express_bxp_pik3ca <- ggplot(signif_hits_expression_data_melt_pik3ca, aes(x = gene, y = value, fill = PIK3CA)) + geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+signif_hits_crispr_data_pik3ca <- subset_to_gene_tophits(signif_hits_crispr_data, pik3ca_top_hits_specific)
+signif_hits_rnai_data_pik3ca <- subset_to_gene_tophits(signif_hits_rnai_data, pik3ca_top_hits_specific)
+signif_hits_expression_data_pik3ca <- subset_to_gene_tophits(signif_hits_expression_data, pik3ca_top_hits_specific)
 
-# Add p-values onto the box plots
-ttest_crispr_tp53 <- ttest_crispr_tp53 %>% add_xy_position(x = "gene", dodge = 0.8)
-ttest_rnai_tp53 <- ttest_rnai_tp53 %>% add_xy_position(x = "gene", dodge = 0.8)
-ttest_expression_tp53 <- ttest_expression_tp53 %>% add_xy_position(x = "gene", dodge = 0.8)
 
-crispr_bxp_tp53 + stat_pvalue_manual(ttest_crispr_tp53,  label = "p", tip.length = 0) + 
-    scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
-rnai_bxp_tp53 + stat_pvalue_manual(ttest_rnai_tp53,  label = "p", tip.length = 0) + 
-    scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
-express_bxp_tp53 + stat_pvalue_manual(ttest_expression_tp53,  label = "p", tip.length = 0) + 
-    scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+#' Run a significance test for each combo, given an input DF and either
+#' "mut" or "cna
+#' @param df input DepMap data frame, melted & subsetted
+#' @param goi gene of interest, Hugo ID
+#' @param mut_or_cna either "mut", to signify we want to test dependency by mutation status, 
+#' or "cna" to indicate we want to test dependency by CNA status
+run_ttest <- function(df, goi, mut_or_cna) {
+  stat_test <- NA
+  
+  if(mut_or_cna == "mut") {
+    stat.test <- df %>%
+      group_by(gene) %>%
+      #wilcox.test(value ~ TP53) %>%
+      t_test(value ~ goi) %>%
+      adjust_pvalue(method = "bonferroni") %>%
+      add_significance("p.adj")
+  } else {
+    goi_cna <- paste0(goi, ".CNA")
+    stat.test <- df %>%
+      group_by(gene) %>%
+      #wilcox.test(value ~ TP53) %>%
+      t_test(value ~ goi_cna) %>%
+      adjust_pvalue(method = "bonferroni") %>%
+      add_significance("p.adj")
+  }
+  
+  return(stat.test)
+}
 
-# Plot boxplots of each gene's dependency across BRCA cell lines, by TP53 or PIK3CA CNA status
-crispr_bxp_tp53_cna <- ggplot(signif_hits_crispr_data_melt_tp53, aes(x = gene, y = value, fill = TP53.CNA)) + geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + scale_fill_discrete(name = "TP53 CNA", labels = c("Deletion", "Normal/ Amplif."))
-rnai_bxp_tp53_cna <- ggplot(signif_hits_rnai_data_melt_tp53, aes(x = gene, y = value, fill = TP53.CNA)) + geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + scale_fill_discrete(name = "TP53 CNA", labels = c("Deletion", "Normal/ Amplif."))
-express_bxp_tp53_cna <- ggplot(signif_hits_expression_data_melt_tp53, aes(x = gene, y = value, fill = TP53.CNA)) + geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + scale_fill_discrete(name = "TP53 CNA", labels = c("Deletion", "Normal/ Amplif."))
+ttest_crispr_tp53_mut <- run_ttest(signif_hits_crispr_data_tp53, "TP53", "mut")
+ttest_rnai_tp53_mut <- run_ttest(signif_hits_rnai_data_tp53, "TP53", "mut")
+ttest_expression_tp53_mut <- run_ttest(signif_hits_expression_data_tp53, "TP53", "mut")
 
-crispr_bxp_pik3ca_cna <- ggplot(signif_hits_crispr_data_melt_pik3ca, aes(x = gene, y = value, fill = PIK3CA.CNA)) + geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + scale_fill_discrete(name = "PIK3CA CNA", labels = c("Normal/Deletion", "Amplification"))
-rnai_bxp_pik3ca_cna <- ggplot(signif_hits_rnai_data_melt_pik3ca, aes(x = gene, y = value, fill = PIK3CA.CNA)) + geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + scale_fill_discrete(name = "PIK3CA CNA", labels = c("Normal/Deletion", "Amplification"))
-express_bxp_pik3ca_cna <- ggplot(signif_hits_expression_data_melt_pik3ca, aes(x = gene, y = value, fill = PIK3CA.CNA)) + geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + scale_fill_discrete(name = "PIK3CA CNA", labels = c("Normal/Deletion", "Amplification"))
+ttest_crispr_tp53_cna <- run_ttest(signif_hits_crispr_data_tp53, "TP53", "cna")
+ttest_rnai_tp53_cna <- run_ttest(signif_hits_rnai_data_tp53, "TP53", "cna")
+ttest_expression_tp53_cna <- run_ttest(signif_hits_expression_data_tp53, "TP53", "cna")
+
+ttest_crispr_pik3ca_mut <- run_ttest(signif_hits_crispr_data_pik3ca, "PIK3CA", "mut")
+ttest_rnai_pik3ca_mut <- run_ttest(signif_hits_rnai_data_pik3ca, "PIK3CA", "mut")
+ttest_expression_pik3ca_mut <- run_ttest(signif_hits_expression_data_pik3ca, "PIK3CA", "mut")
+
+ttest_crispr_pik3ca_cna <- run_ttest(signif_hits_crispr_data_pik3ca, "PIK3CA", "cna")
+ttest_rnai_pik3ca_cna <- run_ttest(signif_hits_rnai_data_pik3ca, "PIK3CA", "cna")
+ttest_expression_pik3ca_cna <- run_ttest(signif_hits_expression_data_pik3ca, "PIK3CA", "cna")
+
+
+#' Plot boxplot of each gene's dependency across BRCA cell lines, by gene of interest mutation status
+#' @param signif_hits_df a DepMap knockout or expression data frame, subsetted to only include genes that are 
+#' significant hits from a particular run of the LM
+#' @param gene_of_interest a Hugo ID for a given gene of interest
+#' @param mut_or_cna either "mut", to signify we want to plot dependency by mutation status, or "cna" to
+#' indicate we want to plot dependency by CNA status
+#' @param ttest_res optional: can include the results of a t-test with the significance values on plot
+make_dependency_boxplot <- function(signif_hits_df, gene_of_interest, mut_or_cna, ttest_res) {
+  if(mut_or_cna == "mut") {
+    bxp <- ggplot(signif_hits_df, aes(x = gene, y = value, fill = gene_of_interest)) + geom_boxplot() +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+    
+  } else if (mut_or_cna == "cna") {
+    gene_of_interest_cna <- paste0(gene_of_interest, ".CNA")
+    bxp <- ggplot(signif_hits_df, aes(x = gene, y = value, fill = gene_of_interest_cna)) + geom_boxplot() +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+    
+  } else {
+    print(paste(mut_or_cna, "is not defined. Please try again with either 'mut' or 'cna'."))
+  }
+  print(bxp)
+  
+  # If ttest_res is defined, add the p-values onto the plot
+  try({
+    ttest_res <- ttest_res %>% add_xy_position(x = "gene", dodge = 0.8)
+    bxp + stat_pvalue_manual(ttest_res,  label = "p", tip.length = 0) + 
+      scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+    
+  })
+  
+}
+
+make_dependency_boxplot(signif_hits_crispr_data_tp53, "TP53", "mut", ttest_crispr_tp53_mut)
+make_dependency_boxplot(signif_hits_rnai_data_tp53, "TP53", "mut", ttest_rnai_tp53_mut)
+make_dependency_boxplot(signif_hits_expression_data_tp53, "TP53", "mut", ttest_expression_tp53_mut)
+
+make_dependency_boxplot(signif_hits_crispr_data_tp53, "TP53", "cna", ttest_crispr_tp53_cna)
+make_dependency_boxplot(signif_hits_rnai_data_tp53, "TP53", "cna", ttest_rnai_tp53_cna)
+make_dependency_boxplot(signif_hits_expression_data_tp53, "TP53", "cna", ttest_expression_tp53_cna)
+
+make_dependency_boxplot(signif_hits_crispr_data_pik3ca, "PIK3CA", "mut", ttest_crispr_pik3ca_mut)
+make_dependency_boxplot(signif_hits_rnai_data_pik3ca, "PIK3CA", "mut", ttest_rnai_pik3ca_mut)
+make_dependency_boxplot(signif_hits_expression_data_pik3ca, "PIK3CA", "mut", ttest_expression_pik3ca_mut)
+
+make_dependency_boxplot(signif_hits_crispr_data_pik3ca, "PIK3CA", "cna", ttest_crispr_pik3ca_cna)
+make_dependency_boxplot(signif_hits_rnai_data_pik3ca, "PIK3CA", "cna", ttest_rnai_pik3ca_cna)
+make_dependency_boxplot(signif_hits_expression_data_pik3ca, "PIK3CA", "cna", ttest_expression_pik3ca_cna)
+
 
 
 ###################################################################################
@@ -342,8 +438,8 @@ depmap_lm <- function(depmap_table, mut_or_cna, gene_name) {
         return(-log(x, base = 10)))))
     # Add differential dependency
     plt_input$diffDep <- "NONE"
-    plt_input$diffDep[plt_input$Betas > 0 & plt_input$p.val < 0.05] <- "UP"
-    plt_input$diffDep[plt_input$Betas < 0 & plt_input$p.val < 0.05] <- "DOWN"
+    plt_input$diffDep[plt_input$Betas > 0 & plt_input$p.val < 0.05] <- "MORE DEP."
+    plt_input$diffDep[plt_input$Betas < 0 & plt_input$p.val < 0.05] <- "LESS DEP."
 
     plt_input$diffDepLabel <- NA
     plt_input$diffDepLabel[plt_input$diffDep != "NONE"] <- plt_input$Gene[plt_input$diffDep != "NONE"]
