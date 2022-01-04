@@ -1,6 +1,6 @@
 ############################################################
 ### Process Methylation Data
-### Written By: Sara Camilli, August 2020
+### Written By: Sara Geraghty, August 2020
 ############################################################
 
 #library(methylumi)
@@ -31,7 +31,7 @@ library(sva)
 
 
 path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
-# path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TCGA Data (ALL)/"
+# path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/"
 
 output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Methylation/"
 #output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Methylation/"

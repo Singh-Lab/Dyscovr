@@ -1,6 +1,6 @@
 ############################################################
 ### Process Linear Model Output
-### Written By: Sara Camilli, May 2021
+### Written By: Sara Geraghty, May 2021
 ############################################################
 
 # Given an output 'master file' from a linear model run, this
@@ -216,12 +216,12 @@ create_heat_map <- function(results_table, outpath) {
   # Fill in this table with t-statistics
   for (i in 1:nrow(results_table)) {
     tstat <- results_table$statistic[i]
-    log_pstat <- log(results_table$p.value[i])
-    if(tstat < 1) {log_pstat <- log_pstat * -1}
+    #log_pstat <- log(results_table$q.value[i])
+    #if(tstat < 1) {log_pstat <- log_pstat * -1}
     regprot <- results_table$R_i.name[i]
     targ <- results_table$T_k.name[i]
     
-    matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- log_pstat
+    matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat #log_pstat
   }
   # NOTE: leave all the unfilled pairings as NA
   
@@ -238,7 +238,9 @@ create_heat_map <- function(results_table, outpath) {
   
   # Plot an enhanced heatmap
   heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
-            density.info = "none", na.color = "gray", Rowv = FALSE, Colv = FALSE) # clusters by default using hclust, but can specify others using param 'hclustfun'
+            density.info = "none")
+  #heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
+            #density.info = "none", na.color = "gray", Rowv = FALSE, Colv = FALSE) # clusters by default using hclust, but can specify others using param 'hclustfun'
   
   # Plot a pretty heatmap
   # pheatmap(matrix, cutree_rows = 4) # options are available for changing clustering metric & method
@@ -316,6 +318,85 @@ heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none", density.in
 
 ############################################################
 ############################################################
+#### SPEARMAN CORRELATION OF BETAS AND T-STATISTICS
+############################################################
+############################################################
+#' Compute and print the Spearman correlation of the Betas and of the T-statistic,
+#' given two groups of interest
+#' @param results_table the output master DF from the linear model
+compute_and_print_spearman <- function(results_table, ri_1, ri_2) {
+  if((ri_1 %fin% results_table$R_i) & (ri_2 %fin% results_table$R_i)) {
+    
+    target_genes <- unique(results_table$T_k)
+    
+    # Mini functions to get Betas/t-statistics for each target gene
+    #' @param results_table the master DF 
+    #' @param ri the given regulatory protein
+    #' @param type "Betas" or "t-statistics" to indicate what value we are returning
+    get_values <- function(results_table, ri, type) {
+      vals <- unlist(lapply(target_genes, function(tg) {
+        if(type == "Betas") {
+          est <- results_table[(results_table$R_i == ri) & (results_table$T_k == tg), "estimate"]
+        } else {
+          est <- results_table[(results_table$R_i == ri) & (results_table$T_k == tg), "statistic"]
+        }
+        if (length(est) == 0) {est <- NA}
+        return(est)
+      }))
+    }
+
+    grp1_Betas <- get_values(results_table, ri_1, "Betas")
+    grp1_tstat <- get_values(results_table, ri_1, "t-statistics")
+    
+    grp2_Betas <- get_values(results_table, ri_2, "Betas")
+    grp2_tstat <- get_values(results_table, ri_2, "t-statistics")
+    
+    # Get Betas spearman
+    betas_spearman <- cor.test(grp1_Betas, grp2_Betas, method = "spearman")
+    betas_spearman_stat <- as.numeric(betas_spearman$estimate)
+    betas_spearman_pval <- betas_spearman$p.value
+    
+    # Get t-statistic spearman
+    tstat_spearman <- cor.test(grp1_tstat, grp2_tstat, method = "spearman")
+    tstat_spearman_stat <- as.numeric(tstat_spearman$estimate)
+    tstat_spearman_pval <- tstat_spearman$p.value
+    
+    # Print the results
+    print(paste("Spearman results for", paste(ri_1, paste("and", ri_2))))
+    print(paste("Beta correlation of", paste(betas_spearman_stat, paste(", p-value of", betas_spearman_pval))))
+    print(paste("t-statistic correlation of", paste(tstat_spearman_stat, paste(", p-value of", tstat_spearman_pval))))
+    
+    # Create a plot to visualize the correlations
+    plot(grp1_Betas, grp2_Betas, pch = 19, col = "lightblue", #main = "Betas Spearman Correlation",
+         xlab = paste(ri_1, "Betas"), ylab = paste(ri_2, "Betas"))
+    abline(lm(grp2_Betas ~ grp1_Betas), col = "red", lwd = 3)
+    text(labels = paste("Correlation:", paste(round(betas_spearman_stat, 4), 
+                                     paste(", p-value:", round(betas_spearman_pval, 4)))), 
+         x = max(grp1_Betas, na.rm = TRUE)-sd(grp1_Betas, na.rm = TRUE)*1.5, 
+         y = max(grp2_Betas, na.rm = TRUE)-sd(grp2_Betas, na.rm = TRUE), col = "black")
+    
+    
+    plot(grp1_tstat, grp2_tstat, pch = 19, col = "lightblue", #main = "T-Statistics Spearman Correlation",
+         xlab = paste(ri_1, "t-statistics"), ylab = paste(ri_2, "t-statistics"))
+    abline(lm(grp2_tstat ~ grp1_tstat), col = "red", lwd = 3)
+    text(labels = paste("Correlation:", paste(round(tstat_spearman_stat, 4), 
+                                     paste(", p-value:", round(tstat_spearman_pval, 4)))), 
+         x = max(grp1_tstat, na.rm = TRUE)-sd(grp1_tstat, na.rm = TRUE)*1.5, 
+         y = max(grp2_tstat, na.rm = TRUE)-sd(grp2_tstat, na.rm = TRUE), col = "black")
+    
+    
+  } else {print("Error. Provided regprots are not in the given master DF.")}
+}
+
+ri_1 <- "P04637"
+ri_2 <- "P42336"
+
+# Call function
+compute_and_print_spearman(master_df, ri_1, ri_2)
+
+
+############################################################
+############################################################
 #### VISUALIZE ON RELEVANT PATHWAYS
 ############################################################
 ############################################################
@@ -387,29 +468,29 @@ fwrite(master_df_cna_sig, paste(main_path, "Linear Model/TP53/Non-Tumor-Normal M
 ############################################################
 #' Plots the overlap in significant top target gene hits for mutation 
 #' and CNA results. 
-#' @param fn an output path/filename for the visualization to be saved to
 #' @param master_df_mut_sig mutation master DF, with gene names added and 
 #' thresholded for significance
 #'@param master_df_cna_sig CNA master DF, with gene names added and 
 #' thresholded for significance
-plot_tophit_overlap <- function(fn, master_df_mut_sig, master_df_cna_sig) {
+plot_tophit_overlap <- function(master_df_mut_sig, master_df_cna_sig) {
   overlap_genes <- intersect(master_df_mut_sig$T_k.name, master_df_cna_sig$T_k.name)
   print(overlap_genes)
   
   # Plot a Venn Diagram
   #myCol <- brewer.pal(2, "Pastel2")
-  venn.diagram(list(master_df_mut_sig$T_k.name, master_df_cna_sig$T_k.name),
-               category.names = c("Mutation", "CNA"), filename = fn, output = TRUE,
-               lwd = 2, lty = 'blank', fill = c("red", "blue"), cex = 0.6, fontface = "bold",
-               fontfamily = "sans")#, cat.cex = 0.6, cat.fontface = "bold",
+  plt <- venn.diagram(list(master_df_mut_sig$T_k.name, master_df_cna_sig$T_k.name),
+               category.names = c("Mutation", "CNA"), filename = NULL, output = TRUE,
+               lwd = 2, lty = 'blank', fill = c("red", "blue"), cex = 2, fontface = "bold",
+               fontfamily = "sans", cat.cex = 2, cat.fontface = "bold",cat.fontfamily = "sans")
                #cat.default.pos = "outer", cat.fontfamily = "sans", rotation = 1)
+  grid::grid.draw(plt)
 }
 
 # Call this function and write to PNG file
 fn <- paste(output_path, "TP53 (Test)/Non-Tumor-Normal-Matched/Top Gene Hit Overlap (I-Protein, TMM, bucketCNA, iciTotFrac).png", 
             sep = "")
 png(fn, width = 450, height = 350)
-plot_tophit_overlap(fn, master_df_mut_sig, master_df_cna_sig)
+plot_tophit_overlap(master_df_mut_sig, master_df_cna_sig)
 dev.off()
 
 ############################################################
@@ -654,3 +735,58 @@ terms_counts <- unlist(lapply(terms, function(x) nrow(master_df_sig[master_df_si
 terms_counts_df <- data.frame('term' = terms, 'freq' = terms_counts)
 pie(terms_counts_df$freq, labels = terms_counts_df$term, main = "Categories of Significant Covariates (All Tests)")
 
+
+############################################################
+#### ASIDE: EXAMINE THE STATISTICAL OVERLAP OF MULTIPLE 
+#### MASTER DF TOP HITS
+############################################################
+#' Looks at only top hits for each given master DF (only one regprot), below 
+#' a given q-value threshold, and makes a Venn diagram to show overlap, along with 
+#' reporting whether there is more overlap than might be expected given
+#' the size of the total target pool
+#' @param master_df1 the first master DF
+#' @param master_df2 the second master DF
+#' @param qval_thres the threshold below which we will consider the pairing significant
+#' @param size_targgene_pool the number of target genes we are looking at
+#' @param master_df1_label a label for what the first master DF is
+#' @param master_df2_label a label for what the second master DF is
+get_overlap_of_top_hits <- function(master_df1, master_df2, qval_thres, size_targgene_pool,
+                                    master_df1_label, master_df2_label) {
+  # Limit the master DFs to only significant hits
+  master_df1_sig <- master_df1[master_df1$q.value < qval_thres,]
+  master_df2_sig <- master_df1[master_df2$q.value < qval_thres,]
+  
+  # Plot a Venn diagram of the intersection
+  myCol <- brewer.pal(3, "Accent")
+  grid.newpage()
+  v <- venn.diagram(x = list(master_df1_sig$T_k.name, master_df2_sig$T_k.name), 
+               filename = NULL, #paste(master_df1_label, paste(master_df2_label, "BRCA.LumAB.png", sep = "_"), sep = "_"),
+               #lwd = 2, lty = 'blank', col = c("#440154ff", '#21908dff'),  
+               cex = 3, fill = myCol[1:2],
+               fontface = "bold", fontfamily = "sans",
+               cat.cex = 1.5, cat.fontface = "bold", #cat.default.pos = "outer", 
+               cat.fontfamily = "sans", #rotation = 1,
+               category.names = c(master_df1_label, master_df2_label),
+               hyper.test = TRUE, lower.tail = FALSE)
+  grid.draw(v)
+  
+  # Get the intersection between the top genes
+  intersecting_genes <- intersect(master_df1_sig$T_k.name, master_df2_sig$T_k.name)
+  num_intersecting_genes <- length(intersecting_genes)
+  print(paste("Number of Significant Mutation Hits:", nrow(master_df1_sig)))
+  print(paste("Number of Significant CNA Hits:", nrow(master_df2_sig)))
+  print(paste("Length Overlap:", num_intersecting_genes))
+  
+  # Use the hypergeometric distribution to determine if the overlap is more
+  # than we would expect by chance
+  print(phyper(q = num_intersecting_genes - 1, m = nrow(master_df1_sig),
+               n = size_targgene_pool - nrow(master_df1_sig), k = nrow(master_df2_sig),
+               lower.tail = FALSE))
+}
+
+master_df_tp53_mut <- read.csv(paste0(main_path, "Linear Model/TP53/Tumor_Only/eQTL/output_results_LumAB_P53_metabolicTargs_iprotein_tmm_CNAbucket_justDel_methMRaw_cibersortTotalFrac_rmCis_allButCancerType_uncorrected_MUT.csv"), header = TRUE, check.names = FALSE)
+master_df_tp53_cna <- read.csv(paste0(main_path, "Linear Model/TP53/Tumor_Only/eQTL/output_results_LumAB_P53_metabolicTargs_iprotein_tmm_CNAbucket_justDel_methMRaw_cibersortTotalFrac_rmCis_allButCancerType_uncorrected_CNA.csv"), header = TRUE, check.names = FALSE)
+
+# Call function
+# Num. metabolic targets in Recon3D: 1837
+get_overlap_of_top_hits(master_df_tp53_mut, master_df_tp53_cna, 0.1, 1837, "TP53 Mutation", "TP53 Deletion")

@@ -12,14 +12,16 @@
  # barcode column attached. 
 
 library(TCGAbiolinks)
+library(ggplot2)
 
 path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/"
+
+input_path <- paste(path, "Input Data Files/BRCA Data/", sep = "")
+#input_path <- paste(path, "Input Data Files/TCGA Data (ALL)/", sep = "")
 
 ############################################################
 # RETAIN ONLY PATIENTS WITH ALL DATATYPES IN GIVEN CLINICAL FILE
 ############################################################
-input_path <- paste(path, "Input Data Files/BRCA Data/", sep = "")
-#input_path <- paste(path, "Input Data Files/TCGA Data (ALL)/", sep = "")
 
 # Read in clinical files with TCGA barcode column (add this column by going through get_TCGA_barcodes.R)
 mut_clin_file <- read.csv(paste(input_path, "Somatic_Mut_Data/mut_clinical_data.csv", sep = ""), 
@@ -38,7 +40,7 @@ meth_clin_file <- read.csv(paste(input_path, "Methylation_Data/meth_clinical_dat
 # Read in all the unique patient IDs from saved file, if using a specific TCGA project
 # NOTE: no way to use TCGA biolinks to get pan-cancer information. Have to just get all the clinical files and 
 # find the intersecting IDs. Save this to file. Otherwise, file originated from analyses in TCGAbiolinks_assay.R
-unique_patient_ids <- get_common_patients(mut_clin_file, exp_clin_file, cnv_clin_file, meth_clin_file, input_path) # Length: 7,864; OR
+unique_patient_ids <- get_common_patients(input_path, mut_clin_file, exp_clin_file, cnv_clin_file, meth_clin_file) # Length: 7,864; OR
 unique_patient_ids <- read.table(paste(input_path, "unique_brca_patient_ids.txt", sep = ""), header = FALSE)[,1] # Length: 747 (OPT. 1) or 732 (OPT. 2)
 
 #' Takes clinical files (with a column for tcga_barcode) and identifies 
@@ -51,17 +53,17 @@ unique_patient_ids <- read.table(paste(input_path, "unique_brca_patient_ids.txt"
 #' @param meth_clin_file methylation clinical file from the TCGA
 get_common_patients <- function(path, mut_clin_file, exp_clin_file, cnv_clin_file, meth_clin_file) {
   # Extract all the IDs
-  mut_ids <- unlist(lapply(mut_clin_file$tcga_barcode, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
-  exp_ids <- unlist(lapply(exp_clin_file$tcga_barcode, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
-  cnv_ids <- unlist(lapply(cnv_clin_file$tcga_barcode, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
-  meth_ids <- unlist(lapply(meth_clin_file$tcga_barcode, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
+  mut_ids <- unlist(lapply(mut_clin_file$case_submitter_id, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
+  exp_ids <- unlist(lapply(exp_clin_file$case_submitter_id, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
+  cnv_ids <- unlist(lapply(cnv_clin_file$case_submitter_id, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
+  meth_ids <- unlist(lapply(meth_clin_file$case_submitter_id, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
   
   # Get just the overlapping IDs
   intersecting_ids <- intersect(intersect(intersect(mut_ids, exp_ids), cnv_ids), meth_ids)
   
   # Write these IDs to a file
   #write.table(intersecting_ids, paste(input_path, "unique_brca_patient_ids.txt", sep = ""))
-  write.table(intersecting_ids, paste(input_path, "unique_patient_ids_2.txt", sep = ""))
+  #write.table(intersecting_ids, paste(input_path, "unique_patient_ids_2.txt", sep = ""))
   
   # Return the IDs
   return(intersecting_ids)
@@ -76,7 +78,7 @@ subset_clin_file_by_patient_ids <- function(clin_file, unique_patient_ids) {
   colnames(clin_df_sub) <- colnames(clin_file)
   
   for (i in 1:nrow(clin_file)) {
-    barcode <- clin_file$tcga_barcode[i]
+    barcode <- clin_file$case_submitter_id[i]
     patient_id <- unlist(strsplit(barcode, split = "-", fixed = TRUE))[3]
     if (patient_id %fin% unique_patient_ids) {
       clin_df_sub <- rbind(clin_df_sub, clin_file[i,])
@@ -155,6 +157,42 @@ write.csv(clinical_df, paste(input_path, "clinical_data_subset.csv", sep = ""))
 
 # When retrieving this information, use:
 clinical_df <- read.csv(paste(input_path, "clinical_data_subset.csv", sep = ""), header = TRUE)
+
+
+############################################################
+# VISUALIZE THE NUMBER OF PATIENT CANCER SAMPLES PER CANCER TYPE
+############################################################
+#' Creates a bar plot to visualize the number of patients within each cancer type
+#' category, to decide which ones we should run individually
+#' @param clinical_df a clinical data frame from the TCGA
+visualize_num_samps_per_ct <- function(clinical_df) {
+  
+  # Get the number of unique cancer types
+  unique_cts <- unique(unlist(lapply(unlist(clinical_df$project), function(x) 
+    unlist(strsplit(x, "-", fixed = TRUE))[2])))
+  
+  # Count up the number of patients that fall into each CT
+  count_list <- lapply(unique_cts, function(ct) {
+    num_ct <- length(unique(clinical_df[grepl(ct, clinical_df$project), 'case_submitter_id']))
+    return(num_ct)
+  })
+  names(count_list) <- unique_cts
+  count_mat <- data.frame("cancer_type" = names(count_list), "patient_count" = as.integer(unlist(count_list)))
+  print(head(count_mat))
+  
+  # Create an ordered bar chart for visualization
+  count_mat$cancer_type <- factor(count_mat$cancer_type, levels = count_mat$cancer_type[order(count_mat$patient_count, 
+                                                                                              decreasing = FALSE)])
+  ggplot(count_mat, aes(x=cancer_type, y=patient_count)) + geom_bar(stat = "identity") + coord_flip()
+}
+
+
+# Import the clinical DF, if needed
+clinical_df <- read.csv(paste(input_path, "clinical_wMutCounts.csv", sep = ""), 
+                        header = TRUE, check.names = FALSE)
+
+visualize_num_samps_per_ct(clinical_df)
+
 
 #
 #

@@ -34,10 +34,14 @@ if(is_brca) {
 }
 
 # Import the patients of interest and subset the aliquot DF to only these patients
-patients <- read.table(paste(input_path, "unique_brca_patient_ids_2.txt", sep = ""), header = TRUE,
-                     row.names = 1)[,1]
-# patients <- read.table(paste(input_path, "unique_patient_ids_2.txt", sep = ""), header = TRUE,
-  # row.names = 1)[,1]
+if(is_brca) {
+  patients <- read.table(paste(input_path, "unique_brca_patient_ids_2.txt", sep = ""), 
+                         header = TRUE, row.names = 1)[,1]
+} else {
+  patients <- read.table(paste(input_path, "unique_patient_ids_2.txt", sep = ""), 
+                         header = TRUE, row.names = 1)[,1]
+}
+
 
 aliquot_df$patient_id <- unlist(lapply(aliquot_df$sample_submitter_id, function(x) {
   unlist(strsplit(x, "-", fixed = TRUE))[3]}))

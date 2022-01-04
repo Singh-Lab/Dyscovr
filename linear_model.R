@@ -571,7 +571,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
           print("LM Input Table")
           print(head(lm_input_table))
           #new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "lm_input_table", 
-                                                                              #sep = "_"), sep = "_"))
+                                                                             # sep = "_"), sep = "_"))
           #fwrite(lm_input_table, paste(outpath, paste(new_fn, ".csv", sep = ""), sep = "/"))
         }
         
@@ -642,7 +642,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
           print("Summary Table")
           print(head(summary_table))
           #new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "summary_table", 
-                                                                              #sep = "_"), sep = "_"))
+                                                                             # sep = "_"), sep = "_"))
           #new_fn <- paste(new_fn, ".csv", sep = "")
           #fwrite(summary_table, paste(outpath, new_fn, sep = "/"))
         }
@@ -1085,7 +1085,7 @@ get_patient_cancer_mapping <- function(specificTypes, clinical_df) {
     patient_cancer_mapping <- lapply(specific_types, function(ct) {
       pats <- clinical_df[grepl(ct, clinical_df$project_id),'case_submitter_id']
       pats_ids <- unlist(lapply(pats$case_submitter_id, function(pat) 
-	unlist(strsplit(pat, "-", fixed = TRUE))[3]))
+        unlist(strsplit(pat, "-", fixed = TRUE))[3]))
       return(pats_ids)
     })
     names(patient_cancer_mapping) <- specific_types
@@ -1169,6 +1169,7 @@ if(is.na(patient_cancer_mapping)) {
     
     # Get the patients for this cancer type
     patient_ids <- unique(unlist(patient_cancer_mapping[[i]]))
+    print(patient_ids)
     
     if(patients_of_interest != "") {
       patient_ids <- patient_ids[patient_ids %fin% patients_of_interest]
@@ -1242,11 +1243,12 @@ if(is.na(patient_cancer_mapping)) {
 process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn, 
                                   debug, randomize) {
   # Order the file by p-value
-  if (debug) {print(head(master_df))}
+  print(head(master_df))
   try(master_df <- master_df[order(p.value)])
   #master_df <- setorder(master_df, p.value)
   
-  # Write the results to the given file
+  # Write the results to the given file, making the directory if it does not already exist
+  dir.create(outpath, showWarnings = FALSE)
   fwrite(master_df, paste(outpath, paste(outfn, ".csv", sep = ""), sep = "/"))
   
   # Limit the data frame to just the term of interest (typically either MutStat_i or CNAStat_i)

@@ -9,6 +9,9 @@ library(dplyr)
 library(tibble)
 library(parallel)
 library(TCGAbiolinks)
+library(gdata)
+library(matrixStats)
+library(data.table)
 
 # This file processes the various expression data files for each patient to:
 # Combine the files across various patients into a single data frame that we can 
@@ -37,8 +40,8 @@ all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Proje
 ############################################################
 ############################################################
 # Unique patient TCGA IDs
-patient_tcga_ids <- read.table(paste(path, "unique_brca_patient_ids.txt", sep = ""), header =  TRUE)[,1]
-# patient_tcga_ids <- read.table(paste(path, "unique_patient_ids.txt", sep = ""), header =  TRUE)[,2]
+patient_tcga_ids <- read.table(paste(path, "unique_brca_patient_ids_2.txt", sep = ""), header =  TRUE)[,1]
+# patient_tcga_ids <- read.table(paste(path, "unique_patient_ids_2.txt", sep = ""), header =  TRUE)[,2]
 
 # IF NEEDED FOR PAN-CANCER: Merge multiple files
 #' This function merges the sample sheets for pan-cancer expression data, if needed
@@ -56,9 +59,11 @@ sample_sheet <- merge_ss_files(path)
 write.csv(sample_sheet, paste(path, "Expression_Data/Counts/gdc_sample_sheet_total.csv", sep = ""))
 
 # Import the GDC sample sheet for file conversions
-sample_sheet <- read.csv(paste(path, "Expression_Data/Counts/gdc_sample_sheet.csv", sep = ""), header = TRUE)
-#sample_sheet <- read.csv(paste(path, "Expression_Data/FPKM/gdc_sample_sheet.csv", sep = ""), header = TRUE)
-sample_sheet$File.Name <- unlist(lapply(sample_sheet$File.Name, function(x) 
+sample_sheet <- read.csv(paste(path, "Expression_Data/Counts/gdc_sample_sheet.csv", sep = ""), header = TRUE, 
+                         check.names = FALSE)
+#sample_sheet <- read.csv(paste(path, "Expression_Data/FPKM/gdc_sample_sheet.csv", sep = ""), header = TRUE, 
+#check.names = FALSE)
+sample_sheet$`File Name` <- unlist(lapply(sample_sheet$`File Name`, function(x) 
   paste(unlist(strsplit(x, ".", fixed = TRUE))[1:3], collapse = ".")))
 
 #' Subset sample sheet to only patients of interest
@@ -68,7 +73,7 @@ sample_sheet$File.Name <- unlist(lapply(sample_sheet$File.Name, function(x)
 #' sample sheet format
 subset_samp_sheet <- function(patient_tcga_ids, sample_sheet, version) {
   indices_of_int <- unlist(lapply(patient_tcga_ids, function(x) {
-    if (version == "original") {return(which(grepl(x, sample_sheet$Sample.ID)))}
+    if (version == "original") {return(which(grepl(x, sample_sheet$`Sample ID`)))}
     else if (version == "edgeR") {return(which(grepl(x, sample_sheet$description)))}
     else {
       print(paste("Unknown version,", version))
@@ -80,6 +85,8 @@ subset_samp_sheet <- function(patient_tcga_ids, sample_sheet, version) {
 }
 
 sample_sheet_subset <- subset_samp_sheet(patient_tcga_ids, sample_sheet, "original")
+sample_sheet_subset <- subset_samp_sheet(patient_tcga_ids, sample_sheet, "edgeR")
+
 
 ############################################################
 ############################################################
@@ -92,7 +99,7 @@ sample_sheet_subset <- subset_samp_sheet(patient_tcga_ids, sample_sheet, "origin
 ############################################################
 # Import a separate version in the format required by the edgeR package
 targets <- read.csv(paste(path, "Expression_Data/Counts/gdc_sample_sheet_for_edgeR.csv", sep = ""), 
-                    header = TRUE)
+                    header = TRUE, check.names = FALSE)
 targets$files <- unlist(lapply(targets$files, function(x) 
   paste(unlist(strsplit(x, ".", fixed = TRUE))[1:3], collapse = ".")))
 
@@ -120,6 +127,9 @@ split_fn <- unlist(lapply(targets_sub$files, function(x) unlist(strsplit(x, "/",
 targets_sub2 <- targets_sub[which(unlist(lapply(split_fn, function(x) 
   x %fin% list.files(paste(path, "Expression_Data/Counts/", sep = ""), 
                      pattern = ".htseq")))),]
+
+# OPTIONAL: also limit DF to only cancer samples
+targets_sub3 <- targets_sub2[targets_sub2$group != 'Solid Tissue Normal',]
 
 # If pan-cancer, split apart the file into individual cancer types
 #' Takes a targets object (GDC sample sheet in edgeR-accepted format) and breaks
@@ -155,6 +165,50 @@ list_of_ct_targets <- split_by_ct(targets_sub2, dictionary)
 
 # Remove any duplicate rows
 list_of_ct_targets <- lapply(list_of_ct_targets, distinct)
+
+
+############################################################
+### OPTIONAL: ADJUST GROUPS TO GROUP BY MUTATION STATUS ###
+### OF A GIVEN PROTEIN OF INTEREST ###
+############################################################
+#' Takes a subsetted edgeR targets DF and changes the grouping
+#' to be by the mutation status of a given protein of interest
+#' (e.g., TP53) so that we can look at DE genes between the 
+#' mutated and nonmutated sample groups.
+#' @param targets_sub a subsetted edgeR targets DF
+#' @param prot a protein whose mutation status we are 
+#' interested in (Hugo Symbol)
+#' @param mutation_df a mutation count DF that correlates patient
+#' ID to the mutation status of the given protein of interest
+group_by_mutation_status <- function(targets_sub, prot, mutation_df) {
+  
+  # Get the patients with/ without a mutation in the given protein
+  mutation_df_sub <- mutation_df[rownames(mutation_df) == prot,]
+  patients_mut <- colnames(mutation_df_sub[,(mutation_df_sub[1,] > 0)])
+  #patients_nonmut <- setdiff(colnames(mutation_df_sub), patients_mut)
+  
+  # Add these new groups to the edgeR targets DF under the 'group' label 
+  # (patients with and without mutation)
+  targets_sub_patients <- unlist(lapply(targets_sub$description, function(x)
+    paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
+  targets_sub$group <- unlist(lapply(targets_sub_patients, function(x) 
+    ifelse((x %fin% patients_mut), 1, 0)))
+  
+  return(targets_sub)
+}
+
+# Define the protein of interest
+prot_of_interest <- "TP53"  # TP53
+# prot_of_interest <- "PIK3CA"  # PIK3CA
+
+# Import the mutation count DF
+mut_count_matrix <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Mutation/Mutation Count Matrices/mut_count_matrix_missense.csv",
+                         header = TRUE, check.names = FALSE, row.names = 1)
+# Adjust the column names to keep just the patient ID and not the sample ID
+colnames(mut_count_matrix) <- unlist(lapply(colnames(mut_count_matrix), function(x)
+  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
+
+targets_sub3_groupedByMutStat <- group_by_mutation_status(targets_sub3, prot_of_interest, mut_count_matrix)
 
 
 ############################################################
@@ -232,15 +286,55 @@ tmm_list <- lapply(tmm_list, function(tmm) {
 #' Estimate and visualize dispersion
 #' @param d edgeR output data structure to visualize
 visualize_dispersion <- function(d) {
-  d <- estimateCommonDisp(d, verbose = TRUE)
+  #d <- estimateCommonDisp(d, verbose = TRUE)
   # BRCA: Disp = 0.92427 , BCV = 0.9614
   # Pan-Cancer: 
-  d <- estimateTagwiseDisp(d, trend="none")
-  plotBCV(d, cex=0.4)
+  #d <- estimateTagwiseDisp(d, trend="none")
+  #plotBCV(d, cex=0.4)
+  
+  d <- estimateDisp(d)
 }
 visualize_dispersion(d)
 # Or, if we are looking pan-cancer, apply to each item in list
 lapply(d_list, visualize_dispersion)
+
+
+############################################################
+### OPT: ESTIMATE & VISUALIZE NAIVE DIFF. GENE EXPRESSION ###
+############################################################
+#' Estimate and visualize top differentially expressed genes,
+#' without using a linear modeling approach. Examine the 
+#' differences between the DE genes by mutation status of a 
+#' given protein (e.g. TP53).  
+#' @param d edgeR output data structure to visualize
+visualize_de_by_mut_status <- function(d) {
+  
+  #d <- visualize_dispersion(d)
+  
+  # Get the DE genes across groups (1 is mutated, 0 is not mutated)
+  et <- exactTest(d)
+  topTags <- topTags(et)
+  print(topTags)
+  de1 <- decideTestsDGE(et, adjust.method="BH", p.value=0.05)
+  print(summary(de1))
+  
+  # Adjust the topTags table
+  print(head(rownames(topTags)))
+  rownames(topTags) <- unlist(lapply(rownames(topTags), function(x) unlist(strsplit(as.character(x), ".", fixed = TRUE))[1]))
+  print(head(topTags))
+  topTags$table$gene.name <- unlist(lapply(rownames(topTags), function(ensg)
+    paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == x, 'external_gene_name'])), collapse = ";")))
+  
+  
+  return(topTags)
+
+}
+
+
+topHits <- visualize_de_by_mut_status(d_tp53Mut)
+
+# Or, if we are looking pan-cancer, apply to each item in list
+lapply(d_list, visualize_de_by_mut_status)
 
 
 ############################################################
@@ -330,7 +424,7 @@ create_output_df <- function(path, sample_sheet_subset, counts_or_fpkm) {
 
     print(paste(i, paste("/", length(patient_filenames))))
     
-    return(counts)
+    return(counts_df)
   })
   expression_dataframe <- as.data.frame(do.call(cbind, expression_list))
   rownames(expression_dataframe) <- gene_ids
@@ -356,7 +450,21 @@ expression_dataframe_counts <- expression_dataframe_counts[,which(unlist(lapply(
                                                                                 function(x) !all(is.na(x)))))]
 expression_dataframe_fpkm <- expression_dataframe_fpkm[,which(unlist(lapply(expression_dataframe_fpkm, 
                                                                             function(x) !all(is.na(x)))))]
-# Leaves 6825 columns
+
+# Remove the rows that do not start with ENSG
+expression_dataframe_counts <- expression_dataframe_counts[grepl("ENSG", rownames(expression_dataframe_counts)),]
+expression_dataframe_fpkm <- expression_dataframe_fpkm[grepl("ENSG", rownames(expression_dataframe_fpkm)),]
+
+# OPT: use edgeR to filter out any genes that are lowly expressed
+counts_matrix <- as.matrix(expression_dataframe_counts)
+keep <- filterByExpr(counts_matrix, group = )
+counts_matrix <- counts_matrix[keep,]
+
+expression_dataframe_counts <- as.data.frame(counts_matrix)
+
+# Remove genes that are not expressed in any cell
+#expression_dataframe_counts <- expression_dataframe_counts[rowSums(expression_dataframe_counts) > 0,]
+#expression_dataframe_fpkm <- expression_dataframe_fpkm[rowSums(expression_dataframe_fpkm) > 0,]
 
 # Save the expression data frame to a CSV
 output_filename_counts <- paste(output_path, "expression_counts_DF.csv", sep = "")
@@ -369,9 +477,128 @@ write.csv(expression_dataframe_fpkm, file = output_filename_fpkm, row.names = TR
 #
 # Read back if necessary
 expression_dataframe_counts <- read.csv(output_filename_counts, header = TRUE, row.names = 1, 
-                                      check.names = FALSE, )
+                                      check.names = FALSE)
 expression_dataframe_fpkm <- read.csv(output_filename_fpkm, header = TRUE, row.names = 1, 
-                                 check.names = FALSE, )
+                                 check.names = FALSE)
+
+############################################################
+############################################################
+### OPT: FILTER BY DIFFERENTIAL EXPRESSION ACROSS PATIENTS ###
+############################################################
+############################################################
+#' Filter out genes that have less than a standard deviation of 
+#' 1 across all patients in the cohort (e.g. do not significantly 
+#' vary)
+#' @param expression_df
+filter_by_sd <- function(expression_df) {
+  
+  # Get the standard deviation across each row of the DF
+  expression_matrix <- as.matrix(expression_df)
+  sd_vector <- rowSds(expression_matrix)
+  
+  # Limit the matrix to only those rows with a SD less than 1
+  expression_matrix_filt <- expression_matrix[which(sd_vector > 1),]
+  
+  return(as.data.frame(expression_matrix_filt))
+}
+
+expression_dataframe_filt <- filter_by_df(expression_dataframe)
+
+
+############################################################
+############################################################
+### FILTER BY MEAN/MEDIAN EXPRESSION PRIOR TO RANK/ QUANTILE
+### NORMALIZATION: COUNTS ONLY ###
+############################################################
+############################################################
+
+# Visualize Read Count Distributions
+hist(rowMedians(as.matrix(expression_dataframe_counts)), main = "Histogram of Median Read Counts Per Gene", 
+     xlab = "Median # of Reads per Gene, Across All Patients")
+hist(rowMeans(expression_dataframe_counts), main = "Histogram of Average Read Counts Per Gene", 
+     xlab = "Average # of Reads per Gene, Across All Patients")
+hist(rowSums(expression_dataframe_counts), main = "Histogram of Total Read Counts Per Gene", 
+     xlab = "Sum of Reads per Gene, Across All Patients")
+
+# Filter overall by a given mean or median read count
+X <- 10
+expression_dataframe_counts_minMedX <- expression_dataframe_counts[rowMedians(as.matrix(expression_dataframe_counts)) > X,]
+expression_dataframe_counts_minAvgX <- expression_dataframe_counts[rowMeans(expression_dataframe_counts) > X,]
+
+# Filter per cancer type
+clinical_df <- read.csv(paste(path, "clinical_data_subset_2.csv", sep = ""), 
+                        header = TRUE, check.names = FALSE)
+
+#' Given an expression data frame and a clinical data frame, keeps only genes that,
+#' per cancer type, exceed a mean or median of X
+#' @param patient_cancer_mapping a list of all the 4-digit TCGA patient IDs per cancer type
+#' @param expression_df a merged, pan-cancer expression count DF
+#' @param medOrAvg "Med" or "Avg" to indicate if we are using the median or average
+#' @param X a median or average below which we will drop the gene
+filter_per_ct <- function(patient_cancer_mapping, expression_df, medOrAvg, X) {
+  
+  expression_df_filt_cols <- lapply(1:length(patient_cancer_mapping), function(i) {
+    patients <- patient_cancer_mapping[[i]]
+    cols_to_keep <- unlist(lapply(1:ncol(expression_df), function(j) {
+      colnam <- colnames(expression_df)[j]
+      pat <- unlist(strsplit(colnam, "-", fixed = TRUE))[3]
+      return(ifelse(pat %fin% patients, TRUE, FALSE))
+    }))
+    expression_df_sub_pats <- expression_df[,cols_to_keep]
+    
+    if (medOrAvg == "Med") {
+      new_df <- expression_df_sub_pats[rowMedians(as.matrix(expression_df_sub_pats)) > X, ]
+      
+    } else if (medOrAvg == "Avg") {
+      new_df <- expression_df_sub_pats[rowMeans(as.matrix(expression_df_sub_pats)) > X,]
+      
+    } else {
+      print(paste("Invalid analysis type:", medOrAvg))
+      return(0)
+    }
+    new_df$ensg <- rownames(new_df)
+    new_df <- as.data.table(new_df)
+    return(new_df)
+  })
+  
+  print(head(expression_df_filt_cols))
+  #expression_dataframe_counts_filt <- do.call(cbindX, expression_df_filt_cols)
+  #expression_dataframe_counts_filt <- expression_df_filt_cols %>% reduce(full_join, by = 'rowname')
+  #expression_dataframe_counts_filt <- Reduce(function(x, y) merge(x, y, all=TRUE, by='row.names'), 
+                                             #expression_df_filt_cols)
+  expression_dataframe_counts_filt <- expression_df_filt_cols[[1]]
+  for(i in 2:length(expression_df_filt_cols)) {
+    expression_dataframe_counts_filt <- merge(expression_dataframe_counts_filt, 
+                                               expression_df_filt_cols[[i]], 
+                                              all = TRUE, by = 'ensg')
+  }
+  
+  return(expression_dataframe_counts_filt)
+}
+
+expression_dataframe_counts_tcga <- expression_dataframe_counts[,grepl("TCGA", colnames(expression_dataframe_counts))]
+
+# Create patient-cancer type matching
+specific_types <- unique(clinical_df$project_id)
+patient_cancer_mapping <- lapply(specific_types, function(ct) {
+  pats <- clinical_df[grepl(ct, clinical_df$project_id),'case_submitter_id']
+  pats_ids <- unique(unlist(lapply(pats, function(pat) unlist(strsplit(pat, "-", fixed = TRUE))[3])))
+  return(pats_ids)
+})
+names(patient_cancer_mapping) <- specific_types
+
+expression_dataframe_counts_minAvg10_perCt <- as.data.frame(filter_per_ct(patient_cancer_mapping, 
+                                                            expression_dataframe_counts_tcga,
+                                                            "Avg", 10))
+expression_dataframe_counts_minMed10_perCt <- as.data.frame(filter_per_ct(patient_cancer_mapping,
+                                                            expression_dataframe_counts_tcga,
+                                                            "Med", 10))
+
+# Remove any entirely NA rows
+
+
+write.csv(expression_dataframe_counts_minAvg10_perCt, paste0(output_path, "expression_counts_DF_mean_Gr10_perCt.csv"))
+write.csv(expression_dataframe_counts_minMed10_perCt, paste0(output_path, "expression_counts_DF_mean_MedGr10_perCt.csv"))
 
 
 ############################################################
@@ -386,7 +613,7 @@ expression_dataframe_fpkm <- read.csv(output_filename_fpkm, header = TRUE, row.n
 #' @param df a raw count expression data frame
 quantile_normalize <- function(df){
   df_rank <- apply(df, MARGIN = 2, function(y) rank(y, ties.method="random"))
-  df_sorted <- data.frame(apply(df, MARGIN = 2, sort))
+  df_sorted <- as.data.frame(apply(df, MARGIN = 2, sort))
   df_mean <- apply(df_sorted, MARGIN = 1, mean)
   
   index_to_mean <- function(my_index, my_mean){
@@ -400,24 +627,48 @@ quantile_normalize <- function(df){
   return(df_final)
 }
 
-expression_df_quantile_norm <- quantile_normalize(expression_dataframe_counts)
+#expression_df_quantile_norm <- quantile_normalize(expression_dataframe_counts)
+expression_df_quantile_norm <- quantile_normalize(expression_dataframe_counts_minMedX)
+expression_df_quantile_norm <- quantile_normalize(expression_dataframe_counts_minAvgX)
 
 # Write to DF
 write.csv(expression_df_quantile_norm, paste(output_path, "expression_quantile_norm_DF.csv", sep = ""))
+
 
 #' Rank-normalizes a given expression count DF
 #' @param df the expression count DF to be normalized
 rank_normalize <- function(df) {
   df_rank <- as.data.frame(apply(df, MARGIN = 2, function(y) {
-    return(rank(y, ties.method = "random") / length(y))
+    return(rank(y, ties.method = "average") / length(y))
   }))
-  return(as.data.frame(df_rank))
+  return(df_rank)
 }
 
 expression_df_rank_norm <- rank_normalize(expression_dataframe_counts)
+expression_df_rank_norm <- rank_normalize(expression_dataframe_counts_minMedX)
+expression_df_rank_norm <- rank_normalize(expression_dataframe_counts_minAvgX)
 
 # Write to DF
 write.csv(expression_df_rank_norm, paste(output_path, "expression_rank_norm_DF.csv", sep = ""))
+
+########################
+# For any given sample, visualize the distribution of rank-normalized values (should be uniform)
+hist(expression_df_rank_norm$`TCGA-AC-A6IV-01A`, main = "", xlab = "Expression of Patient A6IV-01A")
+
+# Aside: count the number of duplicates in each column
+duplicate_info_list <- apply(expression_dataframe_counts, MARGIN = 2, function(y) {
+  print(head(y))
+  y <- as.integer(y)
+  print(paste("Num duplicated", sum(duplicated(y))))
+  print(paste("Num 0's", length(y[y==0])))
+  print(paste("Num 1's", length(y[y==1])))
+  print(paste("Most common values", names(sort(summary(as.factor(y)), decreasing = TRUE)[1:10])))
+  return(data.frame("Num. Duplicated" = sum(duplicated(y)), "Num. 0s" = length(y[y==0]),
+                    "Num. 1s" = length(y[y==1]), "Most Common Values" = 
+                      paste(names(sort(summary(as.factor(y)), decreasing = TRUE)[1:10]), collapse = ",")))
+})
+duplicate_info <- rbindlist(duplicate_info_list)
+
 
 
 ############################################################
@@ -447,13 +698,14 @@ write.csv(expression_dataframe_filt, file = output_filename_fpkm_filt, row.names
 new_rownames <- unlist(lapply(rownames(expression_dataframe_filt), function(ensg) {
   gn <- paste(unique(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == ensg, 
                                        'external_gene_name']), collapse = ";")
-  if (!(gn == "") | (grepl("Y_RNA", gn))) {return(gn)}
+  if (!(gn == "") | (!(grepl("Y_RNA", gn)))) {return(gn)}
   else {return(NA)}
 }))
 indic_to_delete <- which(is.na(new_rownames))
+# indic_to_delete <- which(new_rownames == "" | new_rownames == "Y_RNA")
 expression_df_filt <- expression_df_filt[-indic_to_delete,]
-rownames(expression_dataframe_filt) <- new_rownames[!is.na(new_rownames)]
-write.csv(expression_dataframe_filt, paste(output_path, "expression_fpkm_filt_gn_DF.csv", 
+rownames(expression_df_filt) <- new_rownames[-indic_to_delete]
+write.csv(expression_df_filt, paste(output_path, "expression_fpkm_filt_gn_DF.csv", 
                                            sep = ""))
 
 

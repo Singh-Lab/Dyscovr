@@ -320,7 +320,7 @@ output_cnv_df <- make_output_cnv_dataframe(path, ascat2_filenames,
                                            patient_id_list, biosp_df)
 
 # Write the output data frame to a file
-fwrite(output_cnv_df, paste(output_path, "Gene-level Raw/CNV_DF_AllGenes.csv", sep = ""))
+write.csv(output_cnv_df, paste(output_path, "Gene-level Raw/CNV_DF_AllGenes.csv", sep = ""))
 
 
 ############################################################

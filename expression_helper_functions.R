@@ -7,6 +7,7 @@
 # particular genes under different conditions
 
 library(dplyr)
+library(edgeR)
 
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
@@ -26,29 +27,39 @@ tp53_ensg <- "ENSG00000141510"
 foxa1 <- "P55317" #FOXA1
 foxa1_ensg <- "ENSG00000129514"
 
+pik3ca <- "P42336"
+pik3ca_ensg <- "ENSG00000121879"
+
 ############################################################
 ### IMPORT FILES NECESSARY TO CREATE A STARTER DF FOR THIS
 ### PROTEIN OF INTEREST
 ############################################################
 # Non-Tumor-Normal Matched Files
-methylation_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Methylation/methylation_bucketed_Beta_CancerOnly_IntersectPatients.csv", sep = ""), 
+methylation_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Methylation/methylation_M_CancerOnly_IntersectPatients.csv", sep = ""), 
                            header = TRUE, row.names = 1, check.names = FALSE)
 mutation_targ_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_CancerOnly_IntersectPatients.csv", sep = ""), 
                              header = TRUE, row.names = 1, check.names = FALSE)
 mutation_regprot_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Regprot_Mutation/iprotein_results_missense_IntersectPatients.csv", sep = ""), 
                                 header = TRUE, row.names = 1, check.names = FALSE)
-cna_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/CNV/CNA_AllGenes_Bucketed_InclAmp_CancerOnly_IntersectPatients.csv", sep = ""), 
+cna_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/CNV/CNA_AllGenes_CancerOnly_IntersectPatients.csv", sep = ""), 
                    header = TRUE, row.names = 1, check.names = FALSE)
 rownames(cna_df) <- unlist(lapply(rownames(cna_df), function(x) unlist(strsplit(x, ".", fixed = TRUE))[1]))
 patient_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Patient/combined_patient_sample_cibersort_total_frac_tmm_IntersectPatients.csv", sep = ""), 
                        header = TRUE, row.names = 1, check.names = FALSE)
 
+methylation_df <- as.data.table(methylation_df)
+mutation_targ_df <- as.data.table(mutation_targ_df)
+mutation_regprot_df <- as.data.table(mutation_regprot_df)
+cna_df$ensg_id <- rownames(cna_df)
+cna_df <- as.data.table(cna_df)
+patient_df$sample_id <- rownames(patient_df)
+patient_df <- as.data.table(patient_df)
 
 # See "fill_regprot_inputs" function in linear_model.R file
 starter_df_foxa1 <- fill_regprot_inputs(patient_df, foxa1, foxa1_ensg, mutation_regprot_df, methylation_df, 
                                   cna_df, "eQTL")
 starter_df_tp53 <- fill_regprot_inputs(patient_df, tp53, tp53_ensg, mutation_regprot_df, methylation_df, 
-                                        cna_df, "bucket_inclAmp", TRUE, "eQTL", FALSE, FALSE)
+                                        cna_df, "rawCNA", FALSE, FALSE, FALSE)
 
 ############################################################
 ### DEFINE A TARGET GENE OF INTEREST
@@ -59,17 +70,15 @@ ensg <- "ENSG00000073584"
 ############################################################
 ### IMPORT EXPRESSION DATAFRAMES
 ############################################################
-expression_df_counts <- read.csv(paste(output_path, "expression_rank_norm_DF.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
-expression_df_fpkm <- read.csv(paste(output_path, "expression_fpkm_filt_DF.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
-expression_df_tmm <- read.csv(paste(output_path, "tmm_normalized_expression_counts.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
-expression_df_quantile_norm <- read.csv(paste(output_path, "expression_quantile_norm_DF.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
-expression_df_rank_norm <- read.csv(paste(output_path, "expression_rank_norm_DF.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
-  
+expression_df_fpkm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_fpkm_CancerOnly_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
+expression_df_tmm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_tmm_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
+expression_df_quantile_norm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_quantile_norm_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
+expression_df_rank_norm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_rank_norm_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
 
 ############################################################
 ### CREATE OUTLIER FILTERED FPKM AND TMM DATAFRAMES
 ############################################################
-# See 'filter_expression_df' function in linear_model.R
+# See 'filter_expression_df' function in linear_model_helper_functions.R
   # Will split the patient groups based on whether or not they have a mutation in the given
   # target gene, and then filter outliers in each group using a 1.5*IQR + Q3 schema
 starter_df_fpkm_filt_foxa1 <- filter_expression_df(expression_df_fpkm, starter_df_foxa1, ensg)
@@ -110,8 +119,8 @@ expression_df_tmm_filt_tp53 <- expression_df_tmm[,cols_to_keep_tmm_tp53]
 #' rows are ENSG IDs)
 #' @param ensg the ENSG ID of the target gene of interest
 visualize_tg_expression <- function(expression_df, ensg) {
-  plot(as.numeric(expression_df[rownames(expression_df) == ensg,]), xlab = "Patient", ylab = "Expression")
-  abline(h = mean(as.numeric(expression_df[rownames(expression_df) == ensg,])), col = "red")
+  plot(as.numeric(expression_df[expression_df$ensg_id == ensg,]), xlab = "Patient", ylab = "Expression")
+  abline(h = mean(as.numeric(expression_df[expression_df$ensg_id == ensg,])), col = "red")
 }
 
 
@@ -150,10 +159,11 @@ get_mutant_patients <- function(mutation_regprot_df, regprot_name) {
   return(mutant_patients)
 }
 
+mutation_regprot_df <- as.data.frame(mutation_regprot_df)
 foxa1_mutant_patients <- get_mutant_patients(mutation_regprot_df, "FOXA1")
 tp53_mutant_patients <- get_mutant_patients(mutation_regprot_df, "P53")
 
-# Limit the expression dataframe to just cancer samples
+# Limit the expression data frame to just cancer samples
 express_df_cancer_counts <- expression_df_counts[,!(grepl("-11", colnames(expression_df_counts)))]
 express_df_cancer_fpkm <- expression_df_fpkm[,!(grepl("-11", colnames(expression_df_fpkm)))]
 express_df_cancer_tmm <- expression_df_tmm[,!(grepl("-11", colnames(expression_df_tmm)))]
@@ -177,6 +187,7 @@ get_expression_by_mut_group <- function(express_df_cancer, mutant_patients, ensg
   expression_normal <- as.numeric(express_df_cancer[rownames(express_df_cancer) == ensg, !(colnames(express_df_cancer) %in% mutant_patients)])
   return(list("mutants" = expression_mutants, "normal" = expression_normal))
 }
+
 
 ### MAKE VISUALIZATIONS ###
 #' Makes a boxplot to show the expression in each group (mutated/unmutated) for each 
@@ -233,6 +244,8 @@ make_expression_by_mut_group_vis <- function(mutant_patients, ensg, tg_name, reg
   expression_tmm_normal <- expression_tmm[[2]]
   dataList_tmm <- list("No Mutation" = expression_tmm_normal, "Mutation" = expression_tmm_mutants)
   boxplot(dataList_tmm, ylab = "Expression (TMM)", main = paste(tg_name, paste("Expression By", paste(regprot_name, "Mutation Status"))))
+  boxplot(dataList_tmm, ylab = "Expression (TMM)", main = "")
+  
   
   # TMM, Outliers Filtered
   expression_tmm_filt <- get_expression_by_mut_group(express_df_cancer_tmm_filt, mutant_patients, ensg)
@@ -262,6 +275,4 @@ make_expression_by_mut_group_vis(tp53_mutant_patients, ensg, "ZNF763", "TP53",
                                              express_df_cancer_fpkm_filt_tp53, express_df_cancer_tmm, 
                                              express_df_cancer_tmm_filt_tp53, express_df_cancer_quant_norm, 
                                              express_df_cancer_rank_norm)
-
-
 

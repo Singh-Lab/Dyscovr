@@ -4,6 +4,7 @@
 ############################################################
 
 library(dplyr)
+library(VennDiagram)
 
 # This file contains additional pre-processing that is applied to all the data file
 # types that will be input to the linear model function.
@@ -15,6 +16,7 @@ library(dplyr)
       # and I-Binding Position) in the form of matched Uniprot and ENSG ID inputs
   # 5. Construct a data frame of targets for a given regulatory protein of interest (for model
       # testing purposes)
+  # 6. Find samples that have both an amplification and mutation, or deletion and mutation, in the same gene
 
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
@@ -50,13 +52,14 @@ all_genes_id_conv <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project 
 
 ### NON-TUMOR-NORMAL MATCHED ###
 # 1. Filtered FPKM 
-expression_df_fpkm <- fread(paste(main_path, "Expression/expression_fpkm_filt_DF.csv", sep = ""), 
+expression_df_fpkm <- fread(paste(main_path, "Expression/expression_fpkm_filt_gn_DF.csv", sep = ""), 
                           header = TRUE)  # fpkm-normalized and filtered
 colnames(expression_df_fpkm)[1] <- 'ensg_id'
 
 # 2. Filtered TMM 
 expression_df_tmm <- fread(paste(main_path, "Expression/tmm_normalized_expression_counts.csv", sep = ""), 
                           header = TRUE)
+# expression_df_tmm <- fread(paste(main_path, "Expression/expression_tmm_DF_TO.csv", sep = ""), header = TRUE)
 colnames(expression_df_tmm)[1] <- 'ensg_id'
 
 # 3. Quantile-Normalized
@@ -81,9 +84,9 @@ colnames(expression_df_rn)[1] <- 'ensg_id'
 
 ### NON-TUMOR-NORMAL MATCHED ###
 # Raw
-methylation_df_Beta <- fread(paste(main_path, "Methylation/ methylation_DF_Beta.csv", sep = ""), 
+methylation_df_Beta <- fread(paste(main_path, "Methylation/methylation_DF_Beta.csv", sep = ""), 
                         header = TRUE)
-methylation_df_M <- fread(paste(main_path, "Methylation/ methylation_DF_M.csv", sep = ""), 
+methylation_df_M <- fread(paste(main_path, "Methylation/methylation_DF_M.csv", sep = ""), 
                         header = TRUE)
 
 # Thresholded
@@ -119,6 +122,8 @@ methylation_df_bucketed_M$Gene_Symbol <- methylation_df_M$Gene_Symbol # If neede
 ### NON-TUMOR-NORMAL MATCHED ###
 mutation_targ_df <- fread(paste(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense.csv", sep = ""), 
                              header = TRUE)
+#mutation_targ_df <- fread(paste(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense_ALL.csv", sep = ""), 
+                          #header = TRUE)
 colnames(mutation_targ_df)[1] <- 'Gene_Symbol'
 colnames(mutation_targ_df)[2:ncol(mutation_targ_df)] <- unlist(lapply(colnames(mutation_targ_df)[2:ncol(mutation_targ_df)], function(x) 
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-"))) # Fix the sample IDs
@@ -170,10 +175,10 @@ mutation_regprot_df <- fread(paste(main_path, "Mutation/ibindingpos_results_miss
 cna_df_raw <- read.csv(paste(main_path, "CNV/Gene-level Raw/CNV_DF_AllGenes.csv", sep = ""), 
                        header = TRUE, row.names = 1, check.names = FALSE)
 # Bucketed Copy Number (Incl. Amp)
-cna_df_bucket_inclAmp <- read.csv(paste(main_path, "CNV/Gene-level Raw/CNV_DF_bucketed_inclAmp_AllGenes.csv", sep = ""), 
+cna_df_bucket_inclAmp <- read.table(paste(main_path, "CNV/Gene-level Raw/CNV_DF_bucketed_inclAmp_AllGenes.tsv", sep = ""), 
                 header = TRUE, row.names = 1, check.names = FALSE)
 # Bucketed Copy Number (Excl. Amp)
-cna_df_bucket_exclAmp <- read.csv(paste(main_path, "CNV/Gene-level Raw/CNV_DF_bucketed_exclAmp_AllGenes.csv", sep = ""), 
+cna_df_bucket_exclAmp <- read.table(paste(main_path, "CNV/Gene-level Raw/CNV_DF_bucketed_exclAmp_AllGenes.tsv", sep = ""), 
                 header = TRUE, row.names = 1, check.names = FALSE)
 
 #' Adjust the gene names to remove the part after the '.'
@@ -198,7 +203,9 @@ patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/pat
                        header = TRUE, row.names = 1)
 
 ### NON-TUMOR-NORMAL MATCHED ###
-patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm.csv", sep = ""), 
+#patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm.csv", sep = ""), 
+                       #header = TRUE, row.names = 1)
+patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_normAge.csv", sep = ""), 
                        header = TRUE, row.names = 1)
 
 # If BRCA, eliminate the gender column
@@ -225,9 +232,9 @@ sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/samp
                       header = TRUE, row.names = 1)  # Total fraction
 sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_cibersort_total_frac_qn_top10k.csv", sep = ""), 
                       header = TRUE, row.names = 1)  # Total fraction
-sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_cibersort_total_frac_rn.csv", sep = ""), 
+sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_cibersort_total_frac_rn_mean_MedGr10.csv", sep = ""), 
                       header = TRUE, row.names = 1)  # Total fraction
-sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_cibersort_total_frac_rn_top10k.csv", sep = ""), 
+sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_cibersort_total_frac_rn_mean_MedGr10_top10k.csv", sep = ""), 
                       header = TRUE, row.names = 1)  # Total fraction
 
 # Cibersort Abs
@@ -239,9 +246,9 @@ sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/samp
                       header = TRUE, row.names = 1)   # Per-Cell-Type, CIBERSORT Abs
 sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_cibersort_abs_qn_top10k.csv", sep = ""), 
                       header = TRUE, row.names = 1)   # Per-Cell-Type, CIBERSORT Abs
-sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_cibersort_abs_rn.csv", sep = ""), 
+sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_cibersort_abs_rn_mean_MedGr10.csv", sep = ""), 
                       header = TRUE, row.names = 1)   # Per-Cell-Type, CIBERSORT Abs
-sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_cibersort_abs_rn_top10k.csv", sep = ""), 
+sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_cibersort_abs_rn_mean_MedGr10_top10k.csv", sep = ""), 
                       header = TRUE, row.names = 1)   # Per-Cell-Type, CIBERSORT Abs
 
 sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_timer_tmm.csv", sep = ""), 
@@ -252,9 +259,9 @@ sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/samp
                       header = TRUE, row.names = 1)   # Per-Cell-Type, TIMER
 sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_timer_qn_top10k.csv", sep = ""), 
                       header = TRUE, row.names = 1)   # Per-Cell-Type, TIMER
-sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_timer_rn.csv", sep = ""), 
+sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_timer_rn_mean_MedGr10.csv", sep = ""), 
                       header = TRUE, row.names = 1)   # Per-Cell-Type, TIMER
-sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_timer_rn_top10k.csv", sep = ""), 
+sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_timer_rn_mean_MedGr10_top10k.csv", sep = ""), 
                       header = TRUE, row.names = 1)   # Per-Cell-Type, TIMER
 
 
@@ -318,22 +325,22 @@ write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sampl
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_total_frac_fpkm_ntnm.csv", sep = ""))
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_total_frac_fpkm_top10k_ntnm.csv", sep = ""))
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_total_frac_qn_top10k_ntnm.csv", sep = ""))
-write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_total_frac_rn_ntnm.csv", sep = ""))
-write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_total_frac_rn_top10k_ntnm.csv", sep = ""))
+write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_total_frac_rn_mean_MedGr10_ntnm.csv", sep = ""))
+write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_total_frac_rn_mean_MedGr10_top10k_ntnm.csv", sep = ""))
 
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_abs_tmm_ntnm.csv", sep = ""))
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_abs_fpkm_ntnm.csv", sep = ""))
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_abs_fpkm_top10k_ntnm.csv", sep = ""))
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_abs_qn_top10k_ntnm.csv", sep = ""))
-write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_abs_rn_ntnm.csv", sep = ""))
-write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_abs_rn_top10k_ntnm.csv", sep = ""))
+write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_abs_rn_mean_MedGr10_ntnm.csv", sep = ""))
+write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_abs_rn_mean_MedGr10_top10k_ntnm.csv", sep = ""))
 
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_timer_tmm_ntnm.csv", sep = ""))
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_timer_fpkm_ntnm.csv", sep = ""))
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_timer_fpkm_top10k_ntnm.csv", sep = ""))
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_timer_qn_top10k_ntnm.csv", sep = ""))
-write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_timer_rn_ntnm.csv", sep = ""))
-write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_timer_rn_top10k_ntnm.csv", sep = ""))
+write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_timer_rn_mean_MedGr10_ntnm.csv", sep = ""))
+write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_timer_rn_mean_MedGr10_top10k_ntnm.csv", sep = ""))
 
 
 #
@@ -341,7 +348,7 @@ write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sampl
 #
 
 # Read this back (generic)
-patient_sample_df <- fread(paste(main_path, "Linear Model/combined_patient_sample_DF.csv", sep = ""),
+patient_sample_df <- fread(paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF.csv", sep = ""),
                               header = TRUE)
 
 ############################################################
@@ -360,7 +367,7 @@ write.csv(methylation_df, paste(main_path, "Methylation/methylation_DF_Beta_canc
 write.csv(methylation_df, paste(main_path, "Methylation/methylation_DF_M_cancer_only.csv", sep = ""))
 write.csv(methylation_df, paste(main_path, "Methylation/methylation_DF_Beta_0.8_cancer_only.csv", sep = ""))
 write.csv(methylation_df, paste(main_path, "Methylation/methylation_DF_bucketed_Beta_cancer_only.csv", sep = ""))
-write.csv(methylation_df, paste(main_path, "Methylation/methylation_DF_bucketed_M_0.8_cancer_only.csv", sep = ""))
+write.csv(methylation_df, paste(main_path, "Methylation/methylation_DF_bucketed_M_cancer_only.csv", sep = ""))
 
 
 ############################################################
@@ -389,9 +396,15 @@ methylation_patients <- get_unique_patients(colnames(methylation_df)[2:ncol(meth
 exp_samp_ids <- unlist(lapply(colnames(expression_df)[2:ncol(expression_df)], function(x)
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
 expression_patients <- get_unique_patients(exp_samp_ids)  # 738
-mutation_targ_patients <- get_unique_patients(colnames(mutation_targ_df)[2:ncol(mutation_targ_df)]) # 978
+mutation_targ_patients <- unlist(get_unique_patients(colnames(mutation_targ_df)[2:ncol(mutation_targ_df)])) # 978
 mutation_regprot_patients <- unique(unlist(lapply(mutation_regprot_df$Patient, function(x) 
   unlist(strsplit(x, ";", fixed = TRUE)))))   # 619 -- ignore this
+
+# If needed
+#patient_sample_df <- as.data.frame(patient_sample_df)
+#rownames(patient_sample_df) <- unlist(patient_sample_df[,1]) 
+#patient_sample_df <- patient_sample_df[,2:ncol(patient_sample_df)]
+
 clin_samp_ids <- unlist(lapply(rownames(patient_sample_df), function(x)
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
 clinical_patients <- get_unique_patients(clin_samp_ids)  # 739
@@ -427,10 +440,15 @@ subset_by_intersecting_ids <- function(intersecting_patients, df, colNames) {
     df_adj <- df_adj[, !(grepl("-1", colnames(df_adj), fixed = TRUE))]
 
   } else {
+    if(length(unlist(strsplit(rownames(df)[1], "-", fixed = TRUE))) == 4) {
+      rownames(df) <- unlist(lapply(rownames(df), function(x) paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], 
+                                                                    collapse = "-")))
+    }
     # Keep only intersecting patients
     just_patients <- unlist(lapply(rownames(df), function(x)
       unlist(strsplit(x, "-", fixed = TRUE))[1]))
     df_adj <- df[which(just_patients %fin% intersecting_patients),]
+    print(head(df_adj))
     # Keep only cancer samples
     just_samples <- unlist(lapply(rownames(df_adj), function(x)
       unlist(strsplit(x, "-", fixed = TRUE))[2]))
@@ -617,4 +635,65 @@ write.csv(sample_targets_DF, paste(main_path, "Linear Model/FOXA1/foxa1_chipeat_
 
 # Option 3
 write.csv(sample_targets_DF, paste(main_path, "Linear Model/allgene_targets.csv", sep = ""))
+
+############################################################
+############################################################
+# 6. FIND SAMPLES WITH MUTATION AND CNA IN SAME GENE
+############################################################
+############################################################
+#' Given a sample set of interest, and whether we are interested in amplifications or
+#' deletions, identifies the overlap of samples that have both a mutation event 
+#' and an amplification or deletion in the given gene. Eliminate overlap in the 
+#' given gene and return this new patient list
+#' @param mut_count_matrix a mutation count matrix with sample IDs as column names (XXXX-XX)
+#' and a column called Gene_Symbol with the external gene name
+#' @param cna_df a CNA data frame with the raw copy number of each gene (rownames are gene
+#' ENSG IDs) for each sample (colnames are sample IDs, XXXX-XX)
+#' @param gn the external gene name of the gene of interest
+#' @param ensg the ENSG ID of the gene of interest
+#' @param samples a vector of patient samples (XXXX-XX) in the cohort of interest
+#' @param ampOrDel either "Amplification" to indicate we are interested in overlap with 
+#' amplifications, or "Deletion" to indicate we are interested in overlap with deletions
+find_samps_w_muts_and_cnas_in_same_gene <- function(mut_count_matrix, cna_df, gn, 
+                                                    ensg, samples, ampOrDel) {
+  
+  colnames(mut_count_matrix) <- unlist(lapply(colnames(mut_count_matrix), function(x) {
+    return(unlist(strsplit(x, "-", fixed = TRUE))[1])
+  }))
+  colnames(cna_df) <- unlist(lapply(colnames(cna_df), function(x) {
+    return(unlist(strsplit(x, "-", fixed = TRUE))[1])
+  }))
+  
+  samples_mut <- colnames(mut_count_matrix)[intersect(which(as.numeric(unlist(
+    mut_count_matrix[mut_count_matrix$Gene_Symbol == gn,])) == 1), 
+    which(colnames(mut_count_matrix) %in% samples))]
+  
+  if(ampOrDel == "Amplification") {
+    samples_cna <- colnames(cna_df)[intersect(which(as.numeric(unlist(cna_df[rownames(cna_df) == ensg,])) > 2), 
+                                              which(colnames(cna_df) %in% samples))]
+  } else {
+    samples_cna <- colnames(cna_df)[intersect(which(as.numeric(unlist(cna_df[rownames(cna_df) == ensg,])) < 2), 
+                                              which(colnames(cna_df) %in% samples))]
+  }
+  
+  # Plot a Venn Diagram to visualize the overlap between these two groups
+  plt <- venn.diagram(list(samples_mut, samples_cna), category.names = c("Mutation", ampOrDel), 
+               filename = NULL, output = TRUE, lwd = 2, lty = 'blank', fill = c("red", "blue"), 
+               cex = 2, fontface = "bold", fontfamily = "sans", cat.pos = 180,
+               cat.fontfamily = "sans", cat.cex = 1)
+              #, cat.cex = 0.6, cat.fontface = "bold",
+              #, rotation = 1)
+  grid::grid.draw(plt)
+  
+  # Get & return the samples without overlap
+  samples_no_overlap <- c(setdiff(samples_mut, samples_cna), setdiff(samples_cna, samples_mut))
+  return(samples_no_overlap)
+}
+
+gn <- "TP53"
+ensg <- "ENSG00000141510"
+  
+gn <- "PIK3CA"
+ensg <- "ENSG00000121879"
+
 
