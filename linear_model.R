@@ -591,35 +591,17 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
             print(paste("Formula:", formula))
           }
           
-          if(!tumNormMatched) {
-            lm_fit <- tryCatch( 
-              { 
-                if(is_rank_or_quant_norm) {
-                  speedglm::speedlm(formula = formula, data = lm_input_table)
-                } else {
-                  speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
-                                    data = lm_input_table)
-                }
-              }, error = function(cond) {
-                message("There was a problem with this linear model run:")
-                message(cond)
-                return(NA)
-              })
-          } else {
-            lm_fit <- tryCatch(
-              {
-                if(is_rank_or_quant_norm) {
-                  speedglm::speedlm(formula = formula, data = lm_input_table)
-                } else {
-                  speedglm::speedlm(formula = formula, offset = log2(Lib_Size_Tum / Lib_Size_Norm), 
-                                    data = lm_input_table)
-                }
-              }, error = function(cond) {
-                message("There was a problem with this linear model run:")
-                message(cond)
-                return(NA)
-              })
-          }
+          lm_fit <- tryCatch(
+            {
+              speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
+              #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
+                                #data = lm_input_table)
+            }, error = function(cond) {
+              message("There was a problem with this linear model run:")
+              message(cond)
+              return(NA)
+            })
+          
         } else if (regularization == "L2" | regularization == "ridge") {
           lm_fit <- run_regularization_model(formula, lm_input_table)
           
@@ -650,6 +632,8 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
         # Run collinearity diagnostics 
         if(collinearity_diagn) {
           print("Running Collinearity Diagnostics")
+          #fit_lm <- lm(formula = formula, offset = log2(Lib_Size), 
+                       #data = lm_input_table)
           fit_lm <- lm(formula = formula, offset = log2(Lib_Size), 
                        data = lm_input_table)
           source(paste(getwd(), "run_collinearity_diagnostics.R", sep = "/"), local = TRUE)
