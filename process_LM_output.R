@@ -36,6 +36,9 @@ library("RColorBrewer")
 ############################################################
 # Path to where output figures should be saved
 output_vis_path <- paste("/Genomics/grid/users/scamilli/thesis_work/run-model-R/output_visualizations/", args$cancerType, sep = "")
+if (args$cancerType == "PanCancer") {
+  output_vis_path <- paste(output_vis_path, args$specificTypes, sep = "/")
+}
 if(test) {
   output_vis_path <- paste(output_vis_path, args$tester_name, sep = "/")
 } else {
@@ -54,8 +57,6 @@ all_genes_id_conv <- read.csv("/Genomics/grid/users/scamilli/thesis_work/run-mod
 # Adjust the outfn for visualizations
 outfn_vis <- paste(unlist(strsplit(outfn, "_", fixed = TRUE))[3:length(unlist(strsplit(outfn, "_", fixed = TRUE)))], 
                collapse = "_")
-print(paste("OUTFN VIS:", outfn_vis))
-
 
 ############################################################
 ############################################################
@@ -84,13 +85,16 @@ print(paste("FN MUT:", fn_mut))
 print(paste("FN CNA:", fn_cna))
 
 # Call this function & save output
-png(fn_mut, width = 450, height = 350)
-visualize_beta_distrib(master_df_mut)
-dev.off()
+tryCatch({
+  png(fn_mut, width = 450, height = 350)
+  visualize_beta_distrib(master_df_mut)
+  dev.off()
+  
+  png(fn_cna, width = 450, height = 350)
+  visualize_beta_distrib(master_df_cna)
+  dev.off()
+}, error = function(cond) {print(cond)})
 
-png(fn_cna, width = 450, height = 350)
-visualize_beta_distrib(master_df_cna)
-dev.off()
 
 
 ############################################################
@@ -111,14 +115,15 @@ fn_mut <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "
 fn_cna <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
 
 # Call this function & save output
-png(fn_mut, width = 450, height = 350)
-visualize_pval_distrib(master_df_mut)
-dev.off()
-
-png(fn_cna, width = 450, height = 350)
-visualize_pval_distrib(master_df_cna)
-dev.off()
-
+tryCatch({
+  png(fn_mut, width = 450, height = 350)
+  visualize_pval_distrib(master_df_mut)
+  dev.off()
+  
+  png(fn_cna, width = 450, height = 350)
+  visualize_pval_distrib(master_df_cna)
+  dev.off()
+}, error = function(cond) {print(cond)})
 
 ############################################################
 #### VISUALIZE Q-Q PLOT
@@ -161,7 +166,14 @@ visualize_error_distrib <- function(results_table) {
 mh_correct <- function(results_table, fn_qvalvis, fn_qvalsum) {
   
   # Get the qvalue object
-  qobj <- qvalue(p = results_table$p.value)
+  qobj <- NA
+  if(length(results_table$p.value) < 100) {
+    # With a small number of pvalues we may not be able to accurately estimate pi0,
+    # so we set to 1 (the equivalent of B-H correction)
+    qobj <- qvalue(p = results_table$p.value, pi0 = 1)
+  } else {
+    qobj <- qvalue(p = results_table$p.value)
+  }
   
   # Plot some useful plots & print some useful information
   png(fn_qvalvis, width = 450, height = 450)
@@ -188,9 +200,10 @@ fn_cna_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(o
 fn_mut_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
 fn_cna_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
 
-master_df_mut_corrected <- mh_correct(master_df_mut, fn_mut_qvalvis, fn_mut_qvalsum)
-master_df_cna_corrected <- mh_correct(master_df_cna, fn_cna_qvalvis, fn_cna_qvalsum)
-
+tryCatch({
+  master_df_mut_corrected <- mh_correct(master_df_mut, fn_mut_qvalvis, fn_mut_qvalsum)
+  master_df_cna_corrected <- mh_correct(master_df_cna, fn_cna_qvalvis, fn_cna_qvalsum)
+}, error = function(cond) {print(cond)})
 
 ############################################################
 ############################################################
@@ -213,15 +226,18 @@ add_targ_regprot_gns <- function(master_df_sig, all_genes_id_conv) {
   return(master_df_sig)
 }
 
-# Call this function
-master_df_mut_corrected <- add_targ_regprot_gns(master_df_mut_corrected, all_genes_id_conv)
-master_df_cna_corrected <- add_targ_regprot_gns(master_df_cna_corrected, all_genes_id_conv)
 
-# Write this to a new file
-outfn <- str_replace(outfn, "uncorrected", "corrected") 
-print(paste("NEW FN:", outfn))
-fwrite(master_df_mut_corrected, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
-fwrite(master_df_cna_corrected, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
+tryCatch({
+  # Call this function
+  master_df_mut_corrected <- add_targ_regprot_gns(master_df_mut_corrected, all_genes_id_conv)
+  master_df_cna_corrected <- add_targ_regprot_gns(master_df_cna_corrected, all_genes_id_conv)
+
+  # Write this to a new file
+  outfn <- str_replace(outfn, "uncorrected", "corrected") 
+  print(paste("NEW FN:", outfn))
+  fwrite(master_df_mut_corrected, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
+  fwrite(master_df_cna_corrected, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
+}, error = function(cond) {print(cond)})
 
 
 ############################################################
@@ -242,12 +258,14 @@ create_heat_map <- function(results_table) {
   
   # Fill in this table with t-statistics
   for (i in 1:nrow(results_table)) {
-    tstat <- results_table$statistic[i]
+    #tstat <- results_table$statistic[i]
+    beta <- results_table$estimate[i]
     regprot <- results_table$R_i.name[i]
     targ <- results_table$T_k.name[i]
     
     tryCatch({
-      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
+      #matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
+      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- beta
     }, error=function(cond){
       print(cond)
       matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- 0
@@ -255,13 +273,13 @@ create_heat_map <- function(results_table) {
   }
   # NOTE: leave all the unfilled pairings as NA
   
+  # Replace NA/NaN with 0, or alternatively use na.omit
+  #matrix[is.na(matrix)] <- 0
+  #matrix[is.nan(matrix)] <- 0
+  matrix <- na.omit(matrix)
+
   # Convert from data frame to matrix
   matrix <- data.matrix(matrix)
-  
-  # Replace NA/NaN with 0
-  matrix[is.na(matrix)] <- 0
-  matrix[is.nan(matrix)] <- 0
-  
   print(head(matrix))
   
   # Plot a default heatmap
@@ -269,8 +287,15 @@ create_heat_map <- function(results_table) {
   #heatmap(matrix, scale = "none", col = col)
   
   # Plot an enhanced heatmap
+  # Clusters by default using hclust, but can specify others using param 'hclustfun'
   heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
-            density.info = "none") # clusters by default using hclust, but can specify others using param 'hclustfun'
+            density.info = "none", dendrogram = "row", Colv = FALSE, 
+            Rowv = TRUE, key = TRUE, key.title = NA, key.xlab = "Beta") 
+  #heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
+            #density.info = "none", labCol = "", dendrogram = c("row"), 
+            #add.expr = text(x = seq_along(colnames(matrix)), 
+                            #y = -2, srt = 0, labels = colnames(matrix), 
+                            #xpd = NA, cex = 2, pos = 1))
   
   # Plot a pretty heatmap
   #pheatmap(matrix, cutree_rows = 4) # options are available for changing clustering metric & method
@@ -287,17 +312,110 @@ create_heat_map <- function(results_table) {
 }
 
 if(!test) {
-  fn_mut <- paste(output_vis_path, paste("Heatmap_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  fn_cna <- paste(output_vis_path, paste("Heatmap_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+  fn_mut <- paste(output_vis_path, paste("BetaHeatmap_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+  fn_cna <- paste(output_vis_path, paste("BetaHeatmap_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
   
-  # Call this function
-  png(fn_mut, width = 450, height = 450)
-  create_heat_map(master_df_mut_corrected)
-  dev.off()
+  tryCatch({
+    # Call this function
+    png(fn_mut, width = 450, height = 450)
+    create_heat_map(master_df_mut_corrected)
+    dev.off()
+    
+    png(fn_cna, width = 450, height = 450)
+    create_heat_map(master_df_cna_corrected)
+    dev.off()
+  }, error = function(cond) {print(cond)})
+
+}
+
+############################################################
+############################################################
+#### SPEARMAN CORRELATION OF BETAS AND T-STATISTICS
+############################################################
+############################################################
+#' Compute and print the Spearman correlation of the Betas and of the T-statistic,
+#' given two groups of interest
+#' @param results_table the output master DF from the linear model
+#' @param ri_1 the external gene name of the first protein of interest
+#' @param ri_2 the external gene name of the second protein of interest
+compute_and_print_spearman <- function(results_table, ri_1, ri_2) {
+  if((ri_1 %fin% results_table$R_i.name) & (ri_2 %fin% results_table$R_i.name)) {
+    
+    target_genes <- unique(results_table$T_k.name)
+    
+    # Mini functions to get Betas/t-statistics for each target gene
+    #' @param results_table the master DF 
+    #' @param target_genes the list of target genes
+    #' @param ri the given regulatory protein
+    #' @param type "Betas" or "t-statistics" to indicate what value we are returning
+    get_values <- function(results_table, target_genes, ri, type) {
+      vals <- unlist(lapply(target_genes, function(tg) {
+        if(type == "Betas") {
+          est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "estimate"]
+        } else {
+          est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "statistic"]
+        }
+        if (length(est) == 0) {est <- NA} 
+        return(est)
+      }))
+    }
+    results_table <- na.omit(results_table)
+    
+    grp1_Betas <- get_values(results_table, target_genes, ri_1, "Betas")
+    grp2_Betas <- get_values(results_table, target_genes, ri_2, "Betas")
+
+    print(length(grp1_Betas))
+    print(length(grp2_Betas))
+    print(grp1_Betas)
+    print(grp2_Betas)
+
+    # Get Betas spearman
+    betas_spearman <- cor.test(grp1_Betas, grp2_Betas, method = "spearman")
+    betas_spearman_stat <- as.numeric(betas_spearman$estimate)
+    betas_spearman_pval <- betas_spearman$p.value
+    
+    # Print the results
+    print(paste("Spearman results for", paste(ri_1, paste("and", ri_2))))
+    print(paste("Beta correlation of", paste(betas_spearman_stat, paste(", p-value of", betas_spearman_pval))))
+
+    # Create a plot to visualize the correlations
+    plot(grp1_Betas, grp2_Betas, pch = 19, col = "lightblue", #main = "Betas Spearman Correlation",
+         xlab = paste(ri_1, "Betas"), ylab = paste(ri_2, "Betas"))
+    abline(lm(grp2_Betas ~ grp1_Betas), col = "red", lwd = 3)
+    text(labels = paste("Correlation:", paste(round(betas_spearman_stat, 6), 
+                                              paste(", p-value:", round(betas_spearman_pval, 6)))), 
+         x = max(grp1_Betas, na.rm = TRUE)-sd(grp1_Betas, na.rm = TRUE)*1.5, 
+         y = max(grp2_Betas, na.rm = TRUE)-sd(grp2_Betas, na.rm = TRUE), col = "black")
+    
+    
+  } else {print("Error. Provided regprots are not in the given master DF.")}
+}
+
+
+if(!test) {
+  fn_mut <- paste(output_vis_path, paste("Spearman_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+  fn_cna <- paste(output_vis_path, paste("Spearman_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
   
-  png(fn_cna, width = 450, height = 450)
-  create_heat_map(master_df_cna_corrected)
-  dev.off()
+  regprots <- unique(master_df_mut_corrected$R_i.name)
+  if (length(regprots) == 2) {
+    r1 <- regprots[1]
+    r2 <- regprots[2]
+    
+    tryCatch({
+      # Call this function
+      png(fn_mut, width = 350, height = 450)
+      compute_and_print_spearman(master_df_mut_corrected, r1, r2)
+      dev.off()
+      
+      png(fn_cna, width = 450, height = 450)
+      compute_and_print_spearman(master_df_cna_corrected, r1, r2)
+      dev.off()
+    }, error = function(cond) {print(cond)})
+
+  }
+  else {
+    print("Greater than 2 regulatory proteins of interest. Cannot calculate a pairwise spearman.")
+  }
 }
 
 ############################################################
@@ -326,18 +444,20 @@ get_signif_correl <- function(results_table, qval_thres) {
 
 # Call this function
 qval_thres <- 0.1
-master_df_mut_sig <- get_signif_correl(master_df_mut_corrected, qval_thres)
-master_df_cna_sig <- get_signif_correl(master_df_cna_corrected, qval_thres)
-
-# Write these results to a new file
-outfn <- str_replace(outfn, "corrected_", "") 
-outfn <- str_replace(outfn, "output_results", "significant_output")
-if(length(master_df_mut_sig) > 0) {
-  fwrite(master_df_mut_sig, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
-}
-if(length(master_df_cna_sig) > 0) {
-  fwrite(master_df_cna_sig, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
-}
+tryCatch({
+  master_df_mut_sig <- get_signif_correl(master_df_mut_corrected, qval_thres)
+  master_df_cna_sig <- get_signif_correl(master_df_cna_corrected, qval_thres)
+  
+  # Write these results to a new file
+  outfn <- str_replace(outfn, "corrected_", "") 
+  outfn <- str_replace(outfn, "output_results", "significant_output")
+  if(length(master_df_mut_sig) > 0) {
+    fwrite(master_df_mut_sig, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
+  }
+  if(length(master_df_cna_sig) > 0) {
+    fwrite(master_df_cna_sig, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
+  }
+}, error = function(cond) {print(cond)})
 
 
 ############################################################
@@ -350,8 +470,8 @@ if(length(master_df_cna_sig) > 0) {
 #### IMPORT CANCER GENE LISTS 
 ############################################################
 # Import a table containing a compiled list of known cancer genes
-#known_cancer_genes_table <- read.table("/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/GRCh38_driver_gene_list.tsv", sep = "\t",
-                                       #header = TRUE, check.names = FALSE, comment.char = "#")
+known_cancer_genes_table <- read.table("/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/GRCh38_driver_gene_list.tsv", sep = "\t",
+                                       header = TRUE, check.names = FALSE, comment.char = "#")
 
 # Import TF cancer data table(s), if using
 #tfcancer_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/"

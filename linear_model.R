@@ -7,7 +7,7 @@
 
 #library(biomaRt)
 library(parallel)
-library(rlang)
+#library(rlang)
 library(dplyr)
 library(broom)
 library(data.table)
@@ -352,6 +352,7 @@ if(args$patientsOfInterest != "") {
 if(debug) {
   print("Patients of Interest")
   print(head(patients_of_interest))
+  print(length(patients_of_interest))
 }
 
 
@@ -1160,7 +1161,7 @@ if(is.na(patient_cancer_mapping)) {
     }
     
     # Get the outpath for this cancer type
-    outpath_i <- outpath[[i]]
+    outpath_i <- as.character(unlist(outpath[[i]]))
     
     # Subset files using patient_ids (using helper function)
     patient_df_sub <- subset_by_intersecting_ids(patient_ids, patient_df, FALSE, tumNormMatched)
@@ -1232,7 +1233,14 @@ process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn,
   #master_df <- setorder(master_df, p.value)
   
   # Write the results to the given file, making the directory if it does not already exist
-  dir.create(outpath, showWarnings = FALSE)
+  outpath <- as.character(unlist(outpath[[1]]))
+  print(outpath)
+  tryCatch({
+  	dir.create(outpath, showWarnings = FALSE)
+  }, error = function(cond) {
+  	print(cond)
+  	print("Invalid outpath. Cannot create specified directory.")
+  })
   fwrite(master_df, paste(outpath, paste(outfn, ".csv", sep = ""), sep = "/"))
   
   # Limit the data frame to just the term of interest (typically either MutStat_i or CNAStat_i)
@@ -1257,6 +1265,8 @@ process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn,
 
 
 if(is.na(patient_cancer_mapping)) {
+  outpath <- as.character(unlist(outpath[[1]]))
+  outfn <- as.character(unlist(outfn[[1]]))
   master_df <- process_raw_output_df(master_df = master_df, outpath = outpath, outfn = outfn, 
                                      collinearity_diagn = collinearity_diagn, debug = debug,
                                      randomize = randomize)
@@ -1267,7 +1277,10 @@ if(is.na(patient_cancer_mapping)) {
   source(paste(source_path, "process_LM_output.R", sep = "")) 
   
 } else {
-  for (master_df in master_df_list) {
+  for (i in 1:length(master_df_list)) {
+    master_df <- master_df_list[[i]]
+    outpath <- as.character(unlist(outpath[[i]]))
+    outfn <- as.character(unlist(outfn[[i]]))
     master_df <- process_raw_output_df(master_df = master_df, outpath = outpath, outfn = outfn, 
                                        collinearity_diagn = collinearity_diagn, debug = debug,
                                        randomize = randomize)

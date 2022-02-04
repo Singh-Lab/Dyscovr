@@ -583,7 +583,7 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
     }
     
     # Remove any duplicate samples
-    df_adj <- df_adj[, !(grepl("-1", colnames(df_adj), fixed = TRUE))]
+    #df_adj <- df_adj[, !(grepl("-1", colnames(df_adj), fixed = TRUE))]
     
   } else {
     if(length(unlist(strsplit(df$sample_id[1], "-", fixed = TRUE))) == 4) {
@@ -602,8 +602,9 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
     }
     
     # Remove any duplicate samples
-    df_adj <- df_adj[!(grepl('-1', df_adj$sample_id, fixed = TRUE)),]
+    #df_adj <- df_adj[!(grepl('-1', df_adj$sample_id, fixed = TRUE)),]
   }
+  print(head(df_adj))
   return(as.data.table(df_adj))
 }
 
