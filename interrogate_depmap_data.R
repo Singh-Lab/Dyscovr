@@ -21,11 +21,15 @@ metformin_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main P
                                   header = TRUE, check.names = FALSE)
 metformin_sensitivity_brca <- metformin_sensitivity[grepl("Breast", metformin_sensitivity$Lineage),]
 
-methotrexate_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/depmap_methotrexate.csv", 
+methotrexate_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/methotrexate_sensitivity_primaryPRISM.csv", 
+                                     header = TRUE, check.names = FALSE)
+methotrexate_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/methotrexate_sensitivity_secondaryPRISM.csv", 
+                                     header = TRUE, check.names = FALSE)
+methotrexate_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/methotrexate_sensitivity_auc.csv", 
                                      header = TRUE, check.names = FALSE)
 methotrexate_sensitivity_brca <- methotrexate_sensitivity[grepl("Breast", methotrexate_sensitivity$Lineage),]
 
-fu_sensitivity_brca <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/5fluorouracil_sensitivity_brca.csv", 
+fu_sensitivity_brca <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/5-fluorouracil_sensitivity_brca_primaryPRISM.csv", 
                              header = TRUE, check.names = FALSE)
 
 ccle_drug_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/drug_sensitivity_screen.csv", 
@@ -108,24 +112,28 @@ analyze_differential_sensitivity_twoGenes <- function(sensitivity_file, mutation
   table_for_anova <- data.frame("sensitivity" = sensitivity_file[,2], "status" = unlist(lapply(1:nrow(sensitivity_file), function(i) {
     if(sensitivity_file$MutG1[i] & sensitivity_file$MutG2[i]) {return("Both")}
     else if(!sensitivity_file$MutG1[i] & !sensitivity_file$MutG2[i]) {return("Neither")}
-    else if (sensitivity_file$MutG1[i] & !sensitivity_file$MutG2[i]) {return("G1.Mut")}
-    else if (!sensitivity_file$MutG1[i] & sensitivity_file$MutG2[i]) {return("G2.Mut")}
+    else if (sensitivity_file$MutG1[i] & !sensitivity_file$MutG2[i]) {return(paste(as.character(gene1), "Mut Only"))}
+    else if (!sensitivity_file$MutG1[i] & sensitivity_file$MutG2[i]) {return(paste(as.character(gene2), "Mut Only"))}
     else {return(NA)}
   })))
   aov_res <- aov(sensitivity ~ status, data = table_for_anova)
-  summary(aov_res)
+  print(summary(aov_res))
   
   boxplot(sensitivity ~ status, data = table_for_anova, ylab = "Drug sensitivity", 
           main = "Sensitivity to 5-FU in BRCA Cell Lines, by Missense Mutation Status")
+  
+  return(table_for_anova)
  
 }
 
 # Call function
-analyze_differential_sensitivity_twoGenes(metformin_sensitivity_brca, ccle_missense_mutations, "TP53", "PIK3CA")
-analyze_differential_sensitivity_twoGenes(methotrexate_sensitivity_brca, ccle_missense_mutations, "TP53", "PIK3CA")
-analyze_differential_sensitivity_twoGenes(fu_sensitivity_brca, ccle_missense_mutations, "TP53", "PIK3CA")
+tab <- analyze_differential_sensitivity_twoGenes(metformin_sensitivity_brca, ccle_missense_mutations, "TP53", "PIK3CA")
+tab <- analyze_differential_sensitivity_twoGenes(methotrexate_sensitivity_brca, ccle_missense_mutations, "TP53", "PIK3CA")
+tab <- analyze_differential_sensitivity_twoGenes(fu_sensitivity_brca, ccle_missense_mutations, "TP53", "PIK3CA")
 
 
+# Aside: Test for a significant difference between two genes of interest
+ttest_res <- t.test(x = tab[tab$status == "TP53 Mut Only", 'sensitivity'], y = tab[tab$status == "PIK3CA Mut Only", 'sensitivity'])
 
 
 ###################################################################################
@@ -169,6 +177,10 @@ boxplot(list("TP53 Mut Excl" = ko_score_tp53_mut_excl, "PIK3CA Mut Excl" = ko_sc
 ###################################################################################
 # CRISPR KO DEPENDENCY DATA, ALL SIGNIF. GENES
 ###################################################################################
+
+### IMPORT DEPMAP PORTAL FEATURES ###
+# Link to DepMap downloads: https://depmap.org/portal/download/
+
 # Use DepMap features to create an aggregate file for all BRCA cell lines and for a particular gene set of interest
 signif_hits_crispr_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/CRISPR_(DepMap_21Q4_Public+Score,_Chronos)_subsetted.csv",
                                 header = TRUE, check.names = FALSE)
@@ -191,6 +203,28 @@ colnames(tp53_pik3ca_cnas)[ncol(tp53_pik3ca_cnas)] <- "PIK3CA.CNA"
 # Get the absolute copy number for TP53 & PIK3CA among these cell lines
 #tp53_pik3ca_cnas <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Copy_Number_(Absolute)_subsetted.csv",
 #header = TRUE, check.names = FALSE)
+
+### IMPORT CELL MODEL PASSPORT FEATURES ###
+# Link to Cell Model Passport downloads: https://cellmodelpassports.sanger.ac.uk/downloads
+
+depmap_priority_scores <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Cell Model Passports/depmap-priority-scores.csv",
+                                   header = TRUE, check.names = FALSE)
+depmap_priority_scores_brca <- depmap_priority_scores[grepl("Breast", depmap_priority_scores$`analysis name`),]
+
+cell_passport_mut <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Cell Model Passports/mutations_all_20211208.csv",
+                              header = TRUE, check.names = FALSE)
+
+cell_passport_cna_gistic <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Cell Model Passports/cnv_gistic_20191101.csv",
+                                     header = TRUE, check.names = FALSE)
+cell_passport_cna_picnic <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Cell Model Passports/cnv_abs_copy_number_picnic_20191101.csv",
+                                     header = TRUE, check.names = FALSE)
+
+cell_passport_fpkm <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Cell Model Passports/rnaseq_fpkm_20211124.csv",
+                               header = TRUE, check.names = FALSE)
+cell_passport_tpm <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Cell Model Passports/rnaseq_tpm_20211124.csv",
+                              header = TRUE, check.names = FALSE)
+cell_passport_counts <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Cell Model Passports/rnaseq_read_count_20211124.csv",
+                                 header = TRUE, check.names = FALSE)
 
 
 #' Adjust the knockout and expression data frames to "melt" them so that we can make boxplots from them,
