@@ -9,12 +9,15 @@ library(ggpubr)
 library(rstatix)
 library(broom)
 library(ggrepel)
+library(rstatix)
 
 # Functions to investigate drug sensitivity, knockout (dependency) information, and other phenotypes 
 # in the DepMap cell lines based on cell line mutation/ copy number status
 
+# Also includes a similar section on interrogating drug sensitivity data from PharmacoDB
+
 ###################################################################################
-# DRUG SENSITIVITY ANALYSIS
+# DRUG SENSITIVITY ANALYSIS (DEPMAP)
 ###################################################################################
 # Import the drug sensitivity and CCLE mutation files
 metformin_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/depmap_metformin.csv", 
@@ -137,6 +140,93 @@ ttest_res <- t.test(x = tab[tab$status == "TP53 Mut Only", 'sensitivity'], y = t
 
 
 ###################################################################################
+# DRUG SENSITIVITY ANALYSIS (PHARMACODB)
+###################################################################################
+# PharmacoDB Web Portal: https://pharmacodb.pmgenomics.ca/
+# AAC: Area Above Curve (referring to a dose-response curve); DSS: Drug Sensitivity Score (normalized against dose)
+
+# Import PharmacoDB data downloaded from Web Portal
+
+# 5-FU Data
+fu_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/PharmacoDB/breast_5-FU_dose_response.csv", 
+                              header = TRUE, check.names = FALSE)
+fu_stats <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/PharmacoDB/breast_5-FU_stat_table.csv", 
+                     header = TRUE, check.names = FALSE)
+
+# Methotrxate Data
+methotrexate_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/PharmacoDB/breast_Methotrexate_dose_response.csv", 
+                           header = TRUE, check.names = FALSE)
+methotrexate_stats <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/PharmacoDB/breast_Methotrexate_stat_table.csv", 
+                     header = TRUE, check.names = FALSE)
+
+# Import CCLE's mutation data for BRCA cell lines in TP53 and PIK3CA
+ccle_mutations <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Mutation_21Q4_Public_P53_PIK3CA.csv", 
+                           header = TRUE, check.names = FALSE)
+
+# Get overlapping cell lines
+print(length(intersect(fu_stats$`Cell Line`, ccle_mutations$cell_line_display_name)))  #21
+fu_stats_sub <- fu_stats[fu_stats$`Cell Line` %in% ccle_mutations$cell_line_display_name,]
+
+print(length(intersect(methotrexate_stats$`Cell Line`, ccle_mutations$cell_line_display_name)))  #20
+methotrexate_stats_sub <- methotrexate_stats[methotrexate_stats$`Cell Line` %in% ccle_mutations$cell_line_display_name,]
+
+
+
+#' Analyze differential sensitivity across two genes, considering cases where cell lines have mutations
+#' exclusively in one or the other, both, or neither. Plots a boxplot and performs a corresponding 
+#' ANOVA test. Modified for PharmacoDB files.
+#' @param sensitivity_file a PharmacoDB sensitivity file for a drug of interest, subsetted to the cell lines of interest
+#' @param mutation_file a CCLE mutation file
+#' @param gene1 the first gene whose mutation status is of interest (Hugo Symbol)
+#' @param gene2 the second gene whose mutation status is of interest (Hugo Symbol)
+analyze_differential_sensitivity_twoGenes_pharmacoDB <- function(sensitivity_file, mutation_file, gene1, gene2) {
+  
+  # Get the cell lines with a mutation in each gene
+  cell_lines_mut_gene1 <- unique(mutation_file[mutation_file[ncol(mutation_file)-1] == 1,
+                                                             'cell_line_display_name'])
+  cell_lines_mut_gene2 <- unique(mutation_file[mutation_file[ncol(mutation_file)] == 1,
+                                               'cell_line_display_name'])
+  
+  # Get the cell line overlap
+  cell_lines_mut_gene1_gene2 <- intersect(cell_lines_mut_gene1, cell_lines_mut_gene2)
+  
+  # Add this information to the drug sensitivity file
+  sensitivity_file$MutG1 <- unlist(lapply(sensitivity_file$`Cell Line`, function(id) {
+    if(id %in% cell_lines_mut_gene1) {return(1)}
+    else {return(0)}
+  }))
+  sensitivity_file$MutG2 <- unlist(lapply(sensitivity_file$`Cell Line`, function(id) {
+    if(id %in% cell_lines_mut_gene2) {return(1)}
+    else {return(0)}
+  }))
+  print(head(sensitivity_file))
+  
+  # ANOVA
+  table_for_anova <- data.frame("sensitivity" = sensitivity_file[,'DSS1 (arb.)'], 
+                                "status" = unlist(lapply(1:nrow(sensitivity_file), function(i) {
+    if(sensitivity_file$MutG1[i] & sensitivity_file$MutG2[i]) {return("Both")}
+    else if(!sensitivity_file$MutG1[i] & !sensitivity_file$MutG2[i]) {return("Neither")}
+    else if (sensitivity_file$MutG1[i] & !sensitivity_file$MutG2[i]) {return(paste(as.character(gene1), "Mut Only"))}
+    else if (!sensitivity_file$MutG1[i] & sensitivity_file$MutG2[i]) {return(paste(as.character(gene2), "Mut Only"))}
+    else {return(NA)}
+  })))
+  print(table_for_anova)
+  aov_res <- aov(sensitivity ~ status, data = table_for_anova)
+  print(summary(aov_res))
+  
+  boxplot(sensitivity ~ status, data = table_for_anova, ylab = "Drug sensitivity", 
+          main = "Sensitivity to Methotrexate in BRCA Cell Lines, by Missense Mutation Status")
+  
+  return(table_for_anova)
+  
+}
+
+# Call function
+tab <- analyze_differential_sensitivity_twoGenes_pharmacoDB(fu_stats_sub, ccle_mutations, "TP53", "PIK3CA")
+tab <- analyze_differential_sensitivity_twoGenes_pharmacoDB(methotrexate_stats_sub, ccle_mutations, "TP53", "PIK3CA")
+
+
+###################################################################################
 # CRISPR KO DEPENDENCY DATA, INDIV. GENES
 ###################################################################################
 mthfd1L_crispr <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/MTHFD1L CRISPR (DepMap 21Q4 Public+Score Chronos).csv", header= TRUE)
@@ -190,7 +280,7 @@ signif_hits_expression_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Ma
                                         header = TRUE, check.names = FALSE)
 
 # Get the mutations for TP53 & PIK3CA among these cell lines
-tp53_pik3ca_mutations <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Mutation_21Q4_Public_subsetted.csv",
+tp53_pik3ca_mutations <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Mutation_21Q4_Public_P53_PIK3CA.csv",
                                   header = TRUE, check.names = FALSE)
 
 # Get the relative copy number changes for TP53 & PIK3CA among these cell lines
@@ -248,20 +338,23 @@ adjust_depmap_df <- function(signif_hits_df, mutation_df, cna_df, genes_of_inter
   signif_hits_df_melt$gene <- as.character(unlist(signif_hits_df_melt$gene))
   
   # Add mutation and CNA status of genes of interest to the data frame
+  signif_hits_df_melt <- merge(signif_hits_df_melt, mutation_df[,c("depmap_id", genes_of_interest)], 
+                               by = "depmap_id")
   genes_of_interest_cna <- unlist(lapply(genes_of_interest, function(x) paste0(x, ".CNA")))
-  signif_hits_df_melt <- merge(signif_hits_df_melt, mutation_df[,c("depmap_id", c(genes_of_interest, genes_of_interest_cna))], 
+  signif_hits_df_melt <- merge(signif_hits_df_melt, cna_df[,c("depmap_id", genes_of_interest_cna)], 
                                by = "depmap_id")
   
   # Make the mutation columns factors
   mutation_cols <- which(colnames(signif_hits_df_melt) %in% genes_of_interest)
   signif_hits_df_melt[, mutation_cols] <- lapply(signif_hits_df_melt[, mutation_cols], as.factor)
   
+  
   # Bucket the CNA columns and also make them factors
   cna_cols <- which(colnames(signif_hits_df_melt) %in% genes_of_interest_cna)
   signif_hits_df_melt[, cna_cols] <- lapply(1:length(cna_cols), function(i) {
-    col <- signif_hits_df_melt[, i]
+    col <- signif_hits_df_melt[, cna_cols[i]]
     bucketed_col <- bucket_cna(col, del_or_amp_vect[i])
-    bucketed_col <- as.factor(col)
+    bucketed_col <- as.factor(bucketed_col)
     return(bucketed_col)
   })
   
@@ -274,11 +367,12 @@ adjust_depmap_df <- function(signif_hits_df, mutation_df, cna_df, genes_of_inter
 bucket_cna <- function(cna_vals, deletionOrAmp) {
   bucketed_cna_vals <- unlist(lapply(cna_vals, function(x) {
     if(deletionOrAmp == "deletion") {
+      # we use 3 here because there is a pseudocount of 1
       if (x < log2(3)) {return(1)}
       else {return(0)}
     } else {
-      if (x <= log2(3)) {return(0)}
-      else {return(1)}
+      if (x > log2(3)) {return(1)}
+      else {return(0)}
     }
   }))
   return(bucketed_cna_vals)
@@ -339,7 +433,7 @@ run_ttest <- function(df, goi, mut_or_cna) {
     stat.test <- df %>%
       group_by(gene) %>%
       #wilcox.test(value ~ TP53) %>%
-      t_test(value ~ goi) %>%
+      t_test(reformulate(goi, response = "value", intercept = FALSE)) %>%
       adjust_pvalue(method = "bonferroni") %>%
       add_significance("p.adj")
   } else {
@@ -347,7 +441,7 @@ run_ttest <- function(df, goi, mut_or_cna) {
     stat.test <- df %>%
       group_by(gene) %>%
       #wilcox.test(value ~ TP53) %>%
-      t_test(value ~ goi_cna) %>%
+      t_test(reformulate(goi_cna, response = "value", intercept = FALSE)) %>%
       adjust_pvalue(method = "bonferroni") %>%
       add_significance("p.adj")
   }
@@ -381,27 +475,27 @@ ttest_expression_pik3ca_cna <- run_ttest(signif_hits_expression_data_pik3ca, "PI
 #' @param ttest_res optional: can include the results of a t-test with the significance values on plot
 make_dependency_boxplot <- function(signif_hits_df, gene_of_interest, mut_or_cna, ttest_res) {
   if(mut_or_cna == "mut") {
-    bxp <- ggplot(signif_hits_df, aes(x = gene, y = value, fill = gene_of_interest)) + geom_boxplot() +
+    bxp <- ggplot(signif_hits_df, aes_string(x = "gene", y = "value", fill = gene_of_interest)) + geom_boxplot() +
       theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
     
   } else if (mut_or_cna == "cna") {
     gene_of_interest_cna <- paste0(gene_of_interest, ".CNA")
-    bxp <- ggplot(signif_hits_df, aes(x = gene, y = value, fill = gene_of_interest_cna)) + geom_boxplot() +
+    bxp <- ggplot(signif_hits_df, aes_string(x = "gene", y = "value", fill = gene_of_interest_cna)) + geom_boxplot() +
       theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
     
   } else {
     print(paste(mut_or_cna, "is not defined. Please try again with either 'mut' or 'cna'."))
   }
   print(bxp)
-  
+
   # If ttest_res is defined, add the p-values onto the plot
   try({
     ttest_res <- ttest_res %>% add_xy_position(x = "gene", dodge = 0.8)
-    bxp + stat_pvalue_manual(ttest_res,  label = "p", tip.length = 0) + 
+    print(ttest_res)
+    bxp + stat_pvalue_manual(ttest_res,  label = "p.adj.signif", tip.length = 0) + 
       scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
     
-  })
-  
+  }, silent = TRUE)
 }
 
 make_dependency_boxplot(signif_hits_crispr_data_tp53, "TP53", "mut", ttest_crispr_tp53_mut)
@@ -420,6 +514,121 @@ make_dependency_boxplot(signif_hits_crispr_data_pik3ca, "PIK3CA", "cna", ttest_c
 make_dependency_boxplot(signif_hits_rnai_data_pik3ca, "PIK3CA", "cna", ttest_rnai_pik3ca_cna)
 make_dependency_boxplot(signif_hits_expression_data_pik3ca, "PIK3CA", "cna", ttest_expression_pik3ca_cna)
 
+
+# Split this by predicted upregulation/ predicted downregulation, so we can see how closely DepMap aligns
+pred_upregulat_tp53 <- c("AHCY", "DLD", "FTCD", "GLDC", "GSTP1", "MTHFD1", "MTHFD1L", "PSPH", "SHMT2", "TYMS")
+pred_downregulat_tp53 <- c("CDO1", "CSAD", "MAT2A", "MTHFR", "MTR", "SARDH")
+
+pred_upregulat_pik3ca <- c("BHMT2", "MTHFR")
+pred_downregulat_pik3ca <- c("AHCY", "CHKB", "GLDC", "FTCD", "MAT1A", "MTHFDL1", "PSPH", "SHMT2", "TYMS")
+
+make_dependency_boxplot(signif_hits_expression_data_tp53[signif_hits_expression_data_tp53$gene %in% pred_upregulat_tp53,], "TP53", "mut")
+make_dependency_boxplot(signif_hits_expression_data_tp53[signif_hits_expression_data_tp53$gene %in% pred_downregulat_tp53,], "TP53", "mut")
+make_dependency_boxplot(signif_hits_expression_data_pik3ca[signif_hits_expression_data_pik3ca$gene %in% pred_upregulat_pik3ca,], "PIK3CA", "mut")
+make_dependency_boxplot(signif_hits_expression_data_pik3ca[signif_hits_expression_data_pik3ca$gene %in% pred_downregulat_pik3ca,], "PIK3CA", "mut")
+
+make_dependency_boxplot(signif_hits_expression_data_tp53[signif_hits_expression_data_tp53$gene %in% pred_upregulat_tp53,], "TP53", "cna")
+make_dependency_boxplot(signif_hits_expression_data_tp53[signif_hits_expression_data_tp53$gene %in% pred_downregulat_tp53,], "TP53", "cna")
+make_dependency_boxplot(signif_hits_expression_data_pik3ca[signif_hits_expression_data_pik3ca$gene %in% pred_upregulat_pik3ca,], "PIK3CA", "cna")
+make_dependency_boxplot(signif_hits_expression_data_pik3ca[signif_hits_expression_data_pik3ca$gene %in% pred_downregulat_pik3ca,], "PIK3CA", "cna")
+
+
+make_dependency_boxplot(signif_hits_crispr_data_tp53[signif_hits_crispr_data_tp53$gene %in% pred_upregulat_tp53,], "TP53", "mut")
+make_dependency_boxplot(signif_hits_crispr_data_tp53[signif_hits_crispr_data_tp53$gene %in% pred_downregulat_tp53,], "TP53", "mut")
+make_dependency_boxplot(signif_hits_crispr_data_pik3ca[signif_hits_crispr_data_pik3ca$gene %in% pred_upregulat_pik3ca,], "PIK3CA", "mut")
+make_dependency_boxplot(signif_hits_crispr_data_pik3ca[signif_hits_crispr_data_pik3ca$gene %in% pred_downregulat_pik3ca,], "PIK3CA", "mut")
+
+make_dependency_boxplot(signif_hits_crispr_data_tp53[signif_hits_crispr_data_tp53$gene %in% pred_upregulat_tp53,], "TP53", "cna")
+make_dependency_boxplot(signif_hits_crispr_data_tp53[signif_hits_crispr_data_tp53$gene %in% pred_downregulat_tp53,], "TP53", "cna")
+make_dependency_boxplot(signif_hits_crispr_data_pik3ca[signif_hits_crispr_data_pik3ca$gene %in% pred_upregulat_pik3ca,], "PIK3CA", "cna")
+make_dependency_boxplot(signif_hits_crispr_data_pik3ca[signif_hits_crispr_data_pik3ca$gene %in% pred_downregulat_pik3ca,], "PIK3CA", "cna")
+
+
+make_dependency_boxplot(signif_hits_rnai_data_tp53[signif_hits_rnai_data_tp53$gene %in% pred_upregulat_tp53,], "TP53", "mut")
+make_dependency_boxplot(signif_hits_rnai_data_tp53[signif_hits_rnai_data_tp53$gene %in% pred_downregulat_tp53,], "TP53", "mut")
+make_dependency_boxplot(signif_hits_rnai_data_pik3ca[signif_hits_rnai_data_pik3ca$gene %in% pred_upregulat_pik3ca,], "PIK3CA", "mut")
+make_dependency_boxplot(signif_hits_rnai_data_pik3ca[signif_hits_rnai_data_pik3ca$gene %in% pred_downregulat_pik3ca,], "PIK3CA", "mut")
+
+make_dependency_boxplot(signif_hits_rnai_data_tp53[signif_hits_rnai_data_tp53$gene %in% pred_upregulat_tp53,], "TP53", "cna")
+make_dependency_boxplot(signif_hits_rnai_data_tp53[signif_hits_rnai_data_tp53$gene %in% pred_downregulat_tp53,], "TP53", "cna")
+make_dependency_boxplot(signif_hits_rnai_data_pik3ca[signif_hits_rnai_data_pik3ca$gene %in% pred_upregulat_pik3ca,], "PIK3CA", "cna")
+make_dependency_boxplot(signif_hits_rnai_data_pik3ca[signif_hits_rnai_data_pik3ca$gene %in% pred_downregulat_pik3ca,], "PIK3CA", "cna")
+
+
+# Split cell lines by whether they are derived from primary or metastatic, to see if there is a difference
+cell_line_sample_info <- read.csv(paste0("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/cell_line_sample_info.csv"),
+                                  header = TRUE, check.names = FALSE)
+brca_cl_info <- cell_line_sample_info[grepl("Breast", cell_line_sample_info$primary_disease),]
+
+# Get the cell lines we have mutation/ expression data for
+cls_with_dat <- unique(signif_hits_crispr_data$depmap_id)
+
+# Subset the sample info DF to only the cell lines of interest
+brca_cl_info_sub <- brca_cl_info[brca_cl_info$DepMap_ID %fin% cls_with_dat,]
+
+# Add a "primary" or "metastatic" label to the signif_hits data frames
+
+#' Adds a label for each cell line denoting whether the cell line is derived from a primary or metastatic site
+#' @param sample_info a data frame correlating cell line ID to site
+#' @param signif_hits_df a data frame to add the site information to
+add_site <- function(sample_info, signif_hits_df) {
+  sites_vect <- unlist(lapply(signif_hits_df$depmap_id, function(id) {
+    lab <- sample_info[sample_info$DepMap_ID == id, 'primary_or_metastasis']
+    if(length(lab) == 0) {lab <- NA}
+    return(lab)
+  }))
+  signif_hits_df$site <- sites_vect
+  return(signif_hits_df)
+}
+
+signif_hits_expression_data_tp53 <- add_site(brca_cl_info_sub, signif_hits_expression_data_tp53)
+signif_hits_expression_data_pik3ca <- add_site(brca_cl_info_sub, signif_hits_expression_data_pik3ca)
+signif_hits_crispr_data_tp53 <- add_site(brca_cl_info_sub, signif_hits_crispr_data_tp53)
+signif_hits_crispr_data_pik3ca <- add_site(brca_cl_info_sub, signif_hits_crispr_data_pik3ca)
+signif_hits_rnai_data_tp53 <- add_site(brca_cl_info_sub, signif_hits_rnai_data_tp53)
+signif_hits_rnai_data_pik3ca <- add_site(brca_cl_info_sub, signif_hits_rnai_data_pik3ca)
+
+
+# Segregate them into separate primary and metastatic files, leaving out the NA CLs
+signif_hits_expression_data_primary_tp53 <- signif_hits_expression_data_tp53[signif_hits_expression_data_tp53$site == "Primary",]
+signif_hits_expression_data_metastatic_tp53 <- signif_hits_expression_data_tp53[signif_hits_expression_data_tp53$site == "Metastasis",]
+
+signif_hits_expression_data_primary_pik3ca <- signif_hits_expression_data_pik3ca[signif_hits_expression_data_pik3ca$site == "Primary",]
+signif_hits_expression_data_metastatic_pik3ca <- signif_hits_expression_data_pik3ca[signif_hits_expression_data_pik3ca$site == "Metastasis",]
+
+
+make_dependency_boxplot(signif_hits_expression_data_primary_tp53[signif_hits_expression_data_primary_tp53$gene %in% pred_upregulat_tp53,], "TP53", "mut")
+make_dependency_boxplot(signif_hits_expression_data_metastatic_tp53[signif_hits_expression_data_metastatic_tp53$gene %in% pred_downregulat_tp53,], "TP53", "mut")
+make_dependency_boxplot(signif_hits_expression_data_pik3ca[signif_hits_expression_data_pik3ca$gene %in% pred_upregulat_pik3ca,], "PIK3CA", "mut")
+make_dependency_boxplot(signif_hits_expression_data_pik3ca[signif_hits_expression_data_pik3ca$gene %in% pred_downregulat_pik3ca,], "PIK3CA", "mut")
+
+
+
+# Code to test expression of a few cell lines of interest
+cl_00 <- "ACH-000349"
+cl_01 <- "ACH-001388"
+cl_10 <- "ACH-000288"
+ids_of_interest <- c(cl_00, cl_01, cl_10)
+
+pred_up_tp53_down_pik3ca <- intersect(pred_upregulat_tp53, pred_downregulat_pik3ca)
+pred_down_tp53_up_pik3ca <- intersect(pred_downregulat_tp53, pred_upregulat_pik3ca)
+pred_up_tp53_noEff_pik3ca <- unique(c(setdiff(pred_upregulat_tp53, c(pred_upregulat_pik3ca, pred_downregulat_pik3ca))))
+
+#' Make comparative barplot of the expression of 3 cell lines in various mutational categories
+#' @param signif_hits_df a DepMap expression data frame, subsetted to only include genes that are 
+#' significant hits from a particular run of the LM
+make_expression_barplot <- function(signif_hits_df) {
+  ggplot(signif_hits_df, aes_string(x = "gene", y = "value", fill = "depmap_id")) + geom_bar(position = "dodge", stat= "identity") +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+}
+
+make_expression_barplot(signif_hits_expression_data[(signif_hits_expression_data$gene %in% pred_up_tp53_down_pik3ca) &
+                                                                   (signif_hits_expression_data$depmap_id %in% ids_of_interest),])
+make_expression_barplot(signif_hits_expression_data[(signif_hits_expression_data$gene %in% pred_down_tp53_up_pik3ca) &
+                                                      (signif_hits_expression_data$depmap_id %in% ids_of_interest),])
+make_expression_barplot(signif_hits_expression_data[(signif_hits_expression_data$gene %in% pred_up_tp53_noEff_pik3ca) &
+                                                      (signif_hits_expression_data$depmap_id %in% ids_of_interest),])
 
 
 ###################################################################################
@@ -487,11 +696,13 @@ depmap_lm <- function(depmap_table, mut_or_cna, gene_name) {
     print(plt)
 }
 
-depmap_lm(signif_hits_crispr_data_melt_tp53, "mut", "TP53")
-depmap_lm(signif_hits_crispr_data_melt_tp53, "cna", "TP53")
-depmap_lm(signif_hits_crispr_data_melt_pik3ca, "mut", "PIK3CA")
-depmap_lm(signif_hits_crispr_data_melt_pik3ca, "cna", "PIK3CA")
+depmap_lm(signif_hits_crispr_data_tp53, "mut", "TP53")
+depmap_lm(signif_hits_crispr_data_tp53, "cna", "TP53")
+depmap_lm(signif_hits_crispr_data_pik3ca, "mut", "PIK3CA")
+depmap_lm(signif_hits_crispr_data_pik3ca, "cna", "PIK3CA")
 
-depmap_lm(signif_hits_crispr_data_melt, "mut", "TP53")
-
+depmap_lm(signif_hits_crispr_data, "mut", "TP53")
+depmap_lm(signif_hits_crispr_data, "cna", "TP53")
+depmap_lm(signif_hits_crispr_data, "mut", "PIK3CA")
+depmap_lm(signif_hits_crispr_data, "cna", "PIK3CA")
 

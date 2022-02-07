@@ -1,4 +1,12 @@
-Interrogate CPTAC Data from cBioPortal (Script)
+# Interrogate CPTAC Data from cBioPortal (Script)
+
+library(ggplot2)
+library(reshape2)
+library(ggpubr)
+library(rstatix)
+library(broom)
+library(ggrepel)
+library(rstatix)
 
 cptac_brca_mutation_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_cptac_2020/data_mutations.txt", sep = "\t", header = TRUE, check.names = FALSE)
 cptac_brca_missense_mutation_data <- cptac_brca_mutation_data[cptac_brca_mutation_data$Variant_Classification == "Missense_Mutation",]
@@ -9,13 +17,11 @@ cptac_brca_fpkm_data_complete <- cptac_brca_fpkm_data[rowSums(is.na(cptac_brca_f
 cptac_brca_tp53_mutation <- cptac_brca_missense_mutation_data[cptac_brca_missense_mutation_data$Hugo_Symbol == "TP53",]
 tp53_mut_patients <- unique(cptac_brca_tp53_mutation$Tumor_Sample_Barcode)
 length(tp53_mut_patients)
-[1] 25
 tp53_not_mut_patients <- setdiff(unique(cptac_brca_missense_mutation_data$Tumor_Sample_Barcode), tp53_mut_patients)
 
 cptac_brca_pik3ca_mutation <- cptac_brca_missense_mutation_data[cptac_brca_missense_mutation_data$Hugo_Symbol == "PIK3CA",]
 pik3ca_mut_patients <- unique(cptac_brca_pik3ca_mutation$Tumor_Sample_Barcode)
 length(pik3ca_mut_patients)
-[1] 35
 pik3ca_not_mut_patients <- setdiff(unique(cptac_brca_missense_mutation_data$Tumor_Sample_Barcode), pik3ca_mut_patients)
 
 # MTHFD1L + TP53
@@ -45,3 +51,91 @@ wilcox.test(expression_mutants, y = expression_normal)
 # TP53 + others
 symbol <- "SHMT2"
 symbol <- "GSTP1"
+
+# Do this on a larger scale across all genes of interest
+
+# Subset to just the top hits for TP53 & PIK3CA specifically
+tp53_top_hits <- c("MTHFD1L", "SHMT2", "GSTP1", "TYMS", "PSPH", "CDO1", "MTHFD1", "CSAD", "AHCY", 
+                   "MTHFR", "MTR", "FTCD")
+# additional hits from just TP53/ PIK3CA run: "SARDH", "DLD", "MAT2A", "GLDC"
+tp53_top_hits_specific <- c(tp53_top_hits, c("SARDH", "DLD", "MAT2A", "GLDC"))
+
+pik3ca_top_hits <- c("TYMS", "MTHFD1L", "PSPH", "GLDC")
+# additional hits from just TP53/ PIK3CA run: "SHMT2", "FTCD", "MAT1A", "MTHFR", "AHCY", "CHKB", "MAT2A", "BHMT2", "GCLM"
+pik3ca_top_hits_specific <- c(pik3ca_top_hits, c("SHMT2", "FTCD", "MAT1A", "MTHFR", "AHCY", "CHKB", "MAT2A", "BHMT2", "GCLM"))
+
+
+#' Given a list of top hits, subset the given DF to this list of hits
+#' @param signif_hits_df a CPTAC expression data frame
+#' @param sig_hits_goi a vector of significant hits for only a particular gene of interest
+subset_to_gene_tophits <- function(signif_hits_df, sig_hits_goi) {
+  
+  signif_hits_df <- signif_hits_df[signif_hits_df$Hugo_Symbol %fin% sig_hits_goi,]
+  
+  return(signif_hits_df)
+}
+
+cptac_brca_fpkm_data_complete_tp53 <- subset_to_gene_tophits(cptac_brca_fpkm_data_complete, tp53_top_hits_specific)
+cptac_brca_fpkm_data_complete_pik3ca <- subset_to_gene_tophits(cptac_brca_fpkm_data_complete, pik3ca_top_hits_specific)
+
+
+#' Get the patients that have a mutated version of each gene of interest and add to the expression DF
+#' @param expression_df a CPTAC expression DF 
+#' @param mutation_df a CPTAC mutation DF
+#' @param goi the Hugo Symbol of a gene of interest
+fix_expression_df <- function(expression_df, mutation_df, goi) {
+  
+  exp_df_m <- melt(expression_df)
+  colnames(exp_df_m) <- c("Hugo_Symbol", "Patient_ID", "FPKM")
+  
+  print(exp_df_m)
+  
+  # Add mutation status of the GOI
+  status <- unlist(lapply(exp_df_m$Patient_ID, function(id) {
+    if(id %in% mutation_df$Tumor_Sample_Barcode) {return(1)}
+    else {return(0)}
+  }))
+  exp_df_m[,4] <- status
+  lab <- paste0(goi, "_Mut")
+  colnames(exp_df_m)[4] <- lab
+  
+  return(exp_df_m)
+}
+
+cptac_brca_fpkm_data_complete_tp53 <- fix_expression_df(cptac_brca_fpkm_data_complete_tp53, cptac_brca_tp53_mutation, "TP53")
+cptac_brca_fpkm_data_complete_pik3ca <- fix_expression_df(cptac_brca_fpkm_data_complete_pik3ca, cptac_brca_pik3ca_mutation, "PIK3CA")
+
+cptac_brca_fpkm_data_complete_tp53$TP53_Mut <- as.factor(cptac_brca_fpkm_data_complete_tp53$TP53_Mut)
+cptac_brca_fpkm_data_complete_pik3ca$PIK3CA_Mut <- as.factor(cptac_brca_fpkm_data_complete_pik3ca$PIK3CA_Mut)
+
+
+# Plot boxplot of each gene's expression across CPTAC samples, by gene of interest mutation status
+ggplot(cptac_brca_fpkm_data_complete_tp53, aes_string(x = "Hugo_Symbol", y = "FPKM", fill = "TP53_Mut")) + geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+ggplot(cptac_brca_fpkm_data_complete_pik3ca, aes_string(x = "Hugo_Symbol", y = "FPKM", fill = "PIK3CA_Mut")) + geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+# Split this by predicted upregulation/ predicted downregulation, so we can see how closely DepMap aligns
+pred_upregulat_tp53 <- c("AHCY", "DLD", "FTCD", "GLDC", "GSTP1", "MTHFD1", "MTHFD1L", "PSPH", "SHMT2", "TYMS")
+pred_downregulat_tp53 <- c("CDO1", "CSAD", "MAT2A", "MTHFR", "MTR", "SARDH")
+
+pred_upregulat_pik3ca <- c("BHMT2", "MTHFR")
+pred_downregulat_pik3ca <- c("AHCY", "CHKB", "GLDC", "FTCD", "MAT1A", "MTHFDL1", "PSPH", "SHMT2", "TYMS")
+
+
+
+ggplot(cptac_brca_fpkm_data_complete_tp53[cptac_brca_fpkm_data_complete_tp53$Hugo_Symbol %in% pred_upregulat_tp53,], 
+       aes_string(x = "Hugo_Symbol", y = "FPKM", fill = "TP53_Mut")) + geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+ggplot(cptac_brca_fpkm_data_complete_tp53[cptac_brca_fpkm_data_complete_tp53$Hugo_Symbol %in% pred_downregulat_tp53,], 
+       aes_string(x = "Hugo_Symbol", y = "FPKM", fill = "TP53_Mut")) + geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+ggplot(cptac_brca_fpkm_data_complete_pik3ca[cptac_brca_fpkm_data_complete_pik3ca$Hugo_Symbol %in% pred_upregulat_pik3ca,], 
+       aes_string(x = "Hugo_Symbol", y = "FPKM", fill = "PIK3CA_Mut")) + geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+ggplot(cptac_brca_fpkm_data_complete_pik3ca[cptac_brca_fpkm_data_complete_pik3ca$Hugo_Symbol %in% pred_downregulat_pik3ca,], 
+       aes_string(x = "Hugo_Symbol", y = "FPKM", fill = "PIK3CA_Mut")) + geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
