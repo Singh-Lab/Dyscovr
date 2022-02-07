@@ -17,7 +17,7 @@ main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Ou
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
 
 input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
-#input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TCGA Data (ALL)/"
+#input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/"
 
 
 is_brca <- TRUE
@@ -57,7 +57,7 @@ expression_df <- read.csv(paste(main_path, "Expression/expression_counts_DF.csv"
 tmm_norm_samples_df <- read.csv(paste(main_path, "Expression/tmm_normalized_expression_samples.csv", sep = ""),
                                 header = TRUE, check.names = FALSE)
 # FOR PAN-CANCER
-tmm_norm_samples_df <- read.csv(paste(main_path, "Expression/TMM/ALL_CT_tmm_normalized_expression_samples.csv", sep = ""),
+tmm_norm_samples_df <- read.csv(paste(main_path, "Expression/ALL_CT_tmm_normalized_expression_filtByExpr_samples.csv", sep = ""),
                                 header = TRUE, check.names = FALSE)
 
 # Import tumor purity data frame
@@ -260,13 +260,13 @@ input_sample_specific_info <- function(input_df, aliquot_df, expression_df,
   
   # IMMUNE CELL INFILTRATION
   # OPTION 1: INCLUDE TOTAL PERCENTAGE OF IMMUNE CELLS AS A COVARIATE (need absolute fractions)
-  #input_dataframe_updated <- add_total_immune_cell_percentage(input_dataframe_updated, 
-                                                              #immune_cell_infl_df,
-                                                              #ici_columns)
+  input_dataframe_updated <- add_total_immune_cell_percentage(input_dataframe_updated, 
+                                                              immune_cell_infl_df,
+                                                              ici_columns)
   
   # OPTION 2: INCLUDE THE FRACTION OF EACH IMMUNE CELL TYPE AS INDIVIDUAL COVARIATES
-  input_dataframe_updated <- add_immune_cell_fractions(input_dataframe_updated, 
-                                                      immune_cell_infl_df, ici_columns)
+  #input_dataframe_updated <- add_immune_cell_fractions(input_dataframe_updated, 
+                                                      #immune_cell_infl_df, ici_columns)
   
   # PEER FACTORS
   input_dataframe_updated <- add_peer(input_dataframe_updated, peer_df)

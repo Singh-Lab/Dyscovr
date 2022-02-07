@@ -17,8 +17,8 @@
 #' missense mutations, silent mutations, or both ('full', 'missense', or 'silent')
 prep_cdsearch_files <- function(proteome, label) {
   
-  #path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Summer 2020/Main Project Files/Input Data Files/Proteome/BRCA"
-  path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Summer 2020/Main Project Files/Input Data Files/Proteome/Pan-Cancer"
+  path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Proteome/BRCA"
+  #path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Proteome/Pan-Cancer"
   
   # Split the proteome into sub-proteomes for Batch CD-Search if needed
   if (length(proteome) > 3000) {
@@ -73,14 +73,15 @@ split_into_subproteomes <- function(proteome) {
 #' @param label a string for file retrieval that indicates whether we are looking at 
 #' missense mutations, silent mutations, or both ('full', 'missense', or 'silent')
 get_cdsearch_res <- function(label) {
-  #path = "C:/Users/sarae/Documents/Mona Lab Work/Summer 2020/Main Project Files/Saved Output Data Files/BRCA/CD-Batch Results"
-  path = "C:/Users/sarae/Documents/Mona Lab Work/Summer 2020/Main Project Files/Saved Output Data Files/Pan-Cancer/CD-Batch Results"
+  path = "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/CD-Batch Results"
+  #path = "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/CD-Batch Results"
   
   all_files <- list.files(path)
   subset_files <- all_files[unlist(lapply(all_files, FUN = function(x) {startsWith(x, label)}))]
   
   # Loop through files of interest, read into DF, and recombine into a single DF
   full_filename_1 <- paste(path, subset_files[1], sep = "/")
+  print(full_filename_1)
   cd_search_res_df <- read.csv(full_filename_1, header = TRUE, check.names = FALSE)
   if (length(subset_files) > 1) {
     for (i in 2:length(subset_files)) {

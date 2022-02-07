@@ -23,6 +23,12 @@ library(org.Hs.eg.db)
 keytypes(org.Hs.eg.db)
 
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
+#main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
+
+
+# Generalized ID conversion table from BiomaRt
+all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/all_genes_id_conv.csv", header = TRUE)
+
 
 ##############################################################################
 ### VENN DIAGRAMS TP53 & PIK3CA MUTATIONS
@@ -47,22 +53,43 @@ plot_mutational_overlap <- function(patient_set, mut_count_matrix, gene1, gene2)
   mut_gene2_counts <- as.numeric(unlist(mut_count_matrix_sub[rownames(mut_count_matrix_sub) == gene2, ]))
   gene2_mut_samps <- which(mut_gene2_counts >= 1)
   
-  mut_samps <- list("gene1" = gene1_mut_samps, "gene2" = gene2_mut_samps)
+  # Get the number of tumor samples without a mutation in either gene (count = 0)
+  #mut_neither_counts <- mut_count_matrix_sub[(rownames(mut_count_matrix_sub) == gene1) | 
+                                                              #(rownames(mut_count_matrix_sub) == gene2), ]
+  #neither_mut_samps <- as.numeric(unlist(which(colSums(mut_neither_counts) == 0)))
+  
+  mut_samps <- list("gene1" = gene1_mut_samps, "gene2" = gene2_mut_samps, "all" = 1:ncol(mut_count_matrix_sub))
 
   # Make the Venn Diagram
-  ggVennDiagram(mut_samps, label_alpha = 0, category.names = c(gene1, gene2), set_color = "black",
+  ggVennDiagram(mut_samps, label_alpha = 0, category.names = c(gene1, gene2, "All"), set_color = "black",
                 set_size = 10, label_size = 8, edge_size = 0) +
-    ggplot2::scale_fill_gradient(low="lightpink", high = "red")
+    ggplot2::scale_fill_gradient(low="cornsilk1", high = "cadetblue3")
 }
 
 patient_set <- read.table(paste0(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt"), header = TRUE)[,1]
-patient_set_lt20pamp <- read.table(paste0(main_path, "LessThan20PercAmp_patient_ids.txt"), header = TRUE)[,1]
-patient_set_lumA <- read.table(paste0(main_path, "Luminal.A_patient_ids.txt"), header = TRUE)[,1]
-patient_set_lumB <- read.table(paste0(main_path, "Luminal.B_patient_ids.txt"), header = TRUE)[,1]
-patient_set_lumAB <- read.table(paste0(main_path, "Luminal.A.B_patient_ids.txt"), header = TRUE)[,1]
+patient_set_lt20pamp <- read.table(paste0(main_path, "Patient Subsets/LessThan20PercAmp_patient_ids.txt"), header = TRUE)[,1]
+patient_set_lumA <- read.table(paste0(main_path, "Patient Subsets/Luminal.A_patient_ids.txt"), header = TRUE)[,1]
+patient_set_lumB <- read.table(paste0(main_path, "Patient Subsets/Luminal.B_patient_ids.txt"), header = TRUE)[,1]
+patient_set_lumAB <- read.table(paste0(main_path, "Patient Subsets/Luminal.A.B_patient_ids.txt"), header = TRUE)[,1]
+patient_set_basal <- read.table(paste0(main_path, "Patient Subsets/Basal_patient_ids.txt"), header = TRUE)[,1]
+patient_set_her2 <- read.table(paste0(main_path, "Patient Subsets/HER2_patient_ids.txt"), header = TRUE)[,1]
+patient_set_normLike <- read.table(paste0(main_path, "Patient Subsets/Normal-like_patient_ids.txt"), header = TRUE)[,1]
+
+patient_set_pc <- read.table(paste0(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt"), header = TRUE)[,1]
+
+blca_subtype <- TCGAquery_subtype(tumor = "BLCA")
+hnsc_subtype <- TCGAquery_subtype(tumor = "HNSC")
+blca_subtype$justPat <- unlist(lapply(blca_subtype$patient, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
+hnsc_subtype$patient <- as.character(hnsc_subtype$patient)
+hnsc_subtype$justPat <- unlist(lapply(hnsc_subtype$patient, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
+
+patient_set_blca <- intersect(patient_set_pc, blca_subtype$justPat)
+patient_set_hnsc <- intersect(patient_set_pc, hnsc_subtype$justPat)
 
 mutation_count_matrix <- read.csv(paste0(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense.csv"), 
                                   header = TRUE, row.names = 1, check.names = FALSE)
+#mutation_count_matrix <- read.csv(paste0(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense_ALL.csv"), 
+                                  #header = TRUE, row.names = 1, check.names = FALSE)
 
 gene1 <- "TP53"
 gene2 <- "PIK3CA"
@@ -79,7 +106,7 @@ plot_mutational_overlap(patient_set, mutation_count_matrix, gene1, gene2)
 #' of the hypothesis test
 #' @param results_table a master DF produced from linear_model.R
 #' @param outpath a path to a directory to write the t-statistic matrix to
-create_heat_map <- function(results_table, outpath) {
+create_heat_map <- function(results_table) {
   # Create the regulatory protein vs. gene target table
   matrix <- data.frame(matrix(ncol = length(unique(results_table$R_i.name)),
                               nrow = length(unique(results_table$T_k.name))))
@@ -88,22 +115,28 @@ create_heat_map <- function(results_table, outpath) {
   
   # Fill in this table with t-statistics
   for (i in 1:nrow(results_table)) {
-    tstat <- results_table$statistic[i]
-    #log_pstat <- log(results_table$q.value[i])
-    #if(tstat < 1) {log_pstat <- log_pstat * -1}
+    #tstat <- results_table$statistic[i]
+    beta <- results_table$estimate[i]
     regprot <- results_table$R_i.name[i]
     targ <- results_table$T_k.name[i]
     
-    matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat #log_pstat
+    tryCatch({
+      #matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
+      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- beta
+    }, error=function(cond){
+      print(cond)
+      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- 0
+    })
   }
   # NOTE: leave all the unfilled pairings as NA
   
-  # Write to file
-  #fwrite(matrix, paste(outpath, "Linear Model/Highly Deleted TFs/Non-Tumor-Normal Matched/tstatistic_matrix_delTFs_metabolicTargs_TMM_bucketCNA_iprot_iciTotFrac_uncorrected_MUT_RANDOMIZED.csv", sep = ""))
+  # Replace NA/NaN with 0, or alternatively use na.omit
+  #matrix[is.na(matrix)] <- 0
+  #matrix[is.nan(matrix)] <- 0
+  matrix <- na.omit(matrix)
   
   # Convert from data frame to matrix
   matrix <- data.matrix(matrix)
-  matrix[is.na(matrix)] <- 0
   print(head(matrix))
   
   # Plot a default heatmap
@@ -111,16 +144,20 @@ create_heat_map <- function(results_table, outpath) {
   #heatmap(matrix, scale = "none", col = col)
   
   # Plot an enhanced heatmap
+  # Clusters by default using hclust, but can specify others using param 'hclustfun'
   hm <- heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
-            density.info = "none", dendrogram = "none", key.xlab = "T-statistic", 
-            labRow = FALSE, labCol = FALSE)
-  print(hm)
+                  density.info = "none", dendrogram = "row", Colv = FALSE, 
+                  Rowv = TRUE, key = TRUE, key.title = NA, key.xlab = "Beta") 
+  #plot(hm)
   #heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
-  #density.info = "none", na.color = "gray", Rowv = FALSE, Colv = FALSE) # clusters by default using hclust, but can specify others using param 'hclustfun'
+  #density.info = "none", labCol = "", dendrogram = c("row"), 
+  #add.expr = text(x = seq_along(colnames(matrix)), 
+  #y = -2, srt = 0, labels = colnames(matrix), 
+  #xpd = NA, cex = 2, pos = 1))
   
   # Plot a pretty heatmap
-  #phm <- pheatmap(matrix) # options are available for changing clustering metric & method
-  #print(phm)              # defaults to euclidean and complete
+  #pheatmap(matrix, cutree_rows = 4) # options are available for changing clustering metric & method
+  # defaults to euclidean and complete
   
   # Plot a complex heatmap using Bioconductor
   #Heatmap(matrix, name = "Results Heatmap", column_title = "Regulatory Proteins",
@@ -130,6 +167,9 @@ create_heat_map <- function(results_table, outpath) {
   # e.g. "euclidean" or "pearson"),
   # clustering_method_rows, clustering_method_columns (the method for clustering, 
   # e.g. "complete" or "average")
+  
+  # Opt: Get and return the gene order after clustering
+  # return(data.frame(gene = rownames(matrix)[hm$rowInd]))
   
   return(matrix)
 }
@@ -154,17 +194,16 @@ create_heat_map(master_df_mut, main_path)
 #' clustered heat map, with entries being the t-statistic
 #' of the hypothesis test. Adds an additional dimension of coloring
 #' the clusters, eliminating x-axis clustering
-#' @param main_path a path to a directory to write the t-statistic matrix to
 #' @param master_df a master DF produced from linear_model.R
 #' @param height a height at which to cut the dendrogram to create clusters
-create_heatmap_with_clustering <- function(main_path, master_df, height) {
-  matrix <- create_heat_map(master_df, main_path)
+create_heatmap_with_clustering <- function(master_df, height) {
+  matrix <- create_heat_map(master_df)
   print(head(matrix))
   hm <- heatmap.2(matrix, scale = "none", col = bluered(1000), trace = "none",
-                  density.info = "none")
+                  density.info = "none", key = TRUE, key.title = NA, key.xlab = "Beta")
   rownames(matrix)[hm$rowInd]
   row_clust <- hclust(dist(matrix, method = "euclidean"), method = 'ward.D2')
-  #plot(row_clust)
+  plot(row_clust)
   
   # Cut the dendrogram using the given height
   h_sort <- sort(cutree(row_clust, h = height))
@@ -202,9 +241,10 @@ create_heatmap_with_clustering <- function(main_path, master_df, height) {
   }))
   
   # Plot the new and improved heatmap
-  new_hm <- heatmap.2(matrix, scale = "none", col = bluered(1000), trace = "none", density.info = "none",
-            Rowv = dendrogram, Colv = "none", key.xlab = "T-statistic", RowSideColors = col_labels,
-            colRow = col_labels) 
+  new_hm <- heatmap.2(matrix, scale = "none", col = bluered(1000), trace = "none", 
+                      density.info = "none", dendrogram = "row", Rowv = dendrogram, 
+                      Colv = "none", key.title = NA, key.xlab = "Beta", 
+                      RowSideColors = col_labels, colRow = col_labels) 
   # col = brewer.pal(n = 100, name = "YlGnBu")
   print(new_hm)
   
@@ -226,7 +266,7 @@ master_df_mut_lt20pamp <- read.csv(paste0(main_path, "Linear Model/PIK3CA_TP53/e
 
 
 # Call this function
-create_heatmap_with_clustering(main_path, master_df_mut, height = 22)
+create_heatmap_with_clustering(master_df_mut, height = 2)
 
 
 
@@ -237,75 +277,53 @@ create_heatmap_with_clustering(main_path, master_df_mut, height = 22)
 #' given two groups of interest
 #' @param results_table the output master DF from the linear model
 compute_and_print_spearman <- function(results_table, ri_1, ri_2) {
-  if((ri_1 %fin% results_table$R_i) & (ri_2 %fin% results_table$R_i)) {
+  if((ri_1 %fin% results_table$R_i.name) & (ri_2 %fin% results_table$R_i.name)) {
     
-    target_genes <- unique(results_table$T_k)
+    target_genes <- unique(results_table$T_k.name)
     
     # Mini functions to get Betas/t-statistics for each target gene
     #' @param results_table the master DF 
+    #' @param target_genes the list of target genes
     #' @param ri the given regulatory protein
     #' @param type "Betas" or "t-statistics" to indicate what value we are returning
-    get_values <- function(results_table, ri, type) {
+    get_values <- function(results_table, target_genes, ri, type) {
       vals <- unlist(lapply(target_genes, function(tg) {
         if(type == "Betas") {
-          est <- results_table[(results_table$R_i == ri) & (results_table$T_k == tg), "estimate"]
+          est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "estimate"]
         } else {
-          est <- results_table[(results_table$R_i == ri) & (results_table$T_k == tg), "statistic"]
+          est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "statistic"]
         }
-        if (length(est) == 0) {est <- NA}
+        if (length(est) == 0) {est <- 0}  # To ensure the lengths of the Beta vectors are the same
         return(est)
       }))
     }
     
-    grp1_Betas <- get_values(results_table, ri_1, "Betas")
-    grp1_tstat <- get_values(results_table, ri_1, "t-statistics")
-    
-    grp2_Betas <- get_values(results_table, ri_2, "Betas")
-    grp2_tstat <- get_values(results_table, ri_2, "t-statistics")
+    grp1_Betas <- get_values(results_table, target_genes, ri_1, "Betas")
+    grp2_Betas <- get_values(results_table, target_genes, ri_2, "Betas")
     
     # Get Betas spearman
     betas_spearman <- cor.test(grp1_Betas, grp2_Betas, method = "spearman")
     betas_spearman_stat <- as.numeric(betas_spearman$estimate)
     betas_spearman_pval <- betas_spearman$p.value
     
-    # Get t-statistic spearman
-    tstat_spearman <- cor.test(grp1_tstat, grp2_tstat, method = "spearman")
-    tstat_spearman_stat <- as.numeric(tstat_spearman$estimate)
-    tstat_spearman_pval <- tstat_spearman$p.value
-    
     # Print the results
-    ri_1_name <- unique(results_table[results_table$R_i == ri_1, 'R_i.name'])
-    ri_2_name <- unique(results_table[results_table$R_i == ri_2, 'R_i.name'])
-    print(paste("Spearman results for", paste(ri_1_name, paste("and", ri_2_name))))
+    print(paste("Spearman results for", paste(ri_1, paste("and", ri_2))))
     print(paste("Beta correlation of", paste(betas_spearman_stat, paste(", p-value of", betas_spearman_pval))))
-    print(paste("t-statistic correlation of", paste(tstat_spearman_stat, paste(", p-value of", tstat_spearman_pval))))
     
     # Create a plot to visualize the correlations
     plot(grp1_Betas, grp2_Betas, pch = 19, col = "lightblue", #main = "Betas Spearman Correlation",
-         xlab = paste(ri_1_name, "Betas"), ylab = paste(ri_2_name, "Betas"))
+         xlab = paste(ri_1, "Betas"), ylab = paste(ri_2, "Betas"))
     abline(lm(grp2_Betas ~ grp1_Betas), col = "red", lwd = 3)
-    text(labels = paste("Correlation:", paste(round(betas_spearman_stat, 4), 
-                                              paste(", p-value:", round(betas_spearman_pval, 5)))), 
+    text(labels = paste("Correlation:", paste(round(betas_spearman_stat, 6), 
+                                              paste(", p-value:", round(betas_spearman_pval, 6)))), 
          x = max(grp1_Betas, na.rm = TRUE)-sd(grp1_Betas, na.rm = TRUE)*3, 
-         y = max(grp2_Betas, na.rm = TRUE)-sd(grp2_Betas, na.rm = TRUE), 
-         col = "black", cex = 1.15)
-    
-    
-    plot(grp1_tstat, grp2_tstat, pch = 19, col = "lightblue", #main = "T-Statistics Spearman Correlation",
-         xlab = paste(ri_1_name, "t-statistics"), ylab = paste(ri_2_name, "t-statistics"))
-    abline(lm(grp2_tstat ~ grp1_tstat), col = "red", lwd = 3)
-    text(labels = paste("Correlation:", paste(round(tstat_spearman_stat, 4), 
-                                              paste(", p-value:", round(tstat_spearman_pval, 5)))), 
-         x = max(grp1_tstat, na.rm = TRUE)-sd(grp1_tstat, na.rm = TRUE)*3, 
-         y = max(grp2_tstat, na.rm = TRUE)-sd(grp2_tstat, na.rm = TRUE), 
-         col = "black", cex = 1.15)
+         y = max(grp2_Betas, na.rm = TRUE)-sd(grp2_Betas, na.rm = TRUE), col = "black")
     
     
   } else {print("Error. Provided regprots are not in the given master DF.")}
 }
-
-ri_1 <- "P04637"
-ri_2 <- "P42336"
+ri_1 <- "TP53"
+ri_2 <- "PIK3CA"
 
 # Call function
 compute_and_print_spearman(master_df_mut, ri_1, ri_2)
@@ -418,7 +436,7 @@ perform_gsea <- function(results_table, n, all_genes_id_conv, output_path) {
       if (length(terms) > 0) {
         termIDs <- sapply(terms, function(x) {res@result$ID[which(res@result$Description == x)]})
         pdf(file = paste0(plotdir, regprot,'_gse_',gst,'_gseaCurve_top', n, 'terms_down.pdf'),
-            width =15, height = 10)
+            width = 15, height = 10)
         plot(gseaplot2(res, geneSetID = termIDs, pvalue_table = TRUE,
                        color = RColorBrewer::brewer.pal(length(termIDs), "Dark2"), ES_geom = "dot"))
         dev.off()

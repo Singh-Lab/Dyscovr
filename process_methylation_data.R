@@ -16,7 +16,7 @@ library(tictoc)
 library(data.table)
 library(abind)
 library(doParallel)
-library(sva)
+#library(sva)
 
 # This file takes either:
 # 1. Raw legacy methylation data from the GDC (level 1) OR
@@ -34,10 +34,10 @@ path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Fi
 # path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/"
 
 output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Methylation/"
-#output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Methylation/"
+# output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Methylation/"
 
 outpath_clean <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Methylation/Clean Methylation Files/"
-#outpath_clean <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Methylation/Clean Methylation Files/"
+# outpath_clean <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Methylation/Clean Methylation Files/"
 
 
 ############################################################
@@ -75,7 +75,8 @@ patient_ids <- fread(paste(path, "unique_brca_patient_ids.txt", sep = ""),
 # If needed: patient_ids <- unlist(lapply(patient_ids, function(x) 
         # unlist(strsplit(x, split = " ", fixed = TRUE))[2]))
 # patient_ids <- fread(paste(path, "unique_patient_ids.txt", sep = ""), 
-                           # header = FALSE)[,1]
+                           # header = FALSE)[,2]
+# patient_ids <- patient_ids$V2
 manifest_filenames <- unlist(fread(paste(path, "Methylation_Data/Level3/MANIFEST.txt", sep = ""), 
                                  header = TRUE, sep = "\t")[,2])
 
@@ -92,13 +93,17 @@ for (i in 2:length(manifest_names)) {
   manifest <- rbind(manifest, mani)
 }
 
+
 # Write this to a file
 fwrite(manifest, paste(output_path, "pan-cancer_methylation_manifest.csv", sep = ""))
 
 # Read back
 manifest <- fread(paste(output_path, "pan-cancer_methylation_manifest.csv", sep = ""), 
                      header=TRUE)
+manifest <- manifest[!(manifest$id == "\\N"),]
+
 manifest_filenames <- manifest$filename
+
 
 
 #' Since methylation files are so large, we want to NOT download any patient 
@@ -155,12 +160,12 @@ filenames <- list.files(paste(path, "Methylation_Data/Level3/", sep = ""), patte
 # Pan-Cancer
 # input_path_pc_meth <- "D:/"
 # filenames <- list.files(paste(input_path_pc_meth, "Pan-Cancer Methylation Data/", sep = ""), 
-  # pattern = ".gdc_hg38")  # 5121 files, excluding BRCA
+  # pattern = ".gdc_hg38")  # 8694, excluding BRCA
 
 # Limit to only intersecting IDs, if we haven't already filtered
 filename_patient_ids <- unlist(lapply(filenames, function(x) 
   unlist(strsplit(unlist(strsplit(x, ".", fixed = TRUE))[6], "-", fixed = TRUE))[3]))
-filenames <- filenames[which(filename_patient_ids %fin% intersecting_ids)]
+filenames <- filenames[which(filename_patient_ids %fin% intersecting_ids)] # PC, leaves us with 6951
 
 
 ############################################################
@@ -231,7 +236,16 @@ clean_tab <- function(meth_table) {
 # Call function 
 local_path <- paste(path, "Methylation_Data/Level3/", sep = "")
 # local_path <- paste(input_path_pc_meth, "Pan-Cancer Methylation Data/", sep = "")
-clean_all_meth_dfs(filenames = filenames, path = local_path, output_path = outpath_clean)
+
+# Potentially only look at files we haven't already cleaned
+patient_ids_curr <- unlist(lapply(list.files(outpath_clean), function(x)
+  unlist(strsplit(x, "-", fixed = TRUE))[1]))
+filename_patient_ids <- unlist(lapply(filenames, function(x) 
+  unlist(strsplit(unlist(strsplit(x, ".", fixed = TRUE))[6], "-", fixed = TRUE))[3]))
+filenames_curr <- filenames[which(filename_patient_ids %fin% patient_ids_curr)]
+filenames_needed <- setdiff(filenames, filenames_curr)
+
+clean_all_meth_dfs(filenames = filenames_needed, path = local_path, output_path = outpath_clean)
 
 
 ############################################################

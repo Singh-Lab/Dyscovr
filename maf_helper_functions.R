@@ -59,8 +59,10 @@ get_pfam_domains <- function(maf, n) {
 #' tumor samples (not normal).
 #' @param maf a MAF file that has been read in by maftools
 get_mut_count_matrix <- function(maf) {
-  # mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = NULL)
-  mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = "Missense_Mutation")
+  #mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = NULL)
+  mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = c("Missense_Mutation", 
+                                                              "Nonsense_Mutation"))
+  #mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = "Missense_Mutation")
   print(mut_count_matrix)
   return(mut_count_matrix)
 }
@@ -972,7 +974,7 @@ get_subtype_patient_list(brca_subtype, "LumA", outpath, "Luminal.A")
 
 # Use maftools to examine the proportion of patients that possess top mutations
 maf_filename <- "TCGA.BRCA.muse.b8ca5856-9819-459c-87c5-94e91aca4032.DR-10.0.somatic.maf"
-maf <- read.maf(maf = maf_filename)  # Read in maf file using maftools
+maf <- read.maf(maf = paste0(main_path, maf_filename))  # Read in maf file using maftools
 
 # Use subsetMAF to also create subsetted MAF objects
 subset_maf <- subsetMaf(maf, genes = protein_ids, mafObj = TRUE, isTCGA = TRUE)

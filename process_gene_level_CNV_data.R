@@ -7,7 +7,7 @@
   # 1. Filter to include only patients that have all types of data
   # 2. Filter to include only the transcription factors of interest
 
-# Format of output dataframe: 
+# Format of output data frame: 
   # Rows : Transcription Factors (ENSG ID) OR all genes in genome
   # Columns : Patient TCGA ID (4-digit) OPT: (-Sample ID (01A is tumor, 11A is normal))
   # Entries : CNA value (positive represents an amplification event, negative represents deletion event,

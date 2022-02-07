@@ -12,6 +12,7 @@ library(TCGAbiolinks)
 library(gdata)
 library(matrixStats)
 library(data.table)
+library("gplots")
 
 # This file processes the various expression data files for each patient to:
 # Combine the files across various patients into a single data frame that we can 
@@ -24,8 +25,10 @@ library(data.table)
 # Entries : expression value (may be either normalized or raw counts depending on the
 # type of data we are using)
 
+# edgeR User's Manual: https://www.bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf
+
 path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
-#path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TCGA Data (ALL)/"
+#path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/"
 
 output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Expression/"
 #output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Expression/"
@@ -41,7 +44,7 @@ all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Proje
 ############################################################
 # Unique patient TCGA IDs
 patient_tcga_ids <- read.table(paste(path, "unique_brca_patient_ids_2.txt", sep = ""), header =  TRUE)[,1]
-# patient_tcga_ids <- read.table(paste(path, "unique_patient_ids_2.txt", sep = ""), header =  TRUE)[,2]
+# patient_tcga_ids <- read.table(paste(path, "unique_patient_ids_2.txt", sep = ""), header =  TRUE)[,'x']
 
 # IF NEEDED FOR PAN-CANCER: Merge multiple files
 #' This function merges the sample sheets for pan-cancer expression data, if needed
@@ -60,9 +63,9 @@ write.csv(sample_sheet, paste(path, "Expression_Data/Counts/gdc_sample_sheet_tot
 
 # Import the GDC sample sheet for file conversions
 sample_sheet <- read.csv(paste(path, "Expression_Data/Counts/gdc_sample_sheet.csv", sep = ""), header = TRUE, 
-                         check.names = FALSE)
+                         check.names = FALSE, row.names = 1)
 #sample_sheet <- read.csv(paste(path, "Expression_Data/FPKM/gdc_sample_sheet.csv", sep = ""), header = TRUE, 
-#check.names = FALSE)
+#check.names = FALSE, row.names = 1)
 sample_sheet$`File Name` <- unlist(lapply(sample_sheet$`File Name`, function(x) 
   paste(unlist(strsplit(x, ".", fixed = TRUE))[1:3], collapse = ".")))
 
@@ -102,7 +105,6 @@ targets <- read.csv(paste(path, "Expression_Data/Counts/gdc_sample_sheet_for_edg
                     header = TRUE, check.names = FALSE)
 targets$files <- unlist(lapply(targets$files, function(x) 
   paste(unlist(strsplit(x, ".", fixed = TRUE))[1:3], collapse = ".")))
-
 targets$files <- unlist(lapply(targets$files, function(x) 
   paste(path, paste("Expression_Data/Counts/", x, sep = ""), sep = "")))
 
@@ -130,6 +132,7 @@ targets_sub2 <- targets_sub[which(unlist(lapply(split_fn, function(x)
 
 # OPTIONAL: also limit DF to only cancer samples
 targets_sub3 <- targets_sub2[targets_sub2$group != 'Solid Tissue Normal',]
+#targets_sub3 <- targets_sub3[!grepl("Normal", targets_sub2$group),]
 
 # If pan-cancer, split apart the file into individual cancer types
 #' Takes a targets object (GDC sample sheet in edgeR-accepted format) and breaks
@@ -161,14 +164,14 @@ split_by_ct <- function(targets, dictionary) {
 }
 
 dictionary <- sample_sheet[,c('Sample.ID', 'Project.ID')]
-list_of_ct_targets <- split_by_ct(targets_sub2, dictionary)
+list_of_ct_targets <- split_by_ct(targets_sub3, dictionary)
 
 # Remove any duplicate rows
 list_of_ct_targets <- lapply(list_of_ct_targets, distinct)
 
 
 ############################################################
-### OPTIONAL: ADJUST GROUPS TO GROUP BY MUTATION STATUS ###
+### OPT: ADJUST GROUPS TO GROUP BY MUTATION STATUS ###
 ### OF A GIVEN PROTEIN OF INTEREST ###
 ############################################################
 #' Takes a subsetted edgeR targets DF and changes the grouping
@@ -208,8 +211,7 @@ mut_count_matrix <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Projec
 colnames(mut_count_matrix) <- unlist(lapply(colnames(mut_count_matrix), function(x)
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
 
-targets_sub3_groupedByMutStat <- group_by_mutation_status(targets_sub3, prot_of_interest, mut_count_matrix)
-
+targets_sub3_groupedByTP53Mut <- group_by_mutation_status(targets_sub3, prot_of_interest, mut_count_matrix)
 
 ############################################################
 ### USE EDGER FOR COUNT NORMALIZATION (TMM) ###
@@ -229,12 +231,15 @@ normalize_counts_edgeR <- function(targets) {
   print(d$samples)
   print(dim(d))
   
-  # If doing in two pieces, recombine into one
-  #d_full <- c(d, d2)
-  
+
   # Filter out tags that are not expressed in at least four libraries
-  keep <- rowSums(cpm(d) > 1) >= 4
+  #keep <- rowSums(cpm(d) > 1) >= 4
+  
+  # Alternatively, use edgeR's filterByExpr() function
+  # Function documentation: https://rdrr.io/bioc/edgeR/man/filterByExpr.html
+  keep <- filterByExpr(cpm(d), group = "group") 
   d <- d[keep,]
+  
   # BRCA: went from 60482x840 to 24109x840
 
   # Reset the library sizes
@@ -293,6 +298,9 @@ visualize_dispersion <- function(d) {
   #plotBCV(d, cex=0.4)
   
   d <- estimateDisp(d)
+  plotBCV(d, cex=0.4)
+  
+  return(d)
 }
 visualize_dispersion(d)
 # Or, if we are looking pan-cancer, apply to each item in list
@@ -309,33 +317,180 @@ lapply(d_list, visualize_dispersion)
 #' @param d edgeR output data structure to visualize
 visualize_de_by_mut_status <- function(d) {
   
-  #d <- visualize_dispersion(d)
+  d <- visualize_dispersion(d)
   
   # Get the DE genes across groups (1 is mutated, 0 is not mutated)
   et <- exactTest(d)
-  topTags <- topTags(et)
+  topTags <- topTags(et, n = 15000, adjust.method = "BH", p.value = 0.05)
   print(topTags)
-  de1 <- decideTestsDGE(et, adjust.method="BH", p.value=0.05)
+  de1 <- decideTestsDGE(et, adjust.method = "BH", p.value = 0.05)
   print(summary(de1))
   
   # Adjust the topTags table
-  print(head(rownames(topTags)))
-  rownames(topTags) <- unlist(lapply(rownames(topTags), function(x) unlist(strsplit(as.character(x), ".", fixed = TRUE))[1]))
-  print(head(topTags))
-  topTags$table$gene.name <- unlist(lapply(rownames(topTags), function(ensg)
-    paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == x, 'external_gene_name'])), collapse = ";")))
-  
+  rownames(topTags$table) <- unlist(lapply(rownames(topTags$table), function(x) 
+    unlist(strsplit(as.character(x), ".", fixed = TRUE))[1]))
+  print(head(topTags$table))
+  topTags$table$gene.name <- unlist(lapply(rownames(topTags$table), function(ensg)
+    paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == ensg, 'external_gene_name'])), collapse = ";")))
   
   return(topTags)
-
 }
 
 
-topHits <- visualize_de_by_mut_status(d_tp53Mut)
+topHits_tp53 <- visualize_de_by_mut_status(d_tp53)
+# topHits_pik3ca <- visualize_de_by_mut_status(d_pik3ca)
 
 # Or, if we are looking pan-cancer, apply to each item in list
 lapply(d_list, visualize_de_by_mut_status)
 
+
+#' Visualize the top DE genes by mutation status of multiple proteins of interest using a heat map
+#' @param topHits_prot1 a formal class TopTags object with the top hits from the first protein of interest
+#' @param topHits_prot2 a formal class TopTags object with the top hits from the second protein of interest
+#' @param prot1_name the external gene name of the first protein of interest
+#' @param prot2_name the external gene name of the second protein of interest
+#' @param subset_genes an optional subset of genes that we are interested in looking at expression
+#' effects of (e.g. metabolic genes)
+create_de_by_mut_status_heatmap <- function(topHits_prot1, topHits_prot2, prot1_name, prot2_name, subset_genes) {
+  
+  # Get the tables from the TopTags object
+  topHits_prot1_tab <- topHits_prot1$table
+  topHits_prot2_tab <- topHits_prot2$table
+  
+  # Limit them to just the gene.name and the logFC
+  topHits_prot1_tab <- topHits_prot1_tab[,c("logFC", "gene.name")]
+  topHits_prot2_tab <- topHits_prot2_tab[,c("logFC", "gene.name")]
+  
+  # Adjust the logFC column name
+  colnames(topHits_prot1_tab)[which(colnames(topHits_prot1_tab) == "logFC")] <- paste(prot1_name, "logFC", sep = ".")
+  colnames(topHits_prot2_tab)[which(colnames(topHits_prot2_tab) == "logFC")] <- paste(prot2_name, "logFC", sep = ".")
+  
+  # Remove any gene.name entries that are blank
+  topHits_prot1_tab <- topHits_prot1_tab[-which(topHits_prot1_tab$gene.name == ""),]
+  topHits_prot2_tab <- topHits_prot2_tab[-which(topHits_prot2_tab$gene.name == ""),]
+  
+  # Merge them together by gene name
+  topHits_tab <- merge(topHits_prot1_tab, topHits_prot2_tab, by = "gene.name", all = TRUE)
+  
+  # Deal with duplicates by adding .X to them (where X is a number)
+  duplicates <- unique(topHits_tab$gene.name[which(duplicated(topHits_tab$gene.name))])
+  for (d in duplicates) {
+    indices_of_d <- which(topHits_tab$gene.name == d)
+    for (i in 1:length(indices_of_d)) {
+      index <- indices_of_d[i]
+      topHits_tab$gene.name[index] <- paste(d, i, sep = ".")
+    }
+  }
+  
+  # Make the gene.name a rowname rather than a column for plotting
+  rownames(topHits_tab) <- topHits_tab$gene.name
+  topHits_tab <- topHits_tab[, which(colnames(topHits_tab) != "gene.name")]
+  
+  
+  # Turn into a matrix
+  topHits_matrix <- data.matrix(topHits_tab)
+  
+  # Plot a default heatmap
+  #col <- colorRampPalette(brewer.pal(10, "RdYlBu"))(256)
+  #heatmap(matrix, scale = "none", col = col)
+  
+  # For the purposes of the heatmap, convert all NAs to 0
+  topHits_matrix[is.na(topHits_matrix)] <- 0
+  
+  print(head(topHits_matrix))
+  
+  # If "subset_genes" is given, limit the matrix to just these genes 
+  try(topHits_matrix <- topHits_matrix[which(rownames(topHits_matrix) %in% subset_genes),],
+      silent = TRUE)
+  
+  # Plot an enhanced heatmap
+  heatmap.2(topHits_matrix, scale = "none", col = bluered(100), trace = "none",
+            density.info = "none", labCol = "", dendrogram = c("row"), 
+            add.expr = text(x = seq_along(colnames(topHits_matrix)), 
+                            y = -2, srt = 0, labels = colnames(topHits_matrix), 
+                            xpd = NA, cex = 2, pos = 1))
+  
+  return(topHits_matrix)
+}
+
+tp53_gn <- "TP53"
+pik3ca_gn <- "PIK3CA"
+
+metabolic_genes <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/metabolism_gene_list_ensg.txt",
+                              header = TRUE)[,1]
+metabolic_genes_gn <- unique(unlist(lapply(metabolic_genes, function(ensg)
+  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == ensg, 'external_gene_name'])), collapse = ";"))))
+
+
+logFC_matrix <- create_de_by_mut_status_heatmap(topHits_tp53, topHits_pik3ca, tp53_gn, pik3ca_gn)
+logFC_matrix_metabolism <- create_de_by_mut_status_heatmap(topHits_tp53, topHits_pik3ca, tp53_gn, pik3ca_gn, metabolic_genes_gn)
+
+
+############################################################
+#### OPT: ESTIMATE SPEARMAN CORRELATION OF LOGFC ###
+############################################################
+#' Compute and print the Spearman correlation of the Betas and of the T-statistic,
+#' given two groups of interest
+#' @param results_table the output matrix from "create_de_by_mut_status_heatmap" function
+#' @param ri_1 the external gene name of the first protein of interest
+#' @param ri_2 the external gene name of the second protein of interest
+compute_and_print_spearman <- function(results_table, ri_1, ri_2) {
+  
+  target_genes <- unique(rownames(results_table))
+  
+  grp1_logFC <- results_table[,1]
+  grp2_logFC <- results_table[,2]
+  
+  # Get logFC spearman
+  logFC_spearman <- cor.test(grp1_logFC, grp2_logFC, method = "spearman")
+  logFC_spearman_stat <- as.numeric(logFC_spearman$estimate)
+  logFC_spearman_pval <- logFC_spearman$p.value
+
+  # Print the results
+  print(paste("Spearman results for", paste(ri_1, paste("and", ri_2))))
+  print(paste("logFC correlation of", paste(logFC_spearman_stat, paste(", p-value of", logFC_spearman_pval))))
+
+  # Create a plot to visualize the correlations
+  plot(grp1_logFC, grp2_logFC, pch = 19, col = "lightblue", #main = "logFC Spearman Correlation",
+       xlab = paste(ri_1, "logFC"), ylab = paste(ri_2, "logFC"))
+  abline(lm(grp2_logFC ~ grp1_logFC), col = "red", lwd = 3)
+  text(labels = paste("Correlation:", paste(round(logFC_spearman_stat, 6), 
+                                            paste(", p-value:", round(logFC_spearman_pval, 6)))), 
+       x = max(grp1_logFC, na.rm = TRUE)-sd(grp1_logFC, na.rm = TRUE)*5, 
+       y = max(grp2_logFC, na.rm = TRUE)-sd(grp2_logFC, na.rm = TRUE), col = "black")
+}
+
+ri_1 <- "TP53"
+ri_2 <- "PIK3CA"
+
+# Call function
+compute_and_print_spearman(logFC_matrix, ri_1, ri_2)
+compute_and_print_spearman(logFC_matrix_metabolism, ri_1, ri_2)
+
+
+# ASIDE: Compute & visualize overlap between naive DE genes and those predicted from the model
+tp53_pik3ca_master_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/output_results_P53_PIK3CA_metabolicTargs_iprotein_tmm_rawCNA_methMRaw_cibersortTotalFrac_allButCancerType_uncorrected_MUT.csv", 
+                                  header = TRUE, check.names = FALSE)
+
+# Use processing functions from process_LM_output_manual.R to get top hits from model
+tp53_pik3ca_master_df <- mh_correct(tp53_pik3ca_master_df)
+tp53_pik3ca_master_df <- add_targ_regprot_gns(tp53_pik3ca_master_df, all_genes_id_conv)
+tp53_pik3ca_master_df_sig <- get_signif_correl(tp53_pik3ca_master_df, qval_thres = 0.1)
+tophits_tp53 <- tp53_pik3ca_master_df_sig[tp53_pik3ca_master_df_sig$R_i.name == "TP53", 'T_k.name']
+tophits_pik3ca <- tp53_pik3ca_master_df_sig[tp53_pik3ca_master_df_sig$R_i.name == "PIK3CA", 'T_k.name']
+
+# Make Venn diagrams
+vd_tp53 <- venn.diagram(list(tophits_tp53, logFC_matrix_metabolism$TP53.logFC[logFC_matrix_metabolism$TP53.logFC > 0]),
+             category.names = c("Model Hits", "Naive DE Hits"), filename = NULL, output = TRUE,
+             lwd = 2, lty = 'blank', fill = c("red", "blue"), cex = 2, fontface = "bold",
+             fontfamily = "sans", cat.cex = 2, cat.fontface = "bold",cat.fontfamily = "sans")
+grid::grid.draw(vd_tp53)
+
+vd_pik3ca <- venn.diagram(list(tophits_pik3ca, logFC_matrix_metabolism$PIK3CA.logFC[logFC_matrix_metabolism$PIK3CA.logFC > 0]),
+                        category.names = c("Model Hits", "Naive DE Hits"), filename = NULL, output = TRUE,
+                        lwd = 2, lty = 'blank', fill = c("red", "blue"), cex = 2, fontface = "bold",
+                        fontfamily = "sans", cat.cex = 2, cat.fontface = "bold", cat.fontfamily = "sans")
+grid::grid.draw(vd_pik3ca)
 
 ############################################################
 ### WRITE NORMALIZED RESULTS TO FILES ###
@@ -357,7 +512,7 @@ for (i in 1:length(d_list)) {
 # Also, merge TMM-normalized expression and samples into "master files" and write these as well
 tmm_list <- lapply(tmm_list, as.data.frame)
 tmm_list <- lapply(tmm_list, tibble::rownames_to_column)
-tmm_normalized_full <- tmm_list %>% reduce(full_join, by = 'rowname')
+tmm_normalized_full <- tmm_list %>% purrr::reduce(full_join, by = 'rowname')
 rownames(tmm_normalized_full) <- tmm_normalized_full$rowname
 tmm_normalized_full <- tmm_normalized_full[,2:ncol(tmm_normalized_full)]
 write.csv(tmm_normalized_full, paste(output_path, "ALL_CT_tmm_normalized_expression_counts.csv", sep = ""))
@@ -494,7 +649,9 @@ filter_by_sd <- function(expression_df) {
   
   # Get the standard deviation across each row of the DF
   expression_matrix <- as.matrix(expression_df)
-  sd_vector <- rowSds(expression_matrix)
+  sd_vector <- rowSds(expression_matrix, na.rm = TRUE)
+  
+  print(head(sd_vector))
   
   # Limit the matrix to only those rows with a SD less than 1
   expression_matrix_filt <- expression_matrix[which(sd_vector > 1),]
@@ -502,13 +659,12 @@ filter_by_sd <- function(expression_df) {
   return(as.data.frame(expression_matrix_filt))
 }
 
-expression_dataframe_filt <- filter_by_df(expression_dataframe)
+expression_dataframe_filt <- filter_by_sd(expression_dataframe)
 
 
 ############################################################
 ############################################################
-### FILTER BY MEAN/MEDIAN EXPRESSION PRIOR TO RANK/ QUANTILE
-### NORMALIZATION: COUNTS ONLY ###
+### FILTER BY MEAN/MEDIAN EXPRESSION: COUNTS ONLY ###
 ############################################################
 ############################################################
 

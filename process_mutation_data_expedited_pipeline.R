@@ -70,9 +70,14 @@ clin_filename <- paste(path, "Input Data Files/BRCA Data/clinical_data_subset.cs
 #clin_filename <- paste(path, "Input Data Files/TCGA Data (ALL)/clinical_data_subset.csv", sep = "")
 clinical_df <- fread(clin_filename, header = TRUE)
 
-# Import filtered MAF file
+# Import MAF file
+
+# Missense-filtered
 maf_file_df_missense <- fread(paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/maf_file_df_missense.csv", sep = ""), header = TRUE)
 #maf_file_df_missense <- fread(paste(path, "Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/maf_file_df_missense.csv", sep = ""), header = TRUE)
+
+# Overall MAF
+
 
 # Imported subsetted proteome file
 proteome_subset_missense_filename <- paste(path, "Input Data Files/Proteome/BRCA/proteome_subset_missense.csv", sep = "")

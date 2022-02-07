@@ -39,7 +39,7 @@ write.csv(binding_domains, paste(path, "Saved Output Data Files/InteracDome/bind
 
 # OPT: In order to match these domain names to CD-Search Pfam IDs, remove the "PF" from the ID
 binding_domains_ids <- grep('PF', unlist(strsplit(binding_domains, "_", fixed = TRUE)), value = TRUE)
-binding_domains_ids_noPF <- unique(unlist(lapply(binding_domains_ids, FUN = function(id) str_remove(id, "PF"))))
+binding_domains_ids_noPF <- unique(unlist(lapply(binding_domains_ids, FUN = function(id) as.character(str_remove(id, "PF")))))
 write.csv(binding_domains_ids_noPF, paste(path, "Saved Output Data Files/InteracDome/binding_domains_noPF.csv", sep = ""))
 # Read back if already done
 binding_domains_ids_noPF <- read.csv(paste(path, "Saved Output Data Files/InteracDome/binding_domains_noPF.csv", sep = ""))[,2]
