@@ -31,6 +31,7 @@ library("RColorBrewer")
 library("pathview")
 library("gage")
 library(dendextend)
+library(gclus)
 
 # Path to output files
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
@@ -145,7 +146,14 @@ visualize_error_distrib <- function(results_table) {
 mh_correct <- function(results_table) {
   
   # Get the qvalue object
-  qobj <- qvalue(p = results_table$p.value)
+  qobj <- NA
+  if(length(results_table$p.value) < 100) {
+    # With a small number of pvalues we may not be able to accurately estimate pi0,
+    # so we set to 1 (the equivalent of B-H correction)
+    qobj <- qvalue(p = results_table$p.value, pi0 = 1)
+  } else {
+    qobj <- qvalue(p = results_table$p.value)
+  }
   
   # OPT: plot some useful plots & print some useful information
   plot(qobj)
@@ -206,55 +214,71 @@ fwrite(master_df_cna_corrected, paste(main_path, "Linear Model/TP53/Non-Tumor-No
 #' of the hypothesis test
 #' @param results_table a master DF produced from linear_model.R
 #' @param outpath a path to a directory to write the t-statistic matrix to
-create_heat_map <- function(results_table, outpath) {
+create_heat_map <- function(results_table) {
   # Create the regulatory protein vs. gene target table
   matrix <- data.frame(matrix(ncol = length(unique(results_table$R_i.name)),
                               nrow = length(unique(results_table$T_k.name))))
   colnames(matrix) <- unique(results_table$R_i.name)
   rownames(matrix) <- unique(results_table$T_k.name)
   
-  # Fill in this table with t-statistics
+  # Fill in this table with t-statistics/ Betas
   for (i in 1:nrow(results_table)) {
-    tstat <- results_table$statistic[i]
-    #log_pstat <- log(results_table$q.value[i])
-    #if(tstat < 1) {log_pstat <- log_pstat * -1}
+    #tstat <- results_table$statistic[i]
+    beta <- results_table$estimate[i]
     regprot <- results_table$R_i.name[i]
     targ <- results_table$T_k.name[i]
     
-    matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat #log_pstat
+    tryCatch({
+      #matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
+      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- beta
+    }, error=function(cond){
+      print(cond)
+      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- 0
+    })
   }
   # NOTE: leave all the unfilled pairings as NA
   
-  # Write to file
-  #fwrite(matrix, paste(outpath, "Linear Model/Highly Deleted TFs/Non-Tumor-Normal Matched/tstatistic_matrix_delTFs_metabolicTargs_TMM_bucketCNA_iprot_iciTotFrac_uncorrected_MUT_RANDOMIZED.csv", sep = ""))
+  # Replace NA/NaN with 0, or alternatively use na.omit
+  #matrix[is.na(matrix)] <- 0
+  #matrix[is.nan(matrix)] <- 0
+  matrix <- na.omit(matrix)
   
   # Convert from data frame to matrix
   matrix <- data.matrix(matrix)
   print(head(matrix))
-
+  
   # Plot a default heatmap
   #col <- colorRampPalette(brewer.pal(10, "RdYlBu"))(256)
   #heatmap(matrix, scale = "none", col = col)
   
   # Plot an enhanced heatmap
-  heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
-            density.info = "none")
+  # Clusters by default using hclust, but can specify others using param 'hclustfun'
+  hm <- heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
+                  density.info = "none", dendrogram = "row", Colv = FALSE, 
+                  Rowv = TRUE, key = TRUE, key.title = NA, key.xlab = "Beta") 
+  plot(hm)
   #heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
-            #density.info = "none", na.color = "gray", Rowv = FALSE, Colv = FALSE) # clusters by default using hclust, but can specify others using param 'hclustfun'
+  #density.info = "none", labCol = "", dendrogram = c("row"), 
+  #add.expr = text(x = seq_along(colnames(matrix)), 
+  #y = -2, srt = 0, labels = colnames(matrix), 
+  #xpd = NA, cex = 2, pos = 1))
   
   # Plot a pretty heatmap
-  # pheatmap(matrix, cutree_rows = 4) # options are available for changing clustering metric & method
+  #pheatmap(matrix, cutree_rows = 4) # options are available for changing clustering metric & method
   # defaults to euclidean and complete
   
   # Plot a complex heatmap using Bioconductor
   #Heatmap(matrix, name = "Results Heatmap", column_title = "Regulatory Proteins",
-          #row_title = "Gene Targets", row_names_gp = gpar(fontsize = 6))
+  #row_title = "Gene Targets", row_names_gp = gpar(fontsize = 6))
   # Additional arguments: show_row_names, show_column_names, show_row_hclust, 
   # clustering_distance_rows, clustering_distance_columns (the metric for clustering,
   # e.g. "euclidean" or "pearson"),
   # clustering_method_rows, clustering_method_columns (the method for clustering, 
   # e.g. "complete" or "average")
   
+  # Opt: Get and return the gene order after clustering
+  # return(data.frame(gene = rownames(matrix)[hm$rowInd]))
+
   return(matrix)
 }
 
@@ -276,16 +300,16 @@ dev.off()
 matrix <- create_heat_map(master_df_mut_corrected, main_path)
 hm <- heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
                 density.info = "none")
-rownames(matrix)[hm$rowInd]
+
 row_clust <- hclust(dist(matrix, method = "euclidean"), method = 'ward.D2')
 plot(row_clust)
-h22_sort <- sort(cutree(row_clust, h = 22))
+h2_sort <- sort(cutree(row_clust, h = 2))
 plot(row_clust)
-abline(h = 22, col = "red2", lty = 2, lwd = 2)
+abline(h = 2, col = "red2", lty = 2, lwd = 2)
 
-h22_sort_df <- as.data.frame(h22_sort)
-colnames(h22_sort_df)[1] <- "cluster"
-h22_sort_df$targ_gene <- rownames(h22_sort_df)
+h2_sort_df <- as.data.frame(h22_sort)
+colnames(h2_sort_df)[1] <- "cluster"
+h2_sort_df$targ_gene <- rownames(h2_sort_df)
 
 dendrogram <- as.dendrogram(row_clust)
 cols_branches <- c("darkred", "forestgreen", "orange", "firebrick1", "yellow", 
@@ -301,19 +325,200 @@ col_labels <- get_leaves_branches_col(dendrogram)
 col_labels <- col_labels[order(order.dendrogram(dendrogram))]
 
 
-h22_sort_df$labels <- unlist(lapply(1:length(unique(h22_sort_df$cluster)), function(i) {
-  num_entries <- nrow(h22_sort_df[h22_sort_df$cluster == i,])
+h2_sort_df$labels <- unlist(lapply(1:length(unique(h2_sort_df$cluster)), function(i) {
+  num_entries <- nrow(h2_sort_df[h2_sort_df$cluster == i,])
   return(rep(col_labels[[i]], times = num_entries))
 }))
-h22_sort_df$colors <- unlist(lapply(1:length(unique(h22_sort_df$cluster)), function(i) {
-  num_entries <- nrow(h22_sort_df[h22_sort_df$cluster == i,])
+h22_sort_df$colors <- unlist(lapply(1:length(unique(h2_sort_df$cluster)), function(i) {
+  num_entries <- nrow(h2_sort_df[h2_sort_df$cluster == i,])
   return(rep(cols_branches[[i]], times = num_entries))
 }))
 
 
 heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none", density.info = "none",
-          Rowv = dendrogram, key.xlab = "T-statistic", RowSideColors = col_labels,
+          Rowv = dendrogram, key.xlab = "Beta", RowSideColors = col_labels,
           colRow = col_labels)
+
+
+
+# Cluster when sorting the x-axis by order from another heat map (e.g. all BRCA)
+matrix <- create_heat_map(master_df_mut_corrected, main_path)
+hm <- heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
+                density.info = "none")
+gene_order <- data.frame(gene = rownames(matrix)[hm$rowInd])
+
+#Opt: write this to a file
+gene_order_r <- t(gene_order)
+gene_order_r <- rev(gene_order_r)
+write.csv(gene_order_r, paste0(output_path, "gene_order_allBRCA_recon3d_mut.csv"))
+
+# Read back, if needed
+gene_order_r <- read.csv(paste0(output_path, "gene_order_allBRCA_recon3d_mut.csv"))[,2]
+
+# Replace "master_df_mut_corrected_subtype" with the subtype DF we want to reorder
+master_df_mut_corrected_subtype <- left_join(data.frame(T_k.name = gene_order_r), 
+                                             master_df_mut_corrected_subtype, by = "T_k.name")
+create_heat_map(master_df_mut_corrected_subtype)
+
+
+# Cluster when sorting the x-axis by known pathway genes (cluster within each known group)
+clusters <- list(
+  "Serine.synthesis" = c("PHGDH", "PSAT1", "PSPH"),
+  "Folate.cycle" = c("SHMT1", "SHMT2", "MTHFD1", "MTHFD1L", "MTHFD2", "MTHFD2L", 
+                     "MTHFR", "TYMS", "DHFR", "FTCD", "MTFMT", "ALDH1L1"),
+  "Methionine.SAM.SAH" = c("MAT1A", "MAT2A", "MAT2B", "GNMT", "AHCY", "MTR"),
+  "Transsulferation" = c("CBS", "CTH"),
+  "Taurine.synthesis" = c("CDO1", "CSAD"),
+  "Glutathione.prod" = c("GCLC", "GSS", "GCLM", "GPX1", "GSTP1"),
+  "Glycine.cleavage" = c("GCSH", "GLDC", "AMT", "DLD", "GLYAT"),
+  "Choline" = c("CHDH", "ALDH7A1", "BHMT", "BHMT2", "DMGDH", "SARDH"),
+  "Lipid.metabolism" = c("CHKA", "CHKB", "PCYT1A", "PCYT1B", "CHPT1", "PEMT"),
+  "Glycolysis" = c("HK1", "HK2", "PGI", "PFK1", "PFK2", "ALDOA", "TPI", "GAPDH", 
+                   "PGK1", "PGK2", "PGAM1", "PGAM2", "ENO1", "PKM1", "PKM2"),
+  "TCA.cycle" = c("CS", "ACO1", "ACO2", "IDH1", "IDH2", "OGDH", "SUCLA2", "SDHA", 
+                  "SDHB", "SDHC", "FH", "MDH1", "MDH2", "PC"),
+  "Nucleot.Biosyn" = c("PRPS", "PPAT", "GART", "PFAS", "PAICS", "ADSL", "ATIC", 
+                       "IMPDH1", "GMPS", "ADSS", "ADSL", "AK1", "NME"),
+  "Pentose.phos" = c("ALDOA", "ALDOB", "ALDOC", "DERA", "FBP1", "FBP2", "G6PD", 
+                     "GPI", "H6PD", "PFKL", "PFKM", "PFKP", "PGD", "PGLS", "PGM1", 
+                     "PGM3", "PRPS1", "PRPS1L1", "PRPS2", "RBKS")
+)
+clusters$Other <- setdiff(res_recon3d_mut$T_k.name, as.character(unlist(clusters)))
+
+
+#' Create the regulatory protein vs. gene target ordered matrix for clustering,
+#' using functions from the gclus package
+#' @param results_table master DF results from linear model
+#' @param clusters a list with each known cluster and the corresponding gene names
+create_clust_matrix <- function(results_table, clusters) {
+  matrix <- data.frame(matrix(ncol = length(unique(results_table$R_i.name)), 
+                              nrow = length(unique(results_table$T_k.name))))
+  colnames(matrix) <- unique(results_table$R_i.name)
+  rownames(matrix) <- unique(results_table$T_k.name)
+  
+  # Fill in this table with t-statistics/ Betas
+  for (i in 1:nrow(results_table)) {
+    #tstat <- results_table$statistic[i]
+    beta <- results_table$estimate[i]
+    targ <- results_table$T_k.name[i]
+    regprot <- results_table$R_i.name[i]
+    
+    tryCatch({
+      #matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
+      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- beta
+    }, error=function(cond){
+      print(cond)
+      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- 0
+    })
+  }
+  # NOTE: leave all the unfilled pairings as NA
+  
+  # Replace NA/NaN with 0, or alternatively use na.omit
+  #matrix[is.na(matrix)] <- 0
+  #matrix[is.nan(matrix)] <- 0
+  matrix <- na.omit(matrix)
+  
+  print(head(matrix))
+  #dist_vect <- matrix[,1]
+  #names(dist_vect) <- rownames(matrix)
+  
+  # Create a symmetrical distance matrix from this vector
+  #dist_mat <- dist(dist_vect)
+  
+  # Get numeric vector corresponding to which cluster each gene is in
+  #print(dist_vect)
+  clusters_numeric <- as.numeric(unlist(lapply(rownames(matrix), function(x) {
+    cluster_num <- which(sapply(clusters, function(y) x %in% y))
+    return(cluster_num)
+  })))
+  
+  # Create an ordered matrix
+  #ordered_mat1 <- order.clusters(-matrix[,1], clusters_numeric)
+  
+  # For each given cluster, for each regprot, do kmeans clustering within this cluster
+  ri_dfs <- lapply(unique(results_table$R_i.name), function(regprot) {
+    cluster_dfs <- lapply(1:length(clusters), function(i) {
+      # Get the genes from this cluster
+      genes <- clusters[[i]]
+      tab_genes <- res_recon3d_mut[which(res_recon3d_mut$T_k.name %fin% genes) & 
+                                     which(res_recon3d_mut$R_i.name == regprot),]
+      tab_genes <- tab_genes[, c("estimate", "T_k.name", "R_i.name")]
+      
+      # Cluster this to get "inner clusters" within this cluster
+      if(nrow(tab_genes) < 2) {return(tab_genes)}
+      tab_clust <- hclust(dist(tab_genes, method = "euclidean"), method = 'ward.D2')
+      tab_genes_sort <- as.data.frame(sort(cutree(tab_clust, h = 2)))
+      colnames(tab_genes_sort)[1] <- "inner.cluster"
+      tab_genes_sort$targ_gene <- rownames(tab_genes_sort)
+      
+      # Reorder the genes based on these inner clusters
+
+      
+      # Return this clustered DF
+      print(tab_genes_sort)
+      return(tab_genes_sort)
+    })
+    # Recombine these into one
+    print(cluster_dfs)
+    combined_cluster_df <- do.call(rbind, cluster_dfs)
+    print(combined_cluster_df)
+    return(combined_cluster_df)
+  })
+  
+  # Recombine this by column
+  ordered_df <- do.call(cbind, ri_dfs)
+  
+  # Return this ordered matrix
+  return(ordered_mat)
+}
+
+
+tp53_dist_mat <- create_dist_matrix(res_recon3d_mut, "TP53", clusters)
+pik3ca_dist_mat <- create_dist_matrix(res_recon3d_mut, "PIK3CA", clusters)
+
+
+#' Plot the ordered matrix as a heat map, using k-means clustering within each known cluster
+#' @param dist_mat1 distance matrix produced from the prior function for goi 1
+#' @param dist_mat2 distance matrix produced from the prior function for goi 2
+plot_grouped_heatmap <- function(grouped_dist_mat, grouped_ordered_mat) {
+  # Get the k-means clustering
+  k_means <- kmeans(grouped_dist_mat, length(clusters))$cluster
+  
+  # Get order obtained from the k-means clustering
+  #grouped_ordered_mat <- unlist(memship2clus(k_means))
+  
+  # Plot
+  #layout(matrix(1:3,nrow=1,ncol=3),widths=c(0.1,1,1))
+  #op = par(mar = 1,1,1,0.2)
+  #colors <- cbind(k_means, k_means)
+  #plotcolors(colors[grouped_ordered_mat,])
+  
+  #par(mar=c(1,6,1,1))
+  #rlabels <- names(grouped_dist_mat)[grouped_ordered_mat]
+  
+  #plotcolors(cmat[grouped_ordered_mat, grouped_ordered_mat], rlabels = rlabels)
+  
+  #par(op)
+  #layout(matrix(1,2))
+  
+  # Alternative
+  grouped_ordered_mat <- order.clusters(-grouped_dist_mat, k_means)
+  
+  par(mar = c(1,1,1,1))
+  layout(matrix(1:3,nrow=1,ncol=3),widths=c(0.1,1,1))
+
+  colors <- cbind(k_means, k_means)
+  plotcolors(colors[grouped_ordered_mat,])
+  
+  par(mar=c(1,6,1,3))
+  rlabels <- names(grouped_dist_mat)[grouped_ordered_mat]
+  cmat <- dmat.color(as.matrix(grouped_dist_mat), rev(cm.colors(length(clusters))))
+  plotcolors(cmat[grouped_ordered_mat, grouped_ordered_mat], rlabels = rlabels)
+  
+  par(op)
+  layout(matrix(1,1))
+}
+
 
 
 ############################################################
@@ -324,75 +529,120 @@ heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none", density.in
 #' Compute and print the Spearman correlation of the Betas and of the T-statistic,
 #' given two groups of interest
 #' @param results_table the output master DF from the linear model
+#' @param ri_1 the external gene name of the first protein of interest
+#' @param ri_2 the external gene name of the second protein of interest
 compute_and_print_spearman <- function(results_table, ri_1, ri_2) {
-  if((ri_1 %fin% results_table$R_i) & (ri_2 %fin% results_table$R_i)) {
+  if((ri_1 %fin% results_table$R_i.name) & (ri_2 %fin% results_table$R_i.name)) {
     
-    target_genes <- unique(results_table$T_k)
+    target_genes <- unique(results_table$T_k.name)
     
     # Mini functions to get Betas/t-statistics for each target gene
     #' @param results_table the master DF 
+    #' @param target_genes the list of target genes
     #' @param ri the given regulatory protein
     #' @param type "Betas" or "t-statistics" to indicate what value we are returning
-    get_values <- function(results_table, ri, type) {
+    get_values <- function(results_table, target_genes, ri, type) {
       vals <- unlist(lapply(target_genes, function(tg) {
         if(type == "Betas") {
-          est <- results_table[(results_table$R_i == ri) & (results_table$T_k == tg), "estimate"]
+          est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "estimate"]
         } else {
-          est <- results_table[(results_table$R_i == ri) & (results_table$T_k == tg), "statistic"]
+          est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "statistic"]
         }
-        if (length(est) == 0) {est <- NA}
+        if (length(est) == 0) {est <- 0}  # To ensure the lengths of the Beta vectors are the same
         return(est)
       }))
     }
-
-    grp1_Betas <- get_values(results_table, ri_1, "Betas")
-    grp1_tstat <- get_values(results_table, ri_1, "t-statistics")
     
-    grp2_Betas <- get_values(results_table, ri_2, "Betas")
-    grp2_tstat <- get_values(results_table, ri_2, "t-statistics")
+    grp1_Betas <- get_values(results_table, target_genes, ri_1, "Betas")
+    grp2_Betas <- get_values(results_table, target_genes, ri_2, "Betas")
     
     # Get Betas spearman
     betas_spearman <- cor.test(grp1_Betas, grp2_Betas, method = "spearman")
     betas_spearman_stat <- as.numeric(betas_spearman$estimate)
     betas_spearman_pval <- betas_spearman$p.value
     
-    # Get t-statistic spearman
-    tstat_spearman <- cor.test(grp1_tstat, grp2_tstat, method = "spearman")
-    tstat_spearman_stat <- as.numeric(tstat_spearman$estimate)
-    tstat_spearman_pval <- tstat_spearman$p.value
-    
     # Print the results
     print(paste("Spearman results for", paste(ri_1, paste("and", ri_2))))
     print(paste("Beta correlation of", paste(betas_spearman_stat, paste(", p-value of", betas_spearman_pval))))
-    print(paste("t-statistic correlation of", paste(tstat_spearman_stat, paste(", p-value of", tstat_spearman_pval))))
     
     # Create a plot to visualize the correlations
     plot(grp1_Betas, grp2_Betas, pch = 19, col = "lightblue", #main = "Betas Spearman Correlation",
          xlab = paste(ri_1, "Betas"), ylab = paste(ri_2, "Betas"))
     abline(lm(grp2_Betas ~ grp1_Betas), col = "red", lwd = 3)
-    text(labels = paste("Correlation:", paste(round(betas_spearman_stat, 4), 
-                                     paste(", p-value:", round(betas_spearman_pval, 4)))), 
-         x = max(grp1_Betas, na.rm = TRUE)-sd(grp1_Betas, na.rm = TRUE)*1.5, 
+    text(labels = paste("Correlation:", paste(round(betas_spearman_stat, 6), 
+                                              paste(", p-value:", round(betas_spearman_pval, 6)))), 
+         x = max(grp1_Betas, na.rm = TRUE)-sd(grp1_Betas, na.rm = TRUE)*3, 
          y = max(grp2_Betas, na.rm = TRUE)-sd(grp2_Betas, na.rm = TRUE), col = "black")
-    
-    
-    plot(grp1_tstat, grp2_tstat, pch = 19, col = "lightblue", #main = "T-Statistics Spearman Correlation",
-         xlab = paste(ri_1, "t-statistics"), ylab = paste(ri_2, "t-statistics"))
-    abline(lm(grp2_tstat ~ grp1_tstat), col = "red", lwd = 3)
-    text(labels = paste("Correlation:", paste(round(tstat_spearman_stat, 4), 
-                                     paste(", p-value:", round(tstat_spearman_pval, 4)))), 
-         x = max(grp1_tstat, na.rm = TRUE)-sd(grp1_tstat, na.rm = TRUE)*1.5, 
-         y = max(grp2_tstat, na.rm = TRUE)-sd(grp2_tstat, na.rm = TRUE), col = "black")
     
     
   } else {print("Error. Provided regprots are not in the given master DF.")}
 }
 
-ri_1 <- "P04637"
-ri_2 <- "P42336"
+ri_1 <- "TP53"
+ri_2 <- "PIK3CA"
 
 # Call function
 compute_and_print_spearman(master_df, ri_1, ri_2)
+
+
+
+#' Compute and print Spearman, given two separate results tables
+#' @param results_table1 first output master DF from the linear model
+#' @param results_table2 second output master DF from the linear model
+#' @param ri_1 the external gene name of the first protein of interest
+#' @param ri_2 the external gene name of the second protein of interest
+compute_and_print_spearman_multDF <- function(results_table1, results_table2, ri_1, ri_2) {
+  if((ri_1 %fin% results_table1$R_i.name) & (ri_2 %fin% results_table2$R_i.name)) {
+    
+    target_genes <- intersect(unique(results_table1$T_k.name), unique(results_table2$T_k.name))
+    
+    # Mini functions to get Betas/t-statistics for each target gene
+    #' @param results_table the master DF 
+    #' @param target_genes the list of target genes
+    #' @param ri the given regulatory protein
+    #' @param type "Betas" or "t-statistics" to indicate what value we are returning
+    get_values <- function(results_table, target_genes, ri, type) {
+      vals <- unlist(lapply(target_genes, function(tg) {
+        if(type == "Betas") {
+          est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "estimate"]
+        } else {
+          est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "statistic"]
+        }
+        if (length(est) == 0) {est <- 0}  # To ensure the lengths of the Beta vectors are the same
+        return(est)
+      }))
+    }
+    
+    grp1_Betas <- get_values(results_table1, target_genes, ri_1, "Betas")
+    grp2_Betas <- get_values(results_table2, target_genes, ri_2, "Betas")
+    
+    # Get Betas spearman
+    betas_spearman <- cor.test(grp1_Betas, grp2_Betas, method = "spearman")
+    betas_spearman_stat <- as.numeric(betas_spearman$estimate)
+    betas_spearman_pval <- betas_spearman$p.value
+    
+    # Print the results
+    print(paste("Spearman results for", paste(ri_1, paste("and", ri_2))))
+    print(paste("Beta correlation of", paste(betas_spearman_stat, paste(", p-value of", betas_spearman_pval))))
+    
+    # Create a plot to visualize the correlations
+    plot(grp1_Betas, grp2_Betas, pch = 19, col = "lightblue", #main = "Betas Spearman Correlation",
+         xlab = paste(ri_1, "Betas"), ylab = paste(ri_2, "Betas"))
+    abline(lm(grp2_Betas ~ grp1_Betas), col = "red", lwd = 3)
+    text(labels = paste("Correlation:", paste(round(betas_spearman_stat, 6), 
+                                              paste(", p-value:", round(betas_spearman_pval, 6)))), 
+         x = max(grp1_Betas, na.rm = TRUE)-sd(grp1_Betas, na.rm = TRUE)*3, 
+         y = max(grp2_Betas, na.rm = TRUE)-sd(grp2_Betas, na.rm = TRUE), col = "black")
+    
+    
+  } else {print("Error. Provided regprots are not in the given master DF.")}
+}
+
+ri_1 <- "TP53"
+ri_2 <- "PIK3CA"
+
+# Call function
+compute_and_print_spearman_multDF(master_df1, master_df2, ri_1, ri_2)
 
 
 ############################################################
@@ -481,8 +731,8 @@ plot_tophit_overlap <- function(master_df_mut_sig, master_df_cna_sig) {
   plt <- venn.diagram(list(master_df_mut_sig$T_k.name, master_df_cna_sig$T_k.name),
                category.names = c("Mutation", "CNA"), filename = NULL, output = TRUE,
                lwd = 2, lty = 'blank', fill = c("red", "blue"), cex = 2, fontface = "bold",
-               fontfamily = "sans", cat.cex = 2, cat.fontface = "bold",cat.fontfamily = "sans")
-               #cat.default.pos = "outer", cat.fontfamily = "sans", rotation = 1)
+               fontfamily = "sans", cat.cex = 2, cat.fontface = "bold",cat.fontfamily = "sans",
+               cat.default.pos = "outer", cat.pos = c(180, 180)) #, cat.fontfamily = "sans", rotation = 1)
   grid::grid.draw(plt)
 }
 
@@ -492,6 +742,90 @@ fn <- paste(output_path, "TP53 (Test)/Non-Tumor-Normal-Matched/Top Gene Hit Over
 png(fn, width = 450, height = 350)
 plot_tophit_overlap(master_df_mut_sig, master_df_cna_sig)
 dev.off()
+
+
+############################################################
+############################################################
+#### VISUALIZE THE RELATIVE RANKS OF TOP HITS FOR TWO REGPROTS
+############################################################
+############################################################
+#' Creates a line graph with two lines - one for each regulatory protein
+#' of interest. Plots the rank (of the top hit from the master DF) vs.
+#' the cumulative sum to that rank of hits that were for the given regprot.
+#' @param master_df a DF produced as output from the linear model, MHT corrected
+#' @param regprot1 the gene name of the first regulatory protein of interest
+#' @param regprot2 the gene name of the second regulatory protein of interest
+visualize_tophit_relative_ranks <- function(master_df, regprot1, regprot2) {
+  
+  regprot1_hits <- unlist(lapply(1:nrow(master_df), function(i) 
+    ifelse(master_df$R_i.name[i] == regprot1, 1, 0)))
+  regprot2_hits <- unlist(lapply(1:nrow(master_df), function(i) 
+    ifelse(master_df$R_i.name[i] == regprot2, 1, 0)))
+  
+  regprot1_cumul <- unlist(lapply(1:length(regprot1_hits), function(i) {
+    return(sum(as.numeric(regprot1_hits[1:i])))
+  }))
+  regprot2_cumul <- unlist(lapply(1:length(regprot2_hits), function(i) {
+    return(sum(as.numeric(regprot2_hits[1:i])))
+  }))
+
+  df_tmp <- data.frame(regprot1 = regprot1_cumul, regprot2 = regprot2_cumul)
+  df_tmp$rank <- 1:nrow(df_tmp)
+  
+  plot(df_tmp$rank, df_tmp[,1], col = "orange", lty = 1, xlab = "rank", 
+       ylab = "cumulative # of top hits")
+  points(df_tmp$rank, df_tmp[,2], col = "darkgreen", lty = 1)
+  
+  legend(x = "bottomright", y=NULL, legend = c(regprot1, regprot2), fill = c("orange", "darkgreen"))
+}
+
+visualize_tophit_relative_ranks(master_df_mut_corrected, "TP53", "PIK3CA")
+
+
+#' Creates a line graph with two lines - one for each regulatory protein
+#' of interest. Plots the rank (of the top hit from the master DF) vs.
+#' the Beta to that rank of hits that were for the given regprot.
+#' @param master_df a DF produced as output from the linear model, MHT corrected
+#' @param regprot1 the gene name of the first regulatory protein of interest
+#' @param regprot2 the gene name of the second regulatory protein of interest
+visualize_tophit_relative_Betas <- function(master_df, regprot1, regprot2) {
+  
+  regprot1_hits <- unlist(lapply(1:nrow(master_df), function(i) 
+    ifelse(master_df$R_i.name[i] == regprot1, 1, 0)))
+  regprot2_hits <- unlist(lapply(1:nrow(master_df), function(i) 
+    ifelse(master_df$R_i.name[i] == regprot2, 1, 0)))
+  
+  get_beta_by_rank <- function(regprot_hits, master_df) {
+    prev_Beta <- 0
+    regprot_cumul <- c()
+    for (i in 1:length(regprot_hits)) {
+      if(regprot_hits[i] == 0) {
+        regprot_cumul <- c(regprot_cumul, prev_Beta)
+      } else {
+        beta <- master_df$estimate[i]
+        regprot_cumul <- c(regprot_cumul, beta)
+        prev_Beta <- beta
+      }
+    }
+    return(regprot_cumul)
+  }
+ 
+  regprot1_cumul <- get_beta_by_rank(regprot1_hits, master_df)
+  regprot2_cumul <- get_beta_by_rank(regprot2_hits, master_df)
+  
+  df_tmp <- data.frame(regprot1 = regprot1_cumul, regprot2 = regprot2_cumul)
+  df_tmp$rank <- 1:nrow(df_tmp)
+  
+  plot(df_tmp$rank, df_tmp[,1], col = "orange", lty = 1, xlab = "rank", 
+       ylab = "Relative Betas")
+  points(df_tmp$rank, df_tmp[,2], col = "darkgreen", lty = 1)
+  abline(a = 0, b = 0)
+  
+  legend(x = "bottomright", y=NULL, legend = c(regprot1, regprot2), fill = c("orange", "darkgreen"))
+}
+
+visualize_tophit_relative_Betas(master_df_mut_corrected, "TP53", "PIK3CA")
+
 
 ############################################################
 ############################################################
