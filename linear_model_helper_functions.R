@@ -72,7 +72,7 @@ get_cna_stat <- function(cna_df, sample, cna_bucketing) {
     if(length(cna_stat) < 1) {cna_stat <- NA}
     if (is.nan(cna_stat)) {cna_stat <- NA}
   
-  # 1 if amplified ("justAmp") or deleted ("justDel"), 0 if 2 copies
+  # 1 if amplified ("justAmp") or deleted ("justDel"), 0 if 2+ copies
   } else if ((cna_bucketing == "bucket_justAmp") | (cna_bucketing == "bucket_justDel")) {
     cna_stat <- unique(as.integer(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE])))
     if (length(cna_stat) > 1) {cna_stat <- cna_stat[1]}
@@ -143,7 +143,7 @@ get_meth_stat <- function(methylation_df, sample, meth_bucketing, tumNormMatched
         if(length(unique(str_buckets)) == 1) {str_buckets <- unique(str_buckets)}
         else {str_buckets <- str_buckets[1]}
       }
-      #print(str_buckets)
+      print(str_buckets)
       if(!(length(str_buckets) == 0)) {
         buckets_list <- unlist(strsplit(unlist(strsplit(str_buckets, "(", fixed = TRUE))[2], ")", fixed = TRUE))[1]
         meth_stat <- list(as.integer(unlist(strsplit(buckets_list, ",", fixed = TRUE))))
@@ -157,7 +157,7 @@ get_meth_stat <- function(methylation_df, sample, meth_bucketing, tumNormMatched
     }
   } else {
     meth_stat <- get_tnm_methylation(methylation_df, sample, meth_bucketing)
-    #print(meth_stat)
+    print(meth_stat)
     if(length(meth_stat) < 1) {meth_stat <- NA}
     if (length(meth_stat) > 1) {meth_stat <- meth_stat[1]}
     if (is.nan(meth_stat)) {meth_stat <- NA}
@@ -287,7 +287,7 @@ get_tnm_fc <- function(df, sample) {
     
   } else {print(paste("Unhandled case:", sample))}
   
-  #print(paste("Fold change:", fc))
+  print(paste("Fold change:", fc))
   
   # Take the log of the fold change, with a pseudocount
   logfc <- log2(fc + 1)
@@ -573,17 +573,19 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
     just_patients <- unlist(lapply(colnames(df), function(x) 
       unlist(strsplit(x, "-", fixed = TRUE))[1]))
     df_adj <- df[, c(label_col_indices, which(just_patients %fin% patients))]
-
+    #print(head(df_adj))
+    
     # Keep only cancer samples
     if(!tumNormMatched) {
       df_adj_label_col_indices <- which(colnames(df_adj) %fin% column_names_to_keep)
+      print(df_adj_label_col_indices)
+      print(which(grepl("-0", colnames(df_adj), fixed = TRUE)))
       df_adj <- df_adj[, c(df_adj_label_col_indices, which(grepl("-0", colnames(df_adj), 
                                                                  fixed = TRUE)))]
-      #print(head(df_adj))
     }
     
     # Remove any duplicate samples
-    #df_adj <- df_adj[, !(grepl("-1", colnames(df_adj), fixed = TRUE))]
+    df_adj <- df_adj[, !(grepl("-1", colnames(df_adj), fixed = TRUE))]
     
   } else {
     if(length(unlist(strsplit(df$sample_id[1], "-", fixed = TRUE))) == 4) {
@@ -594,7 +596,7 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
     just_patients <- unlist(lapply(df$sample_id, function(x) 
       unlist(strsplit(x, "-", fixed = TRUE))[1]))
     df_adj <- df[which(just_patients %fin% patients),]
-    #print(head(df_adj))
+    print(head(df_adj))
     
     # Keep only cancer samples
     if(!tumNormMatched) {
@@ -602,9 +604,8 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
     }
     
     # Remove any duplicate samples
-    #df_adj <- df_adj[!(grepl('-1', df_adj$sample_id, fixed = TRUE)),]
+    df_adj <- df_adj[!(grepl('-1', df_adj$sample_id, fixed = TRUE)),]
   }
-  print(head(df_adj))
   return(as.data.table(df_adj))
 }
 
@@ -663,6 +664,82 @@ subset_regprot_df_by_intersecting_ids <- function(patients, mutation_regprot_df,
   return(mutation_regprot_df_sub)
 }
 
+
+############################################################
+#' Removes metastatic samples from a given data frame (sample ID will be
+#' -06 or -07 to indicate metastasis)
+#' @param df the data frame to remove metastatic samples from
+#' @param colNames a TRUE/FALSE value indicating whether the patient/sample IDs are
+#' found on the rows or the columns of the DF (TRUE is columns, FALSE is rows)
+remove_metastatic_samples <- function(df, colNames) {
+  df <- as.data.frame(df)
+  
+  column_names_to_keep <- c("ensg_id", "Swissprot", "swissprot", "gene_name", "ensg_ids")
+  
+  if(colNames == TRUE) {
+    # Keep only primary patients
+    label_col_indices <- which(colnames(df) %fin% column_names_to_keep)
+    just_samples <- unlist(lapply(colnames(df), function(x) 
+      unlist(strsplit(x, "-", fixed = TRUE))[2]))
+    df_adj <- df[, unique(c(label_col_indices, intersect(which(just_samples != "06"), 
+                                                         which(just_samples != "07"))))]
+    #print(head(df_adj))
+    
+  } else {
+    if(length(unlist(strsplit(df$sample_id[1], "-", fixed = TRUE))) == 4) {
+      df$sample_id <- unlist(lapply(df$sample_id, function(x) 
+        paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
+    }
+    # Keep only primary patients
+    just_samples <- unlist(lapply(df$sample_id, function(x) 
+      unlist(strsplit(x, "-", fixed = TRUE))[2]))
+    df_adj <- df[intersect(which(just_samples != "06"),
+                           which(just_samples != "07")),]
+    #print(head(df_adj))
+  }
+  return(as.data.table(df_adj))
+}
+
+
+############################################################
+#' Removes metastatic samples from a given regprot data frame (sample ID will be
+#' -06 or -07 to indicate metastasis)
+#' @param df the regprot data frame to remove metastatic samples from
+remove_metastatic_samples_regprot <- function(df) {
+
+  # Adjust each row to remove metastatic samples
+  regprot_df_new_patient_labels <- lapply(mutation_regprot_df$Patient, function(x) {
+    # Split apart the semicolon separated sample IDs
+    spl_patients <- unlist(strsplit(x, ";", fixed = TRUE))
+    # Extract just the 2-digit sample ID
+    samp_ids <- unlist(lapply(spl_patients, function(x) 
+      unlist(strsplit(x, "-", fixed = TRUE))[2]))
+    # Check if this sample is primary and return TRUE if so, F o.w.
+    primary_samp_ind <- unlist(lapply(samp_ids, function(y) {
+      if((y != "06") & (y != "07")) {
+        return(TRUE)
+      } else {return(FALSE)}
+    }))
+    # If there are primary samples in this row, then we want to keep this row
+    if(TRUE %in% primary_samp_ind) {
+      samps_to_keep <- spl_patients[primary_samp_ind]
+      
+      # If we still have samples, return them in this row 
+      if(length(samps_to_keep) > 0) {
+        return(paste(samps_to_keep, collapse = ";"))
+      } else {return(NA)}
+    } else {return(NA)}
+  })
+  
+  # Remove NA
+  mutation_regprot_df_sub <- mutation_regprot_df[unlist(lapply(regprot_df_new_patient_labels, function(x) 
+    ifelse(is.na(x), FALSE, TRUE))),]
+  # Update the DF with the new intersecting patient labels
+  mutation_regprot_df_sub$Patient <- regprot_df_new_patient_labels[!is.na(regprot_df_new_patient_labels)]
+  mutation_regprot_df_sub$Patient <- unlist(lapply(mutation_regprot_df_sub$Patient, function(x) return(unlist(x))))
+  
+  return(mutation_regprot_df_sub)
+}
 
 ############################################################
 #' Subset the given targets to only genes that are trans to the current regulatory 
@@ -783,8 +860,8 @@ filter_expression_df_outliers <- function(expression_df, starter_df, ensg) {
       expression_nonmut[[patient]] <- as.numeric(expression_df_upd_labels[,i])
     }
   }
-  #print(expression_mut)
-  #print(expression_nonmut)
+  print(expression_mut)
+  print(expression_nonmut)
   
   # Get the IQR, Q3, and expression thresholds for each group
   iqr_mut <- IQR(unlist(expression_mut), na.rm = TRUE)
@@ -792,9 +869,9 @@ filter_expression_df_outliers <- function(expression_df, starter_df, ensg) {
   q3_mut <- as.numeric(quantile(unlist(expression_mut), na.rm = TRUE)[4])
   q3_nonmut <- as.numeric(quantile(unlist(expression_nonmut), na.rm = TRUE)[4])
   threshold_mut <- as.numeric(q3_mut + (1.5 * iqr_mut))
-  #print(paste("threshold mut:", threshold_mut))
+  print(paste("threshold mut:", threshold_mut))
   threshold_nonmut <- as.numeric(q3_nonmut + (1.5 * iqr_nonmut))
-  #print(paste("threshold nonmut:", threshold_nonmut))
+  print(paste("threshold nonmut:", threshold_nonmut))
   # TODO: IF THERE ARE MULTIPLE ROWS, SHOULD I TAKE THE IQR SEPARATELY FOR EACH? 
   
   # Get patients that do not exceed threshold 
@@ -817,9 +894,9 @@ filter_expression_df_outliers <- function(expression_df, starter_df, ensg) {
   starter_df_filt <- starter_df[rownames(starter_df) %fin% patients_to_keep,]
   
   # Return the filtered starter DF
-  #print(starter_df_filt)
-  #print(paste("Nrow original starter", nrow(starter_df)))
-  #print(paste("Nrow filtered starter", nrow(starter_df_filt)))
+  print(starter_df_filt)
+  print(paste("Nrow original starter", nrow(starter_df)))
+  print(paste("Nrow filtered starter", nrow(starter_df_filt)))
   return(starter_df_filt)
 }
 

@@ -7,7 +7,7 @@
 
 #library(biomaRt)
 library(parallel)
-#library(rlang)
+library(rlang)
 library(dplyr)
 library(broom)
 library(data.table)
@@ -51,6 +51,8 @@ parser$add_argument("--patientsOfInterest", default = "", type = "character",
                     help = "Rather given a particular cancer type or types, further restricts the patient pool to particular patients (e.g. from a particular subtype). A filename with a vector of patient IDs (no header) is optionally provided here.")
 parser$add_argument("--patientsOfInterestLabel", default = "", type = "character",
                     help = "A character label for the specific patient population we are looking at here (for file naming purposes).")
+parser$add_argument("--removeMetastatic", default = "FALSE", type = "character",
+                    help = "A TRUE/ FALSE value indicating whether or not we want to exclude metastatic samples from the analysis.")
 
 # Randomization
 parser$add_argument("--randomize", default = "FALSE", type = "character", 
@@ -176,7 +178,7 @@ meth_bucketing <- str2bool(args$meth_bucketing)
 debug <- str2bool(args$debug)
 collinearity_diagn <- str2bool(args$collinearity_diagn)
 removeCis <- str2bool(args$removeCis)
-
+removeMetastatic <- str2bool(args$removeMetastatic)
 
 ############################################################
 # SET MAIN PATH AND IMPORT GENERALLY NEEDED FILES
@@ -352,7 +354,6 @@ if(args$patientsOfInterest != "") {
 if(debug) {
   print("Patients of Interest")
   print(head(patients_of_interest))
-  print(length(patients_of_interest))
 }
 
 
@@ -1120,6 +1121,19 @@ if(is.na(patient_cancer_mapping)) {
     cna_df <- subset_by_intersecting_ids(patients_of_interest, cna_df, TRUE, tumNormMatched)
     expression_df <- subset_by_intersecting_ids(patients_of_interest, expression_df, TRUE, tumNormMatched)
   }
+  
+  # If needed, exclude metastatic samples
+  if(removeMetastatic == TRUE) {
+    patient_df <- remove_metastatic_samples(patient_df, FALSE)
+    mutation_targ_df <- remove_metastatic_samples(mutation_targ_df, TRUE)
+    mutation_regprot_df <- remove_metastatic_samples_regprot(mutation_regprot_df)
+    methylation_df <- remove_metastatic_samples(methylation_df, TRUE)
+    if(!is.na(methylation_df_meQTL)) {
+      methylation_df_meQTL <- remove_metastatic_samples(methylation_df_meQTL, TRUE)
+    } else {methylation_df_meQTL <- NA} 
+    cna_df <- remove_metastatic_samples(cna_df, TRUE)
+    expression_df <- remove_metastatic_samples(expression_df, TRUE)
+  }
     
   master_df <- run_linear_model(protein_ids_df = protein_ids_df, 
                                 downstream_target_df = targets_DF, 
@@ -1161,7 +1175,7 @@ if(is.na(patient_cancer_mapping)) {
     }
     
     # Get the outpath for this cancer type
-    outpath_i <- as.character(unlist(outpath[[i]]))
+    outpath_i <- outpath[[i]]
     
     # Subset files using patient_ids (using helper function)
     patient_df_sub <- subset_by_intersecting_ids(patient_ids, patient_df, FALSE, tumNormMatched)
@@ -1173,6 +1187,19 @@ if(is.na(patient_cancer_mapping)) {
     } else {methylation_df_meQTL_sub <- NA} 
     cna_df_sub <- subset_by_intersecting_ids(patient_ids, cna_df, TRUE, tumNormMatched)
     expression_df_sub <- subset_by_intersecting_ids(patient_ids, expression_df, TRUE, tumNormMatched)
+    
+    # If needed, exclude metastatic samples
+    if(removeMetastatic == TRUE) {
+      patient_df <- remove_metastatic_samples(patient_df, FALSE)
+      mutation_targ_df <- remove_metastatic_samples(mutation_targ_df, TRUE)
+      mutation_regprot_df <- remove_metastatic_samples_regprot(mutation_regprot_df)
+      methylation_df <- remove_metastatic_samples(methylation_df, TRUE)
+      if(!is.na(methylation_df_meQTL)) {
+        methylation_df_meQTL <- remove_metastatic_samples(methylation_df_meQTL, TRUE)
+      } else {methylation_df_meQTL <- NA} 
+      cna_df <- remove_metastatic_samples(cna_df, TRUE)
+      expression_df <- remove_metastatic_samples(expression_df, TRUE)
+    }
     
     # Run the model with these subsetted files
     master_df <- run_linear_model(protein_ids_df = protein_ids_df, 
@@ -1236,10 +1263,10 @@ process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn,
   outpath <- as.character(unlist(outpath[[1]]))
   print(outpath)
   tryCatch({
-  	dir.create(outpath, showWarnings = FALSE)
+    dir.create(outpath, showWarnings = FALSE)
   }, error = function(cond) {
-  	print(cond)
-  	print("Invalid outpath. Cannot create specified directory.")
+    print(cond)
+    print("Invalid outpath. Cannot create specified directory.")
   })
   fwrite(master_df, paste(outpath, paste(outfn, ".csv", sep = ""), sep = "/"))
   
@@ -1291,4 +1318,5 @@ if(is.na(patient_cancer_mapping)) {
     source(paste(source_path, "process_LM_output.R", sep = "")) 
   }
 }
+
 
