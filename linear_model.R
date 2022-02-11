@@ -128,7 +128,7 @@ parser$add_argument("--collinearity_diagn", default = "FALSE", type = "character
                     help = "A TRUE/ FALSE value indicating whether or not we want detailed collinearity diagnostics. Can be useful but adds to runtime; not suggested for large runs. Default is FALSE.")
 # Add a flag for adding a regularization method
 parser$add_argument("--regularization", default = "None", type = "character",
-                    help = "The name of the regularization method being used. Currently only implemented for L2. Default is None.")
+                    help = "The name of the regularization method being used. Currently only implemented for L1 and L2. Default is None.")
 # Add a flag for keeping only trans pairings
 parser$add_argument("--removeCis", default = "TRUE", type = "character",
                     help = "A TRUE/ FALSE value to indicate whether or not we want to remove cis pairings and look only at trans pairings. Defaults to true, but can be set to false.")
@@ -604,12 +604,14 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
               return(NA)
             })
           
-        } else if (regularization == "L2" | regularization == "ridge") {
-          lm_fit <- run_regularization_model(formula, lm_input_table)
+        } else if (regularization == "L2" | regularization == "ridge" | 
+                   regularization == "L1" | regularization == "lasso") {
+          
+          lm_fit <- run_regularization_model(formula, lm_input_table, type = regularization, debug)
           
         } else {
           lm_fit <- NA
-          print("Model only has L2 or None implemented for regularization. Please provide one of these two options.")
+          print("Model only has L1, L2 or None implemented for regularization. Please provide one of these options.")
         }
         
         # Tidy the output
@@ -1047,7 +1049,8 @@ outfn <- create_output_filename(test = test, tester_name = args$tester_name, run
                                 meth_bucketing = meth_bucketing, meth_type = args$meth_type, 
                                 patient_df_name = args$patient_df, num_PEER = args$num_PEER, 
                                 num_pcs = args$num_pcs, randomize = randomize, covs_to_incl_label = args$select_args_label,
-                                patients_to_incl_label = args$patientsOfInterestLabel, removeCis = removeCis)
+                                patients_to_incl_label = args$patientsOfInterestLabel, removeCis = removeCis,
+                                removeMetastatic = removeMetastatic)
 
 if(debug) {
   print(paste("Outfile Name:", outfn))

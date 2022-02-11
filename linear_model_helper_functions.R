@@ -6,6 +6,7 @@
 # This file contains a set of helper functions that will be called by the linear
 # model (from linear_model.R or linear_model.R) while it is running.
 library(stringr)
+library(caret)
 
 ############################################################
 
@@ -361,11 +362,14 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
 #' to, if any
 #' @param removeCis a TRUE/ FALSE value indicating whether or not we have removed
 #' cis gene pairings 
+#' @param removeMetastatic a TRUE/ FALSE value indicating whether or not we have removed 
+#' metastatic samples from the analysis
 create_output_filename <- function(test, tester_name, run_name, targets_name, expression_df_name,
                                    cna_bucketing, mutation_regprot_df_name, meth_bucketing,
                                    meth_type, patient_df_name, num_PEER, num_pcs, randomize,
-                                   covs_to_incl_label, patients_to_incl_label, removeCis) {
-  outfn <- "output_results"
+                                   covs_to_incl_label, patients_to_incl_label, removeCis, 
+                                   removeMetastatic) {
+  outfn <- "res"
   
   # Add the name of the patient population of interest, if there is one
   if(!(patients_to_incl_label == "")) {
@@ -406,6 +410,9 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   # If we are removing cis comparisons, add a label to denote this
   if(removeCis) {outfn <- paste(outfn, "rmCis", sep = "_")}
   
+  # If we are removing metastatic samples, add a label to denote this
+  if(removeMetastatic) {outfn <- paste(outfn, "rmMetast", sep = "_")}
+  
   # If we've restricted the number of covariates, add that label
   if(!(covs_to_incl_label == "")) {outfn <- paste(outfn, covs_to_incl_label, sep = "_")}
   
@@ -425,7 +432,9 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
 #' regression model
 #' @param lm_input_table the input table with values corresponding to all 
 #' variables in the formula
-run_regularization_model <- function(formula, lm_input_table) {
+#' @param type a string indicating the type of regularization (ridge or lasso)
+#' @param debug a TRUE/ FALSE value indicating whether or not we are in debug mode
+run_regularization_model <- function(formula, lm_input_table, type, debug) {
   
   # Get the data of interest using the formula
   spl_formula <- unlist(strsplit(formula, "~", fixed = TRUE))
@@ -434,23 +443,44 @@ run_regularization_model <- function(formula, lm_input_table) {
   x_vars <- unlist(strsplit(trimws(spl_formula[2], which="both"), " + ", fixed = TRUE))
   x_data <- as.matrix(lm_input_table[,colnames(lm_input_table) %fin% x_vars])
   
-  # Fit the model
-  #model <- glmnet(x_data, y_data, alpha = 0)
-  
-  #if(debug) {
-  #print("Summary of Regularized Model")
-  #print(summary(model))
-  #}
+  # Do standard scaling preprocessing, using preProcess function from the caret package
+  #pre_proc_val <- preProcess(x_data, method = c("center", "scale"))
+  #x_data <- predict(pre_proc_val, x_data)
+  #summary(x_data)
   
   # Use a cross validation glmnet to get the best lambda value; alpha = 0 
   # indicates that we are doing L2-regularization
   lambdas <- 10^seq(2, -3, by = -.1)
-  ridge.cv <- cv.glmnet(x_data, y_data, alpha = 0, lambda = lambdas)
-  optimal_lambda <- ridge.cv$lambda.min
-  if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
   
-  # Run the model with the best lambda
-  best_model <- glmnet(x_data, y_data, alpha = 0, lambda = optimal_lambda)
+  # Ridge regression
+  if((type == "ridge") | (type == "L2")) {
+    ridge.cv <- cv.glmnet(x_data, y_data, alpha = 0, lambda = lambdas)
+    optimal_lambda <- ridge.cv$lambda.min
+    if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
+    # Run the model with the best lambda
+    best_model <- glmnet(x_data, y_data, alpha = 0, lambda = optimal_lambda)
+  
+  # Lasso
+  } else if((type == "lasso") | (type == "L1")) {
+    lasso.cv <- cv.glmnet(x, y_train, alpha = 1, lambda = lambdas, 
+                          standardize = TRUE, nfolds = 5)
+    optimal_lambda <- lasso.cv$lambda.min
+    if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
+    # Run the model with the best lambda
+    best_model <- glmnet(x_data, y_data, alpha = 1, lambda = optimal_lambda, 
+                         standardize = TRUE)
+    
+    
+  } else {
+    print(paste("Only implemented for ridge or lasso;", 
+                paste(type, "is not implemented. Proceeding with ridge.")))
+    ridge.cv <- cv.glmnet(x_data, y_data, alpha = 0, lambda = lambdas)
+    optimal_lambda <- ridge.cv$lambda.min
+    if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
+    
+    # Run the model with the best lambda
+    best_model <- glmnet(x_data, y_data, alpha = 0, lambda = optimal_lambda)
+  }
   
   if(debug) {
     print("Summary of Best Regularized Model")
@@ -458,6 +488,24 @@ run_regularization_model <- function(formula, lm_input_table) {
   }
   return(best_model)
 }
+
+
+#' Evaluation metrics function from plural sight guide (R-squared and RMSE)
+#' https://www.pluralsight.com/guides/linear-lasso-and-ridge-regression-with-r
+#' @param model a regression model
+#' @param df the input DF for the regression
+#' @param predications the results from stat's "predict" function for the model & input DF
+#' @param target the target or y variable
+eval_metrics <- function(model, df, predictions, target){
+  resids = df[,target] - predictions
+  resids2 = resids**2
+  N = length(predictions)
+  r2 = as.character(round(summary(model)$r.squared, 2))
+  adj_r2 = as.character(round(summary(model)$adj.r.squared, 2))
+  print(paste("R-squared:", adj_r2)) #Adjusted R-squared
+  print(paste("RMSE:", as.character(round(sqrt(sum(resids2)/N), 2)))) #RMSE
+}
+
 
   
 ############################################################
