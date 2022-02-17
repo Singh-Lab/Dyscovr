@@ -436,17 +436,24 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
 #' @param debug a TRUE/ FALSE value indicating whether or not we are in debug mode
 run_regularization_model <- function(formula, lm_input_table, type, debug) {
   
+  lm_input_table <- as.data.frame(lm_input_table)
+  
   # Get the data of interest using the formula
-  spl_formula <- unlist(strsplit(formula, "~", fixed = TRUE))
+  spl_formula <- unlist(strsplit(formula, " ~ ", fixed = TRUE))
   y_var <- trimws(spl_formula[1], which = "both")
-  y_data <- lm_input_table[,colnames(lm_input_table) == y_var]
-  x_vars <- unlist(strsplit(trimws(spl_formula[2], which="both"), " + ", fixed = TRUE))
+  print(y_var)
+  y_data <- as.matrix(lm_input_table[,colnames(lm_input_table) == y_var])
+  x_vars <- unlist(strsplit(trimws(spl_formula[2], which = "both"), " + ", fixed = TRUE))
+  print(x_vars)
   x_data <- as.matrix(lm_input_table[,colnames(lm_input_table) %fin% x_vars])
   
   # Do standard scaling preprocessing, using preProcess function from the caret package
   #pre_proc_val <- preProcess(x_data, method = c("center", "scale"))
   #x_data <- predict(pre_proc_val, x_data)
   #summary(x_data)
+  print(head(lm_input_table))
+  print(y_data)
+  print(x_data)
   
   # Use a cross validation glmnet to get the best lambda value; alpha = 0 
   # indicates that we are doing L2-regularization
@@ -462,7 +469,7 @@ run_regularization_model <- function(formula, lm_input_table, type, debug) {
   
   # Lasso
   } else if((type == "lasso") | (type == "L1")) {
-    lasso.cv <- cv.glmnet(x, y_train, alpha = 1, lambda = lambdas, 
+    lasso.cv <- cv.glmnet(x_data, y_data, alpha = 1, lambda = lambdas, 
                           standardize = TRUE, nfolds = 5)
     optimal_lambda <- lasso.cv$lambda.min
     if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
