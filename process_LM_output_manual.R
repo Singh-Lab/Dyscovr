@@ -16,6 +16,7 @@
 
 # install.packages("gplots")
 # install.packages("pheatmap")
+# install.packages("meta", "metasens")
 # BiocManager::install("ComplexHeatmap")
 # BiocManager::install("pathview")
 library("gplots")
@@ -32,6 +33,9 @@ library("pathview")
 library("gage")
 library(dendextend)
 library(gclus)
+library(meta)
+library(metasens)
+library(metafor)
 
 # Path to output files
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
@@ -215,37 +219,8 @@ fwrite(master_df_cna_corrected, paste(main_path, "Linear Model/TP53/Non-Tumor-No
 #' @param results_table a master DF produced from linear_model.R
 #' @param outpath a path to a directory to write the t-statistic matrix to
 create_heat_map <- function(results_table) {
-  # Create the regulatory protein vs. gene target table
-  matrix <- data.frame(matrix(ncol = length(unique(results_table$R_i.name)),
-                              nrow = length(unique(results_table$T_k.name))))
-  colnames(matrix) <- unique(results_table$R_i.name)
-  rownames(matrix) <- unique(results_table$T_k.name)
   
-  # Fill in this table with t-statistics/ Betas
-  for (i in 1:nrow(results_table)) {
-    #tstat <- results_table$statistic[i]
-    beta <- results_table$estimate[i]
-    regprot <- results_table$R_i.name[i]
-    targ <- results_table$T_k.name[i]
-    
-    tryCatch({
-      #matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
-      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- beta
-    }, error=function(cond){
-      print(cond)
-      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- 0
-    })
-  }
-  # NOTE: leave all the unfilled pairings as NA
-  
-  # Replace NA/NaN with 0, or alternatively use na.omit
-  #matrix[is.na(matrix)] <- 0
-  #matrix[is.nan(matrix)] <- 0
-  matrix <- na.omit(matrix)
-  
-  # Convert from data frame to matrix
-  matrix <- data.matrix(matrix)
-  print(head(matrix))
+  matrix <- create_hm_input_matrix(results_table)
   
   # Plot a default heatmap
   #col <- colorRampPalette(brewer.pal(10, "RdYlBu"))(256)
@@ -281,6 +256,46 @@ create_heat_map <- function(results_table) {
 
   return(matrix)
 }
+
+
+#' Helper function to create the heat map input matrix
+#' @param results_table a master DF produced from linear_model.R
+create_hm_input_matrix <- function(results_table) {
+  # Create the regulatory protein vs. gene target table
+  matrix <- data.frame(matrix(ncol = length(unique(results_table$R_i.name)),
+                              nrow = length(unique(results_table$T_k.name))))
+  colnames(matrix) <- unique(results_table$R_i.name)
+  rownames(matrix) <- unique(results_table$T_k.name)
+  
+  # Fill in this table with t-statistics/ Betas
+  for (i in 1:nrow(results_table)) {
+    #tstat <- results_table$statistic[i]
+    beta <- results_table$estimate[i]
+    regprot <- results_table$R_i.name[i]
+    targ <- results_table$T_k.name[i]
+    
+    tryCatch({
+      #matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
+      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- beta
+    }, error=function(cond){
+      print(cond)
+      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- 0
+    })
+  }
+  # NOTE: leave all the unfilled pairings as NA
+  
+  # Replace NA/NaN with 0, or alternatively use na.omit
+  #matrix[is.na(matrix)] <- 0
+  #matrix[is.nan(matrix)] <- 0
+  matrix <- na.omit(matrix)
+  
+  # Convert from data frame to matrix
+  matrix <- data.matrix(matrix)
+  print(head(matrix))
+  
+  return(matrix)
+}
+
 
 # Call this function
 fn <- paste(output_path, "ALL/Non-Tumor-Normal-Matched/Mutation, eQTL/Heatmap (I-Protein, TMM, bucketCNA, iciTotFrac).png", 
@@ -391,34 +406,8 @@ clusters$Other <- setdiff(res_recon3d_mut$T_k.name, as.character(unlist(clusters
 #' @param results_table master DF results from linear model
 #' @param clusters a list with each known cluster and the corresponding gene names
 create_clust_matrix <- function(results_table, clusters) {
-  matrix <- data.frame(matrix(ncol = length(unique(results_table$R_i.name)), 
-                              nrow = length(unique(results_table$T_k.name))))
-  colnames(matrix) <- unique(results_table$R_i.name)
-  rownames(matrix) <- unique(results_table$T_k.name)
-  
-  # Fill in this table with t-statistics/ Betas
-  for (i in 1:nrow(results_table)) {
-    #tstat <- results_table$statistic[i]
-    beta <- results_table$estimate[i]
-    targ <- results_table$T_k.name[i]
-    regprot <- results_table$R_i.name[i]
+  matrix <- create_hm_input_matrix(results_table)
     
-    tryCatch({
-      #matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
-      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- beta
-    }, error=function(cond){
-      print(cond)
-      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- 0
-    })
-  }
-  # NOTE: leave all the unfilled pairings as NA
-  
-  # Replace NA/NaN with 0, or alternatively use na.omit
-  #matrix[is.na(matrix)] <- 0
-  #matrix[is.nan(matrix)] <- 0
-  matrix <- na.omit(matrix)
-  
-  print(head(matrix))
   #dist_vect <- matrix[,1]
   #names(dist_vect) <- rownames(matrix)
   
@@ -519,6 +508,175 @@ plot_grouped_heatmap <- function(grouped_dist_mat, grouped_ordered_mat) {
   layout(matrix(1,1))
 }
 
+
+############################################################
+############################################################
+#### HEAT MAP VISUALIZATION FOR TOP MUTATED GENES
+############################################################
+############################################################
+
+#' Given a master DF for a particular set of patients (e.g. full set or subtype)
+#' that was run on multiple candidate or query genes on a set of target genes,
+#' create an output figure that visualizes the Betas where query genes are labeled
+#' on the left and names of target genes (on x-axis) are ignored 
+#' @param results_table results_table a master DF produced from linear_model.R
+#' @param outpath a path to a directory to write the t-statistic matrix to
+create_hm_for_top_mutated <- function(results_table) {
+  
+  # Hack- limit to just the top 4 mutated
+  results_table <- results_table[results_table$R_i.name %in% c("TP53", "PIK3CA", "TTN", "RYR2", "KMT2C"),]
+  
+  # Create the regulatory protein vs. gene target table
+  matrix <- t(create_hm_input_matrix(results_table))
+  matrix <- data.matrix(matrix)
+  #print(matrix[1,])
+  
+  # Plot an enhanced heatmap
+  # Clusters by default using hclust, but can specify others using param 'hclustfun'
+  heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
+                  density.info = "none", Colv = TRUE, dendrogram = "none",
+                  Rowv = FALSE, key = TRUE, key.title = NA, key.xlab = "Beta", 
+                  rowsep = 1:nrow(matrix), sepwidth = c(0.1, 0.1), 
+                  labCol = rep("", ncol(matrix)), offsetRow = -37)
+  
+  return(matrix)
+}
+
+
+# Call this function
+create_hm_for_top_mutated(master_df_mut_corrected)
+create_hm_for_top_mutated(master_df_cna_corrected)
+
+# Get the absolute value of the sum of Betas for given R_i
+print(rowSums(apply(master_df_mut_corrected, 2, abs)))
+
+#' Perform q-value correction on each R_i individually 
+#' @param master_df
+get_qval_dict <- function(master_df) {
+  
+  master_df <- master_df[!(is.na(master_df$p.value)),]
+  
+  qval_dict <- lapply(1:length(unique(master_df$R_i.name)), function(i) {
+    r_i <- unique(master_df$R_i.name)[i]
+    #print(r_i)
+    pvals <- master_df[master_df$R_i.name == r_i, 'p.value']
+    #print(pvals)
+    qobj <- NA
+    if(length(pvals) < 100) {
+      # With a small number of pvalues we may not be able to accurately estimate pi0,
+      # so we set to 1 (the equivalent of B-H correction)
+      qobj <- qvalue(p = pvals, pi0 = 1)
+    } else {
+      qobj <- qvalue(p = pvals)
+    }
+    
+    # OPT: plot some useful plots & print some useful information
+    #plot(qobj)
+    #print(summary(qobj))
+    #print(paste("Pi0 (Propr. of true null hypotheses):", qobj$pi0))
+    
+    qvals <- qobj$qvalues
+    return(list("Names" = master_df[master_df$R_i.name == r_i, 'T_k.name'],
+                "Qvals" = qvals))
+  })
+  names(qval_dict) <- unique(master_df$R_i.name)
+  return(qval_dict)
+}
+
+
+#' Use this qval to print the number of significant hits for each R_i
+#' @param qval_dict a q-value dictionary as output above (Names and Qvals
+#' for each query protein)
+print_num_sig_hits <- function(qval_dict, thres) {
+  for(i in 1:length(qval_dict)) {
+    print(paste("Protein name:", names(qval_dict)[i]))
+    print(paste("Number of significant hits, q <", thres))
+    curr_entry <- qval_dict[[i]]
+    print(length(curr_entry$Names[which(curr_entry$Qvals < thres)]))
+  }
+}
+
+
+############################################################
+############################################################
+#### GROUPED BAR CHART TO SHOW NUMBERS OF SIGNIFICANT HITS
+#### FOR EACH OF QUERY GENES
+############################################################
+############################################################
+#' Creates a stacked bar plot to show the number of significant hits
+#' (at given q-value threshold) found for each query gene, for 
+#' each particular subtype of interest
+#' @param qval_dict_list a list of qvalue dictionaries (as output above),
+#' one for each subtype of interest. Each entry should have the same 
+#' query genes.
+#' @param thres a qvalue threshold for significance
+create_stacked_sig_hits_bar_plot <- function(qval_dict_list, thres) {
+  sub_dfs <- lapply(1:length(qval_dict_list), function(i) {
+    subtype_entry <- qval_dict_list[[i]]
+    prot_dfs <- lapply(1:length(subtype_entry), function(j) {
+      prot_entry <- subtype_entry[[j]]
+      # Turn this list into a DF
+      prot_df <- data.frame("Query.Prot" = names(subtype_entry)[j],
+                            "Num.Sig.Hits" = length(prot_entry$Names[which(prot_entry$Qvals < thres)]))
+      #prot_df$Query.Prot <- rep(names(prot_entry)[j], times = ncol(prot_df))
+      return(prot_df)
+    })
+    combined_prot_df <- do.call(rbind, prot_dfs)
+    print(head(combined_prot_df))
+    # Add the name of the subtype
+    print(names(qval_dict_list)[i])
+    combined_prot_df$Subtype <- rep(names(qval_dict_list)[i], 
+                                    times = nrow(combined_prot_df))
+    return(combined_prot_df)
+  }) 
+  # Combined these into one 
+  full_df <- do.call(rbind, sub_dfs)
+  #print(head(full_df))
+  
+  # Create a stacked bar plot from this
+  ggplot(full_df, aes(fill=Query.Prot, y=Num.Sig.Hits, x=Subtype)) + 
+    geom_bar(position="stack", stat="identity")
+  
+  return(full_df)
+}
+
+# Create a list of qval dictionaries for each subtype
+qval_dict_lumA <- get_qval_dict(master_df_lumA)
+qval_dict_lumB <- get_qval_dict(master_df_lumB)
+qval_dict_basal <- get_qval_dict(master_df_basal)
+qval_dict_her2 <- get_qval_dict(master_df_her2)
+
+qval_dict_list <- list("LumA" = qval_dict_lumA, "LumB" = qval_dict_lumB,
+                       "Basal" = qval_dict_basal, "HER2" = qval_dict_her2)
+
+combined_df <- create_stacked_sig_hits_bar_plot(qval_dict_list, 0.1)
+
+driver_genes <- c("TP53", "PIK3CA", "KMT2C")
+combined_df$Status <- unlist(lapply(combined_df$Query.Prot, function(g) 
+  ifelse(g %in% driver_genes, "Driver", "Non-Driver")))
+
+nb = length(unique(combined_df$Query.Prot))
+nm = length(unique(combined_df$Status))
+colors = apply(expand.grid(seq(70,40,length=nm), 100, seq(15,375,length=nb+1)[1:nb]), 1, 
+               function(x) hcl(x[3],x[2],x[1]))
+colors[3] <- "#E8909C"
+
+ggplot(combined_df, aes(fill=interaction(Query.Prot, Status), y=Num.Sig.Hits, x=Subtype)) + 
+  geom_bar(position="stack", stat="identity")+
+  scale_fill_manual(values=colors) + theme_classic()
+
+
+# Examine significant hit overlap
+p53_top_allgenes <- list("LumA" = qval_dict_lumA_allgenes$TP53$Names[which(qval_dict_lumA_allgenes$TP53$Qvals < 0.2)],
+                         "LumB" = qval_dict_lumB_allgenes$TP53$Names[which(qval_dict_lumB_allgenes$TP53$Qvals < 0.2)],
+                         "Basal" = qval_dict_basal_allgenes$TP53$Names[which(qval_dict_basal_allgenes$TP53$Qvals < 0.2)],
+                         "HER2" = qval_dict_her2_allgenes$TP53$Names[which(qval_dict_her2_allgenes$TP53$Qvals < 0.2)])
+plt <- venn.diagram(p53_top_allgenes, category.names = c("LumA", "LumB", "Basal", "HER2"), 
+                    filename = NULL, output = TRUE, lwd = 2, lty = 'blank', 
+                    fill = c("red", "blue", "green", "yellow"), cex = 2, fontface = "bold",
+                    fontfamily = "sans", cat.cex = 2, cat.fontface = "bold",cat.fontfamily = "sans")
+                    #cat.default.pos = "outer", cat.pos = c(180, 180, 180, 180)) #, cat.fontfamily = "sans", rotation = 1)
+grid::grid.draw(plt)
 
 
 ############################################################
@@ -645,6 +803,106 @@ ri_2 <- "PIK3CA"
 compute_and_print_spearman_multDF(master_df1, master_df2, ri_1, ri_2)
 
 
+#' Compute and print the Spearman correlation of the T-statistics for two separate
+#' subpopulations
+#' @param results_table_subpop1 the output master DF from the linear model for 
+#' the first subgroup
+#' #' @param results_table_subpop2 the output master DF from the linear model for 
+#' the second subgroup
+#' @param ri the external gene name of the protein of interest
+#' @param subpop1 the name of the first subgroup
+#' @param subpop2 the name of the second subgroup
+#' @param sub_to_top if given, subsets to the genes with smallest X and largest X
+#' t-statistics from the two subpopulations
+compute_and_print_spearman_subpops <- function(results_table_subpop1, results_table_subpop2, 
+                                               ri, subpop1, subpop2, sub_to_top) {
+  if((ri %fin% results_table_subpop1$R_i.name) & (ri %fin% results_table_subpop2$R_i.name)) {
+    
+    if(is.infinite(sub_to_top)) {
+      target_genes <- intersect(unique(results_table_subpop1$T_k.name), 
+                                unique(results_table_subpop2$T_k.name))
+    } else {
+      # Use a helper function to subset the target genes
+      target_genes <- subset_targ_genes(results_table_subpop1, results_table_subpop2, 
+                                        ri, sub_to_top)
+    }
+
+    # Mini functions to get t-statistics for each target gene
+    #' @param results_table the master DF 
+    #' @param target_genes the list of target genes
+    #' @param ri the given regulatory protein
+    get_values <- function(results_table, target_genes, ri) {
+      vals <- unlist(lapply(target_genes, function(tg) {
+        est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "statistic"]
+        if (length(est) == 0) {est <- 0}  # To ensure the lengths of the Beta vectors are the same
+        return(est)
+      }))
+    }
+    
+    subpop1_tstats <- get_values(results_table_subpop1, target_genes, ri)
+    subpop2_tstats <- get_values(results_table_subpop2, target_genes, ri)
+    
+    # Get Spearman
+    spearman <- cor.test(subpop1_tstats, subpop2_tstats, method = "spearman")
+    spearman_stat <- as.numeric(spearman$estimate)
+    spearman_pval <- spearman$p.value
+    
+    # Print the results
+    print(paste("Spearman results for", paste(subpop1, paste("and", paste(subpop2, paste("in", ri))))))
+    print(paste("T-statistic correlation of", paste(spearman_stat, paste(", p-value of", spearman_pval))))
+    
+    # Create a plot to visualize the correlations
+    plot(subpop1_tstats, subpop2_tstats, pch = 19, col = "lightblue", #main = "Betas Spearman Correlation",
+         xlab = paste(subpop1, paste(ri, "T-statistics")), ylab = paste(subpop2, paste(ri, "T-statistics")))
+    abline(lm(subpop1_tstats ~ subpop2_tstats), col = "red", lwd = 3)
+    text(labels = paste("Correlation:", paste(round(spearman_stat, 6), 
+                                              paste(", p-value:", round(spearman_pval, 6)))), 
+         x = max(subpop1_tstats, na.rm = TRUE)-sd(subpop1_tstats, na.rm = TRUE)*3, 
+         y = max(subpop2_tstats, na.rm = TRUE)-sd(subpop2_tstats, na.rm = TRUE), col = "black")
+    
+    
+  } else {print("Error. Provided regprot not in the given master DF.")}
+}
+
+#' Helper function for subsetting the target genes to the top X/ bottom X t-statistics 
+#' in the two subpopulations
+#' @param results_table_subpop1 the output master DF from the linear model for 
+#' the first subgroup
+#' @param results_table_subpop2 the output master DF from the linear model for 
+#' the second subgroup
+#' @param ri the external gene name of the protein of interest
+#' @param sub_to_top if given, subsets to the genes with smallest X and largest X
+#' t-statistics from the two subpopulations
+subset_targ_genes <- function(results_table_subpop1, results_table_subpop2, ri, sub_to_pop) {
+  
+  # First, subset to the regprot of interest
+  results_table_subpop1_sub <- results_table_subpop1[results_table_subpop1$R_i.name == ri,]
+  results_table_subpop2_sub <- results_table_subpop2[results_table_subpop2$R_i.name == ri,]
+  
+  # Next, get the top X and bottom X t-statistics 
+  results_table_subpop1_sub <- arrange(results_table_subpop1_sub, desc(estimate))
+  results_table_subpop2_sub <- arrange(results_table_subpop2_sub, desc(estimate))
+  
+  top100_subpop1 <- results_table_subpop1_sub[1:sub_to_pop, 'T_k.name']
+  bottom100_subpop1 <- results_table_subpop1_sub[(nrow(results_table_subpop1_sub)-sub_to_pop):nrow(results_table_subpop1_sub), 
+                                                 'T_k.name']
+  top100_subpop2 <- results_table_subpop2_sub[1:sub_to_pop, 'T_k.name']
+  bottom100_subpop2 <- results_table_subpop2_sub[(nrow(results_table_subpop2_sub)-sub_to_pop):nrow(results_table_subpop2_sub), 
+                                                 'T_k.name']
+  
+  top_genes <- unique(c(top100_subpop1, bottom100_subpop1, top100_subpop2, bottom100_subpop2))
+  
+  return(top_genes)
+}
+
+ri <- "TP53"
+ri <- "PIK3CA"
+
+# Call function
+compute_and_print_spearman_subpops(lumA_allgenes_mut, lumB_allgenes_mut, ri, 
+                                   "LumA", "LumB", 100)
+
+
 ############################################################
 ############################################################
 #### VISUALIZE ON RELEVANT PATHWAYS
@@ -723,13 +981,21 @@ fwrite(master_df_cna_sig, paste(main_path, "Linear Model/TP53/Non-Tumor-Normal M
 #'@param master_df_cna_sig CNA master DF, with gene names added and 
 #' thresholded for significance
 plot_tophit_overlap <- function(master_df_mut_sig, master_df_cna_sig) {
-  overlap_genes <- intersect(master_df_mut_sig$T_k.name, master_df_cna_sig$T_k.name)
-  print(overlap_genes)
+  #overlap_genes <- intersect(master_df_mut_sig$T_k.name, master_df_cna_sig$T_k.name)
+  #print(overlap_genes)
+  
+  # Alternatively, look at only combinations of overlap
+  pairs_mut_sig <- unlist(lapply(1:nrow(master_df_mut_sig), function(i)
+    paste(master_df_mut_sig[i, 'R_i.name'], master_df_mut_sig[i, 'T_k.name'], sep = ":")))
+  pairs_cna_sig <- unlist(lapply(1:nrow(master_df_cna_sig), function(i)
+    paste(master_df_cna_sig[i, 'R_i.name'], master_df_cna_sig[i, 'T_k.name'], sep = ":")))
+  print(paste("Length intersect:", length(intersect(pairs_mut_sig, pairs_cna_sig))))
+  
+  pairs_list <- list("Mutation" = pairs_mut_sig, "CNA" = pairs_cna_sig)
   
   # Plot a Venn Diagram
   #myCol <- brewer.pal(2, "Pastel2")
-  plt <- venn.diagram(list(master_df_mut_sig$T_k.name, master_df_cna_sig$T_k.name),
-               category.names = c("Mutation", "CNA"), filename = NULL, output = TRUE,
+  plt <- venn.diagram(pairs_list, category.names = c("Mutation", "CNA"), filename = NULL, output = TRUE,
                lwd = 2, lty = 'blank', fill = c("red", "blue"), cex = 2, fontface = "bold",
                fontfamily = "sans", cat.cex = 2, cat.fontface = "bold",cat.fontfamily = "sans",
                cat.default.pos = "outer", cat.pos = c(180, 180)) #, cat.fontfamily = "sans", rotation = 1)
@@ -829,6 +1095,75 @@ visualize_tophit_relative_Betas(master_df_mut_corrected, "TP53", "PIK3CA")
 
 ############################################################
 ############################################################
+#### PERFORM A META-ANALYSIS TO AGGREGATE SIGNAL
+############################################################
+############################################################
+# Use the package "meta" for perform a meta-analysis, treating the various subtype
+# results as results from separate studies
+# Link to documentation: https://cran.r-project.org/web/packages/meta/meta.pdf
+
+#' Create an input data frame of the type expected by meta
+#' @param list_of_master_dfs a list of the master DFs with results we are interested
+#' in combining in our meta-analysis. These are already subsetted to only have results
+#' for one regulatory protein of interest. List names are the names of the subgroups.
+#' @param vect_of_n a vector the same length as the above list, with the number of 
+#' samples for each subgroup (n)
+#' @param targ the external gene name of the target gene of interest
+create_meta_input_tab <- function(list_of_master_dfs, vect_of_n, targ) {
+  meta_input_tab <- data.frame("study" = names(list_of_master_dfs), 
+                               "n_patients" = vect_of_n)
+  # Get the Beta estimate and t-statistic value for each of the subgroups, for
+  # the given target
+  meta_input_tab$beta <- lapply(list_of_master_dfs, function(x) 
+    x[x$T_k.name == targ, 'estimate']) 
+  meta_input_tab$tstat <- lapply(list_of_master_dfs, function(x) 
+    x[x$T_k.name == targ, 'statistic']) 
+  meta_input_tab$std.error <- lapply(list_of_master_dfs, function(x) 
+    x[x$T_k.name == targ, 'std.error']) 
+  
+  return(meta_input_tab)
+}
+
+master_df_list_p53 <- list("LumA"= lumA_allgenes_mut_p53, "LumB" = lumB_allgenes_mut_p53,
+                       "Basal" = basal_allgenes_mut_p53, "HER2" = her2_allgenes_mut_p53)
+
+patient_set <- read.table(paste0(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt"), header = TRUE)[,1]
+patient_set_lt20pamp <- intersect(read.table(paste0(main_path, "Patient Subsets/LessThan20PercAmp_patient_ids.txt"), header = TRUE)[,1], patient_set)
+patient_set_lumA <- intersect(read.table(paste0(main_path, "Patient Subsets/Luminal.A_patient_ids.txt"), header = TRUE)[,1], patient_set)
+patient_set_lumB <- intersect(read.table(paste0(main_path, "Patient Subsets/Luminal.B_patient_ids.txt"), header = TRUE)[,1], patient_set)
+patient_set_basal <- intersect(read.table(paste0(main_path, "Patient Subsets/Basal_patient_ids.txt"), header = TRUE)[,1], patient_set)
+patient_set_her2 <- intersect(read.table(paste0(main_path, "Patient Subsets/HER2_patient_ids.txt"), header = TRUE)[,1], patient_set)
+
+n_of_subtypes <- c(length(patient_set_lumA), length(patient_set_lumB), length(patient_set_basal), length(patient_set_her2))
+  
+meta_input_tab_p53 <- create_meta_input_tab(master_df_list_p53, n_of_subtypes, "DDB2")
+meta_input_tab_p53 <- create_meta_input_tab(master_df_list_p53, n_of_subtypes, "SRD5A1")
+
+#' Perform the meta-analysis using a random-effects model
+#' @param meta_input_tab an input table for meta-analysis as created by helper function
+#' @param targ the external gene name of the target gene of interest
+perform_meta_analysis <- function(meta_input_tab, targ) {
+  ma_model <- rma(yi = as.numeric(meta_input_tab$tstat), 
+                  sei = as.numeric(meta_input_tab$std.error))
+  print(summary(ma_model))
+  
+  # Make a forest plot 
+  forest(ma_model, slab = meta_input_tab$study)
+  
+  # Add details
+  text(-10, -1.5, pos=4, cex=0.75, bquote(paste("RE Model (Q = ", 
+                                              .(formatC(ma_model$QE, digits=2, format="f")), ", df = ", .(ma_model$k - ma_model$p),
+                                              ", p = ", .(formatC(ma_model$QEp, digits=2, format="f")), "; ", I^2, " = ",
+                                              .(formatC(ma_model$I2, digits=1, format="f")), "%)")))
+  # Add title
+  grid.text(paste(targ, "Meta-Analysis"), .5, .8, gp=gpar(cex=1.5))
+}
+
+perform_meta_analysis(meta_input_tab_p53, "DDB2")
+perform_meta_analysis(meta_input_tab_p53, "SRD5A1")
+
+############################################################
+############################################################
 #### VISUALIZE ENRICHMENT OF TOP HITS IN CGC/ VOGELSTEIN/ etc.
 ############################################################
 ############################################################
@@ -846,6 +1181,9 @@ tfcancer_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Inpu
 # FOR BRCA
 tfcancer_df <- read.csv(paste(tfcancer_path, "BRCA Data/Validation_Files/BRCA_TFcancer.csv", sep = ""),
                         header = TRUE, check.names = FALSE)
+
+# Import TP53-specific ChIP-eat targets
+tp53_chipeat_targets <- read.table(paste0(path, "Saved Output Data Files/BRCA/ChIP-eat/tp53_chipeat_targets.txt"), header = FALSE)[,1]
 
 # FOR PAN-CANCER (must combine files)
 #' Creates a TFcancer file that is the combination of all the individual cancer
@@ -924,7 +1262,7 @@ adjust_tfcancer_df <- function(tfcancer_df) {
 
 
 ############################################################
-#### CREATE ENRICHMENT PLOT
+#### CREATE ENRICHMENT PLOTS
 ############################################################
 #' Function to plot the enrichment of cancer genes among the significant target genes
 #' @param master_df_sig a master DF produced from run_linear_model() that has q-values
@@ -973,6 +1311,39 @@ png(fn, width = 650, height = 350)
 plot_cancer_enrichment(master_df_cna_sig, known_cancer_genes_table, tfcancer_df)
 dev.off()
 
+
+#' Function to plot the enrichment of cancer genes among the significant target genes
+#' @param master_df a master DF produced from run_linear_model() that has q-values
+#' @param chipeat_targs a vector of known ChIP-eat targets for a gene of interest (master
+#' DF should already be subsetted to just this gene)
+#' @param goi a string denoting the gene-of-interest, for labeling graph
+plot_chipseq_enrichment <- function(master_df, chipeat_targs, goi) {
+  # Get all the target genes 
+  target_hits <- unlist(master_df$T_k.name)
+  print(length(target_hits))
+  print(length(chipeat_targs))
+  
+  # Fill in a vector of 0 and 1 for each significant target hit to indicate if it 
+  # is a ChIP-eat target
+  chipeat_vect <- unlist(lapply(target_hits, function(x) {
+    return(ifelse(x %fin% chipeat_targs, 1, 0))
+  }))
+  
+  # Plot the enrichment (fraction of ChIP-eat genes at/ above given rank)
+  ranks <- 1:length(target_hits)
+  frac_chipeat_vect <- c()
+  count_of_chipeat_genes <- 0
+  for (i in 1:length(target_hits)) {
+    val_of_curr_tg <- chipeat_vect[i]
+    count_of_chipeat_genes <- count_of_chipeat_genes + val_of_curr_tg
+    frac <- count_of_chipeat_genes / i
+    frac_chipeat_vect <- c(frac_chipeat_vect, frac)
+  }
+  
+  plot(ranks[1:100], frac_chipeat_vect[1:100], pch = 16, 
+       main = paste("Enrichment of Significant Target Genes in", paste(goi, "ChIP-eat Targets")),
+       xlab = "Rank", ylab = "Fraction of Target Genes that are ChIP-eat Targets")
+}
 
 
 ############################################################

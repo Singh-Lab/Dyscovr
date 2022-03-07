@@ -41,22 +41,17 @@ all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Proje
 #' @param gene2 the external name of gene 2
 plot_mutational_overlap <- function(patient_set, mut_count_matrix, gene1, gene2) {
   # Limit the mutation count matrix to the given patient set
-  colnames(mut_count_matrix) <- unlist(lapply(colnames(mut_count_matrix), function(x) {
-    return(unlist(strsplit(x, "-", fixed = TRUE))[3])
+  colnames(mut_count_matrix)[2:ncol(mut_count_matrix)] <- unlist(lapply(colnames(mut_count_matrix)[2:ncol(mut_count_matrix)], function(x) {
+    return(unlist(strsplit(x, "-", fixed = TRUE))[1])
   }))
-  mut_count_matrix_sub <- mut_count_matrix[,colnames(mut_count_matrix) %in% patient_set]
+  mut_count_matrix_sub <- mut_count_matrix[,c(1, (which(colnames(mut_count_matrix)[2:ncol(mut_count_matrix)] %in% patient_set) + 1))]
 
   # Get the number of tumor samples with a mutation in each gene (count >= 1)
-  mut_gene1_counts <- as.numeric(unlist(mut_count_matrix_sub[rownames(mut_count_matrix_sub) == gene1, ]))
+  mut_gene1_counts <- as.numeric(unlist(mut_count_matrix_sub[mut_count_matrix_sub$Gene_Symbol == gene1, 2:ncol(mut_count_matrix_sub)]))
   gene1_mut_samps <- which(mut_gene1_counts >= 1)
   
-  mut_gene2_counts <- as.numeric(unlist(mut_count_matrix_sub[rownames(mut_count_matrix_sub) == gene2, ]))
+  mut_gene2_counts <- as.numeric(unlist(mut_count_matrix_sub[mut_count_matrix_sub$Gene_Symbol == gene2, 2:ncol(mut_count_matrix_sub)]))
   gene2_mut_samps <- which(mut_gene2_counts >= 1)
-  
-  # Get the number of tumor samples without a mutation in either gene (count = 0)
-  #mut_neither_counts <- mut_count_matrix_sub[(rownames(mut_count_matrix_sub) == gene1) | 
-                                                              #(rownames(mut_count_matrix_sub) == gene2), ]
-  #neither_mut_samps <- as.numeric(unlist(which(colSums(mut_neither_counts) == 0)))
   
   mut_samps <- list("gene1" = gene1_mut_samps, "gene2" = gene2_mut_samps, "all" = 1:ncol(mut_count_matrix_sub))
 
@@ -67,13 +62,13 @@ plot_mutational_overlap <- function(patient_set, mut_count_matrix, gene1, gene2)
 }
 
 patient_set <- read.table(paste0(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt"), header = TRUE)[,1]
-patient_set_lt20pamp <- read.table(paste0(main_path, "Patient Subsets/LessThan20PercAmp_patient_ids.txt"), header = TRUE)[,1]
-patient_set_lumA <- read.table(paste0(main_path, "Patient Subsets/Luminal.A_patient_ids.txt"), header = TRUE)[,1]
-patient_set_lumB <- read.table(paste0(main_path, "Patient Subsets/Luminal.B_patient_ids.txt"), header = TRUE)[,1]
-patient_set_lumAB <- read.table(paste0(main_path, "Patient Subsets/Luminal.A.B_patient_ids.txt"), header = TRUE)[,1]
-patient_set_basal <- read.table(paste0(main_path, "Patient Subsets/Basal_patient_ids.txt"), header = TRUE)[,1]
-patient_set_her2 <- read.table(paste0(main_path, "Patient Subsets/HER2_patient_ids.txt"), header = TRUE)[,1]
-patient_set_normLike <- read.table(paste0(main_path, "Patient Subsets/Normal-like_patient_ids.txt"), header = TRUE)[,1]
+patient_set_lt20pamp <- intersect(read.table(paste0(main_path, "Patient Subsets/LessThan20PercAmp_patient_ids.txt"), header = TRUE)[,1], patient_set)
+patient_set_lumA <- intersect(read.table(paste0(main_path, "Patient Subsets/Luminal.A_patient_ids.txt"), header = TRUE)[,1], patient_set)
+patient_set_lumB <- intersect(read.table(paste0(main_path, "Patient Subsets/Luminal.B_patient_ids.txt"), header = TRUE)[,1], patient_set)
+patient_set_lumAB <- intersect(read.table(paste0(main_path, "Patient Subsets/Luminal.A.B_patient_ids.txt"), header = TRUE)[,1], patient_set)
+patient_set_basal <- intersect(read.table(paste0(main_path, "Patient Subsets/Basal_patient_ids.txt"), header = TRUE)[,1], patient_set)
+patient_set_her2 <- intersect(read.table(paste0(main_path, "Patient Subsets/HER2_patient_ids.txt"), header = TRUE)[,1], patient_set)
+patient_set_normLike <- intersect(read.table(paste0(main_path, "Patient Subsets/Normal-like_patient_ids.txt"), header = TRUE)[,1], patient_set)
 
 patient_set_pc <- read.table(paste0(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt"), header = TRUE)[,1]
 
@@ -86,9 +81,11 @@ hnsc_subtype$justPat <- unlist(lapply(hnsc_subtype$patient, function(x) unlist(s
 patient_set_blca <- intersect(patient_set_pc, blca_subtype$justPat)
 patient_set_hnsc <- intersect(patient_set_pc, hnsc_subtype$justPat)
 
-mutation_count_matrix <- read.csv(paste0(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense.csv"), 
+mutation_count_matrix <- read.csv(paste0(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_CancerOnly_IntersectPatients.csv"), 
                                   header = TRUE, row.names = 1, check.names = FALSE)
-#mutation_count_matrix <- read.csv(paste0(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense_ALL.csv"), 
+mutation_count_matrix <- read.csv(paste0(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_nonsense_CancerOnly_IntersectPatients.csv"), 
+                                  header = TRUE, row.names = 1, check.names = FALSE)
+#mutation_count_matrix <- read.csv(paste0(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_ALL.csv"), 
                                   #header = TRUE, row.names = 1, check.names = FALSE)
 
 gene1 <- "TP53"
@@ -107,37 +104,9 @@ plot_mutational_overlap(patient_set, mutation_count_matrix, gene1, gene2)
 #' @param results_table a master DF produced from linear_model.R
 #' @param outpath a path to a directory to write the t-statistic matrix to
 create_heat_map <- function(results_table) {
-  # Create the regulatory protein vs. gene target table
-  matrix <- data.frame(matrix(ncol = length(unique(results_table$R_i.name)),
-                              nrow = length(unique(results_table$T_k.name))))
-  colnames(matrix) <- unique(results_table$R_i.name)
-  rownames(matrix) <- unique(results_table$T_k.name)
   
-  # Fill in this table with t-statistics
-  for (i in 1:nrow(results_table)) {
-    #tstat <- results_table$statistic[i]
-    beta <- results_table$estimate[i]
-    regprot <- results_table$R_i.name[i]
-    targ <- results_table$T_k.name[i]
-    
-    tryCatch({
-      #matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
-      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- beta
-    }, error=function(cond){
-      print(cond)
-      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- 0
-    })
-  }
-  # NOTE: leave all the unfilled pairings as NA
-  
-  # Replace NA/NaN with 0, or alternatively use na.omit
-  #matrix[is.na(matrix)] <- 0
-  #matrix[is.nan(matrix)] <- 0
-  matrix <- na.omit(matrix)
-  
-  # Convert from data frame to matrix
-  matrix <- data.matrix(matrix)
-  print(head(matrix))
+  # Use helper function to create input matrix from results table
+  matrix <- create_regprot_v_genetarg_matrix(results_table)
   
   # Plot a default heatmap
   #col <- colorRampPalette(brewer.pal(10, "RdYlBu"))(256)
@@ -173,6 +142,46 @@ create_heat_map <- function(results_table) {
   
   return(matrix)
 }
+
+
+#' Helper function to create regprot vs. gene target matrix and fill with Beta values 
+#' @param results_table
+create_regprot_v_genetarg_matrix <- function(results_table) {
+  # Create the regulatory protein vs. gene target table
+  matrix <- data.frame(matrix(ncol = length(unique(results_table$R_i.name)),
+                              nrow = length(unique(results_table$T_k.name))))
+  colnames(matrix) <- unique(results_table$R_i.name)
+  rownames(matrix) <- unique(results_table$T_k.name)
+  
+  # Fill in this table with t-statistics
+  for (i in 1:nrow(results_table)) {
+    #tstat <- results_table$statistic[i]
+    beta <- results_table$estimate[i]
+    regprot <- results_table$R_i.name[i]
+    targ <- results_table$T_k.name[i]
+    
+    tryCatch({
+      #matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
+      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- beta
+    }, error=function(cond){
+      print(cond)
+      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- 0
+    })
+  }
+  # NOTE: leave all the unfilled pairings as NA
+  
+  # Replace NA/NaN with 0, or alternatively use na.omit
+  #matrix[is.na(matrix)] <- 0
+  #matrix[is.nan(matrix)] <- 0
+  matrix <- na.omit(matrix)
+  
+  # Convert from data frame to matrix
+  matrix <- data.matrix(matrix)
+  print(head(matrix))
+  
+  return(matrix)
+}
+
 
 # Recon3D results for TP53/ PIK3CA (No overlap)
 master_df_mut <- read.csv(paste0(main_path, "Linear Model/PIK3CA_TP53/eQTL/output_results_NoMutOverlap_P53_PIK3CA_metabolicTargs_iprotein_tmmSDGr1_rawCNA_methMRaw_cibersortTotalFrac_rmCis_allButCancerType_corrected_MUT.csv"),
@@ -269,6 +278,98 @@ master_df_mut_lt20pamp <- read.csv(paste0(main_path, "Linear Model/PIK3CA_TP53/e
 create_heatmap_with_clustering(master_df_mut, height = 2)
 
 
+##############################################################################
+### COMBINED SUBTYPE MODEL RESULT HEAT MAPS
+##############################################################################
+#' Create a partitioned heat map with the results from all breast cancer subtypes,
+#' partitioned by subtype and set to a uniform scale
+#' @param master_df_lumA luminal A results DF
+#' @param master_df_lumB luminal B results DF
+#' @param master_df_basal basal (TN) results DF
+#' @param master_df_her2 HER2 results DF
+#' @param signif_only a TRUE/ FALSE value indicating whether or not to limit
+#' heatmap to only significant hits (q < 0.2)
+create_subtype_partitioned_heatmap <- function(master_df_lumA, master_df_lumB,
+                                               master_df_basal, master_df_her2, 
+                                               signif_only) {
+  
+  # Limit to significant hits only, if desired
+  if(signif_only) {
+    master_df_lumA <- master_df_lumA[master_df_lumA$q.value < 0.2,]
+    master_df_lumB <- master_df_lumB[master_df_lumB$q.value < 0.2,]
+    master_df_basal <- master_df_basal[master_df_basal$q.value < 0.2,]
+    master_df_her2 <- master_df_her2[master_df_her2$q.value < 0.2,]
+  }
+  
+  # User helper function to create an input matrix for each master DF
+  lumA_incl <- FALSE
+  if((nrow(master_df_lumA) > 0) & (length(unique(master_df_lumA$R_i.name)) >= 2)) {
+    matrix_lumA <- create_regprot_v_genetarg_matrix(master_df_lumA)
+    matrix_lumA <- cbind(matrix_lumA, rep(1, times = nrow(matrix_lumA)))
+    colnames(matrix_lumA)[ncol(matrix_lumA)] <- "subtype"
+    lumA_incl <- TRUE
+  }
+  
+  lumB_incl <- FALSE
+  if((nrow(master_df_lumB) > 0) & (length(unique(master_df_lumB$R_i.name)) >= 2)) {
+    matrix_lumB <- create_regprot_v_genetarg_matrix(master_df_lumB)
+    matrix_lumB <- cbind(matrix_lumB, rep(2, times = nrow(matrix_lumB)))
+    colnames(matrix_lumB)[ncol(matrix_lumB)] <- "subtype"
+    lumB_incl <- TRUE
+  }
+  
+  basal_incl <- FALSE
+  if((nrow(master_df_basal) > 0) & (length(unique(master_df_basal$R_i.name)) >= 2)) {
+    matrix_basal <- create_regprot_v_genetarg_matrix(master_df_basal)
+    matrix_basal <- cbind(matrix_basal, rep(3, times = nrow(matrix_basal)))
+    colnames(matrix_basal)[ncol(matrix_basal)] <- "subtype"
+    basal_incl <- TRUE
+  }
+  
+  her2_incl <- FALSE
+  if((nrow(master_df_her2) > 0) & (length(unique(master_df_her2$R_i.name)) >= 2)) {
+    matrix_her2 <- create_regprot_v_genetarg_matrix(master_df_her2)
+    matrix_her2 <- cbind(matrix_her2, rep(4, times = nrow(matrix_her2)))
+    colnames(matrix_her2)[ncol(matrix_her2)] <- "subtype"
+    her2_incl <- TRUE
+  }
+  
+  
+  # Combine all these into one
+  matrices <- list(matrix_lumA, matrix_lumB, matrix_basal, matrix_her2)
+  incl_vect <- c(lumA_incl, lumB_incl, basal_incl, her2_incl)
+  incl_vect_num <- unlist(lapply(1:length(incl_vect), function(i) ifelse(incl_vect[i] == TRUE, i, NA)))
+  incl_vect_num <- incl_vect_num[!is.na(incl_vect_num)]
+  matrices_to_keep <- matrices[incl_vect_num]
+  print(matrices_to_keep)
+  master_matrix <- do.call(rbind, matrices_to_keep)
+  print(head(master_matrix))
+  print(unique(master_matrix[,'subtype']))
+  #master_matrix <- rbind(rbind(rbind(matrix_lumA, matrix_lumB), matrix_basal), matrix_her2)
+  
+  # Get row clustering
+  #row_dend <- hclust(dist(master_matrix[,1:2]))
+  
+  hm_annot <- HeatmapAnnotation(df = data.frame(subtype = c(rep("Luminal A", nrow(matrix_lumA)), 
+                                                            rep("Luminal B", nrow(matrix_lumB)),
+                                                            rep("Basal", nrow(matrix_basal)),
+                                                            rep("HER2", nrow(matrix_her2)))),
+                                col = list(subtype = c("Luminal A" = "pink", "Luminal B" = "lightblue",
+                                                       "Basal" = "orange", "HER2" = "lightgreen")),
+                                show_legend = TRUE, annotation_name_side = "right")
+  draw(hm_annot)
+  
+  # Create partitioned heatmap
+  Heatmap(master_matrix[, 1:2], name = "Beta", column_title = "Driver Gene", column_title_side = "bottom",
+          row_title = "Target Gene", split = master_matrix[, 'subtype'], row_gap = unit(2, "mm"), 
+          row_names_gp = gpar(fontsize = 6), border = c("black"), cluster_columns = FALSE, 
+          column_names_rot = 0, show_row_names = FALSE)
+          #rowAnnotation = hm_annot, show_annotation_legend = TRUE)
+  
+}
+
+create_subtype_partitioned_heatmap(res_metabol_lumA_mut, res_metabol_lumB_mut, res_metabol_basal_mut,
+                                   res_metabol_her2_mut, TRUE)
 
 ##############################################################################
 ### SPEARMAN CORRELATION PLOTS
