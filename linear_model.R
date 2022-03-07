@@ -96,6 +96,9 @@ parser$add_argument("--patient_df", default = "combined_patient_sample_cibersort
                     help = "The name of the patient sample data frame input. [default %(default)s]")
 parser$add_argument("--target_df", default = "allgene_targets.csv", type = "character",
                     help = "The name of the ChIP-eat or curated targets data frame. [default %(default)s]")
+parser$add_argument("--functional_copies_df", default = "tp53_functional_copies_per_sample.csv",
+                    type = "character",
+                    help = "The name of a functional copies DF for a particular tester gene of interest, default TP53.")
 
 # The decision for if/ how to bucket CNAs and methylation
 parser$add_argument("--cna_bucketing", default = "bucket_inclAmp", 
@@ -129,10 +132,14 @@ parser$add_argument("--collinearity_diagn", default = "FALSE", type = "character
 # Add a flag for adding a regularization method
 parser$add_argument("--regularization", default = "None", type = "character",
                     help = "The name of the regularization method being used. Currently only implemented for L1 and L2. Default is None.")
+
 # Add a flag for keeping only trans pairings
 parser$add_argument("--removeCis", default = "TRUE", type = "character",
                     help = "A TRUE/ FALSE value to indicate whether or not we want to remove cis pairings and look only at trans pairings. Defaults to true, but can be set to false.")
 
+# A flag for using the number of functional copies of regulatory protein per sample, rather than the mutation and CNA status 
+parser$add_argument("--useNumFunctCopies", default = "FALSE", type = "character",
+                    help = "A TRUE/ FALSE value to indicate whether or not we want to use the allele-specific number of functional copies for the given regulatory tester protein, rather than its separate mutation and CNA status.")
 
 # Add a flag for debugging
 parser$add_argument("--debug", default = "FALSE", type = "character",
@@ -179,6 +186,8 @@ debug <- str2bool(args$debug)
 collinearity_diagn <- str2bool(args$collinearity_diagn)
 removeCis <- str2bool(args$removeCis)
 removeMetastatic <- str2bool(args$removeMetastatic)
+useNumFunctCopies <- str2bool(args$useNumFunctCopies)
+
 
 ############################################################
 # SET MAIN PATH AND IMPORT GENERALLY NEEDED FILES
@@ -385,6 +394,23 @@ if(debug) {
 
 
 ############################################################
+# IMPORT NUM. FUNCTIONAL COPIES DATA FRAME (OPT)
+############################################################
+# If we are using a data frame with the number of functional copies for the
+# given regulatory protein, import that here
+
+num_funct_copies_DF <- fread(paste(main_path, args$functional_copies_df, sep = ""), header = TRUE)
+colnames(num_funct_copies_DF)[1] <- "sample_id"
+
+print("FUNCT COPIES DF")
+print(head(num_funct_copies_DF))
+
+if(debug) {
+  print("Num. Functional Copies DF")
+  print(head(num_funct_copies_DF))
+}
+
+############################################################
 #### OVERVIEW OF LINEAR MODEL
 ############################################################
 ### PATIENT CHARACTERISTICS ###
@@ -408,6 +434,10 @@ if(debug) {
 # MethStat_i : The methylation status of protein i (0 if not methylated, 1 if methylated) across all tumor samples 1..j..M  
 # CNA_i : The copy number alteration status of protein i (1 if amplified, -1 if deleted, 0 if no amp. or del. OR copy #) 
 # across all tumor samples 1..j..M
+
+# ALTERNATIVE: Rather than MutStat_i and CNA_i, can also use a bulk "Num. Functional Copies" (Num_F_Copies_i) term,
+# which is the log2 of the number of functional copies a given sample possesses of the regulatory protein i 
+  # Can also bucket (0 = no functional copies, 1 = 1 functional copy, 2 = at least 2 functional copies)
 
 ### TARGET GENE k CHARACTERISTICS ###
 # MutStat_k : The mutation status of gene k (0 if not mutated, 1 if mutated) across all samples 1..j..M
@@ -449,6 +479,8 @@ if(debug) {
 #' entries are CNA values)
 #' @param expression_df table of expression (rows are genes, columns are patients, 
 #' entries are expression values)
+#' @param num_funct_copies_df a data frame with the number of functional copies
+#' of a given regulatory protein for each sample of interest 
 #' @param is_rank_or_quant_norm a TRUE/FALSE value indicating whether this is rank-
 #' or quantile-normalized data (i.e. whether we need to include library size as an
 #' offset)
@@ -463,6 +495,8 @@ if(debug) {
 #' "bucket_justDel" and "rawCNA"
 #' @param meth_bucketing a TRUE/FALSE value indicating whether or not we are bucketing
 #' methylation values
+#' @param useNumFunctCopies a TRUE/FALSE value indicating whether or not we are using
+#' the number of functional copies rather than the mutation/CNA status information
 #' @param num_PEER a value from 0-10 indicating the number of PEER factors we 
 #' are including as covariates in the model
 #' @param num_pcs a value from 0-2 indicating the number of  
@@ -485,11 +519,11 @@ if(debug) {
 #' cis pairings if needed
 run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df, 
                              mutation_df_targ, mutation_df_regprot, methylation_df, 
-                             methylation_df_meQTL, cna_df, expression_df, is_rank_or_quant_norm,
-                             analysis_type, tumNormMatched, randomize, cna_bucketing, 
-                             meth_bucketing, num_PEER, num_pcs, debug, collinearity_diagn,
-                             outpath, outfn, regularization, covs_to_incl, removeCis,
-                             all_genes_id_conv) {
+                             methylation_df_meQTL, cna_df, expression_df, num_funct_copies_df,
+                             is_rank_or_quant_norm, analysis_type, tumNormMatched, 
+                             randomize, cna_bucketing, meth_bucketing, useNumFunctCopies, 
+                             num_PEER, num_pcs, debug, collinearity_diagn, outpath, 
+                             outfn, regularization, covs_to_incl, removeCis, all_genes_id_conv) {
   
   # We need to get a mini-table for every r_i, t_k combo that we rbind into a master table of results
   results_df_list <- lapply(1:protein_ids_df[, .N], function(i) {
@@ -508,6 +542,8 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                                       mutation_regprot_df = mutation_df_regprot, 
                                       methylation_df = methylation_df, 
                                       cna_df = cna_df,
+                                      num_funct_copies_df = num_funct_copies_DF,
+                                      useNumFunctCopies = useNumFunctCopies,
                                       cna_bucketing = cna_bucketing, 
                                       meth_bucketing = meth_bucketing, 
                                       tumNormMatched = tumNormMatched, debug = debug)
@@ -707,6 +743,10 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
 #' @param mutation_regprot_df the mutation DF for regulatory proteins 
 #' @param methylation_df the methylation DF
 #' @param cna_df the copy number alteration DF
+#' @param num_funct_copies_df a data frame with the number of functional copies 
+#' of the given regulatory protein (if looking at only 1 regprot)
+#' @param useNumFunctCopies a TRUE/FALSE value indicating whether or not we are 
+#' using the number of functional copies data
 #' @param cna_bucketing a string indicating if/how we are bucketing CNA values. Possible
 #' values are "bucket_inclAmp", "bucket_exclAmp", and "rawCNA"
 #' @param meth_bucketing a TRUE/FALSE value indicating whether or not we are bucketing
@@ -716,8 +756,8 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
 #' @param debug a TRUE/FALSE value indicating if we are in debug mode and should 
 #' use additional prints
 fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg, 
-                                mutation_regprot_df, methylation_df, cna_df,
-                                cna_bucketing, meth_bucketing, tumNormMatched, debug) {
+                                mutation_regprot_df, methylation_df, cna_df, num_funct_copies_df,
+                                useNumFunctCopies, cna_bucketing, meth_bucketing, tumNormMatched, debug) {
   
   # Filter the data frames to look at only this regulatory protein
   mutation_regprot_df <- mutation_regprot_df[Swissprot %like% regprot_i_uniprot]
@@ -758,29 +798,52 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
       if(length(meth_stat) > 3) {meth_stat <- meth_stat[1:3]}
     }
     
+    # If we are using the functional number of copies info, what is the functional
+    # number of copies for this protein in this sample?
+    if(useNumFunctCopies) {
+      fnc_stat <- num_funct_copies_df[num_funct_copies_df$sample_id == sample, 
+                                      'Num.Functional.Copies']
+      # Take the log2 + 1 of this value
+      fnc_stat <- log2(fnc_stat + 1)
+    }
+    
     if (debug) {
       print(paste("Meth stat:", meth_stat))
       print(paste("CNA stat:", cna_stat))
       print(paste("Mut stat:", mut_stat))
+      if(useNumFunctCopies) {print(paste("FNC stat:", fnc_stat))}
     }
     
-    if(!meth_bucketing) {
-      if ((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing))) {
-        return(data.table("MutStat_i" = mut_stat, "CNAStat_i" = cna_stat, "MethStat_i" = meth_stat))
+    outdf <- data.table()
+    if(useNumFunctCopies) {
+      outdf[, 'FNCStat_i'] <- fnc_stat
+      if(!meth_bucketing) {
+        outdf[, 'MethStat_i'] <- meth_stat
       } else {
-        return(data.table("MutStat_i" = mut_stat, "CNAStat_i_b1" = cna_stat[1], "CNAStat_i_b2" = cna_stat[2],
-                          "CNAStat_i_b3" = cna_stat[3], "MethStat_i" = meth_stat))
+        outdf <- cbind(outdf, data.table("MethStat_i_b1" = meth_stat[1],
+                                         "MethStat_i_b2" = meth_stat[2], 
+                                         "MethStat_i_b3" = meth_stat[3]))
       }
     } else {
-      if ((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing))) {
-        return(data.table("MutStat_i" = mut_stat, "CNAStat_i" = cna_stat, "MethStat_i_b1" = meth_stat[1],
-                          "MethStat_i_b2" = meth_stat[2], "MethStat_i_b3" = meth_stat[3]))
+      if(!meth_bucketing) {
+        if ((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing))) {
+          outdf <- data.table("MutStat_i" = mut_stat, "CNAStat_i" = cna_stat, "MethStat_i" = meth_stat)
+        } else {
+          outdf <- data.table("MutStat_i" = mut_stat, "CNAStat_i_b1" = cna_stat[1], "CNAStat_i_b2" = cna_stat[2],
+                              "CNAStat_i_b3" = cna_stat[3], "MethStat_i" = meth_stat)
+        }
       } else {
-        return(data.table("MutStat_i" = mut_stat, "CNAStat_i_b1" = cna_stat[1], "CNAStat_i_b2" = cna_stat[2],
-                          "CNAStat_i_b3" = cna_stat[3], "MethStat_i_b1" = meth_stat[1], "MethStat_i_b2" = meth_stat[2], 
-                          "MethStat_i_b3" = meth_stat[3]))
+        if ((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing))) {
+          outdf <- data.table("MutStat_i" = mut_stat, "CNAStat_i" = cna_stat, "MethStat_i_b1" = meth_stat[1],
+                              "MethStat_i_b2" = meth_stat[2], "MethStat_i_b3" = meth_stat[3])
+        } else {
+          outdf <- data.table("MutStat_i" = mut_stat, "CNAStat_i_b1" = cna_stat[1], "CNAStat_i_b2" = cna_stat[2],
+                              "CNAStat_i_b3" = cna_stat[3], "MethStat_i_b1" = meth_stat[1], "MethStat_i_b2" = meth_stat[2], 
+                              "MethStat_i_b3" = meth_stat[3])
+        }
       }
     }
+    return(outdf)
   })
   
   
@@ -978,6 +1041,7 @@ construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
     return(index)
   }))
   colnames_to_incl <- colnames_to_incl[-vals_to_remove]
+
   
   # Additionally, if we have any columns that are uniform (the same value in all patients) we'd 
   # like to remove those as well, as long as they are not MutStat_i
@@ -1123,6 +1187,7 @@ if(is.na(patient_cancer_mapping)) {
     } else {methylation_df_meQTL <- NA} 
     cna_df <- subset_by_intersecting_ids(patients_of_interest, cna_df, TRUE, tumNormMatched)
     expression_df <- subset_by_intersecting_ids(patients_of_interest, expression_df, TRUE, tumNormMatched)
+    if(useNumFunctCopies) {num_funct_copies_DF <- subset_by_intersecting_ids(patients_of_interest, num_funct_copies_DF, FALSE, tumNormMatched)}
   }
   
   # If needed, exclude metastatic samples
@@ -1136,6 +1201,7 @@ if(is.na(patient_cancer_mapping)) {
     } else {methylation_df_meQTL <- NA} 
     cna_df <- remove_metastatic_samples(cna_df, TRUE)
     expression_df <- remove_metastatic_samples(expression_df, TRUE)
+    if(useNumFunctCopies) {num_funct_copies_DF <- remove_metastatic_samples(num_funct_copies_DF, FALSE)}
   }
     
   master_df <- run_linear_model(protein_ids_df = protein_ids_df, 
@@ -1161,7 +1227,9 @@ if(is.na(patient_cancer_mapping)) {
                                 regularization = args$regularization,
                                 covs_to_incl = covs_to_incl,
                                 removeCis = removeCis,
-                                all_genes_id_conv = all_genes_id_conv)
+                                all_genes_id_conv = all_genes_id_conv,
+                                useNumFunctCopies = useNumFunctCopies,
+                                num_funct_copies_df = num_funct_copies_DF)
   
 # Case 2: If we're running on multiple cancer types separately
 } else if (!(is.na(patient_cancer_mapping))) {
@@ -1190,6 +1258,7 @@ if(is.na(patient_cancer_mapping)) {
     } else {methylation_df_meQTL_sub <- NA} 
     cna_df_sub <- subset_by_intersecting_ids(patient_ids, cna_df, TRUE, tumNormMatched)
     expression_df_sub <- subset_by_intersecting_ids(patient_ids, expression_df, TRUE, tumNormMatched)
+    if(useNumFunctCopies) {num_funct_copies_DF_sub <- subset_by_intersecting_ids(patients_of_interest, num_funct_copies_DF, FALSE, tumNormMatched)}
     
     # If needed, exclude metastatic samples
     if(removeMetastatic == TRUE) {
@@ -1202,6 +1271,7 @@ if(is.na(patient_cancer_mapping)) {
       } else {methylation_df_meQTL <- NA} 
       cna_df <- remove_metastatic_samples(cna_df, TRUE)
       expression_df <- remove_metastatic_samples(expression_df, TRUE)
+      if(useNumFunctCopies) {num_funct_copies_DF <- remove_metastatic_samples(num_funct_copies_DF, FALSE)}
     }
     
     # Run the model with these subsetted files
@@ -1228,7 +1298,9 @@ if(is.na(patient_cancer_mapping)) {
                                   regularization = args$regularization,
                                   covs_to_incl = covs_to_incl,
                                   removeCis = removeCis,
-                                  all_genes_id_conv = all_genes_id_conv)
+                                  all_genes_id_conv = all_genes_id_conv,
+                                  useNumFunctCopies = useNumFunctCopies,
+                                  num_funct_copies_df = num_funct_copies_DF)
     
     return(master_df)
   })
@@ -1255,8 +1327,10 @@ if(is.na(patient_cancer_mapping)) {
 #' @param debug a TRUE/FALSE value indicating whether or not we are in debug mode
 #' @param randomize a TRUE/FALSE value indicating whether or not this was a 
 #' randomized run
+#' @param useNumFunctCopies a TRUE/FALSE value indicating whether or not we are
+#' using the number of functional copies of regprot_i rather than mut/CNA status
 process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn, 
-                                  debug, randomize) {
+                                  debug, randomize, useNumFunctCopies) {
   # Order the file by p-value
   print(head(master_df))
   try(master_df <- master_df[order(p.value)])
@@ -1274,12 +1348,18 @@ process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn,
   fwrite(master_df, paste(outpath, paste(outfn, ".csv", sep = ""), sep = "/"))
   
   # Limit the data frame to just the term of interest (typically either MutStat_i or CNAStat_i)
-  master_df_mut <- master_df[master_df$term == "MutStat_i",]
-  master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
+  if(!useNumFunctCopies) {
+    master_df_mut <- master_df[master_df$term == "MutStat_i",]
+    master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
+    
+    # Write these to files as well 
+    fwrite(master_df_mut, paste(outpath, paste(outfn, "_MUT.csv", sep = ""), sep = "/")) 
+    fwrite(master_df_cna, paste(outpath, paste(outfn, "_CNA.csv", sep = ""), sep = "/"))  
+  } else {
+    master_df_fnc <- master_df[master_df$term == "FNCStat_i",]
+    fwrite(master_df_fnc, paste(outpath, paste(outfn, "_FNC.csv", sep = ""), sep = "/")) 
+  }
   
-  # Write these to files as well 
-  fwrite(master_df_mut, paste(outpath, paste(outfn, "_MUT.csv", sep = ""), sep = "/")) 
-  fwrite(master_df_cna, paste(outpath, paste(outfn, "_CNA.csv", sep = ""), sep = "/"))  
   
   # Combine the collinearity results and write to a file
   if(collinearity_diagn) {
@@ -1299,9 +1379,13 @@ if(is.na(patient_cancer_mapping)) {
   outfn <- as.character(unlist(outfn[[1]]))
   master_df <- process_raw_output_df(master_df = master_df, outpath = outpath, outfn = outfn, 
                                      collinearity_diagn = collinearity_diagn, debug = debug,
-                                     randomize = randomize)
-  master_df_mut <- master_df[master_df$term == "MutStat_i",]
-  master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
+                                     randomize = randomize, useNumFunctCopies = useNumFunctCopies)
+  if(!useNumFunctCopies) {
+    master_df_mut <- master_df[master_df$term == "MutStat_i",]
+    master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
+  } else {
+    master_df_fnc <- master_df[master_df$term == "FNCStat_i",]
+  }
   
   # Call the file to create output visualizations
   source(paste(source_path, "process_LM_output.R", sep = "")) 
@@ -1313,9 +1397,14 @@ if(is.na(patient_cancer_mapping)) {
     outfn <- as.character(unlist(outfn[[i]]))
     master_df <- process_raw_output_df(master_df = master_df, outpath = outpath, outfn = outfn, 
                                        collinearity_diagn = collinearity_diagn, debug = debug,
-                                       randomize = randomize)
-    master_df_mut <- master_df[master_df$term == "MutStat_i",]
-    master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
+                                       randomize = randomize, useNumFunctCopies = useNumFunctCopies)
+    if(!useNumFunctCopies) {
+      master_df_mut <- master_df[master_df$term == "MutStat_i",]
+      master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
+    } else {
+      master_df_fnc <- master_df[master_df$term == "FNCStat_i",]
+    }
+    
     
     # Call the file to create output visualizations
     source(paste(source_path, "process_LM_output.R", sep = "")) 
