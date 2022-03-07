@@ -51,7 +51,8 @@ binding_domains_ids_noPF <- read.csv(paste(path, "Saved Output Data Files/Intera
                                      header = TRUE, check.names = FALSE)[,2]
 # Choose which threshold to import
 #interacdome_binding_positions_df <- read.csv(paste(path, "Saved Output Data Files/InteracDome/binding_positions_DF_0.5.csv", sep = ""), header = TRUE)
-interacdome_binding_positions_df <- read.csv(paste(path, "Saved Output Data Files/InteracDome/binding_positions_DF_0.csv", sep = ""), header = TRUE, check.names = FALSE)
+interacdome_binding_positions_df <- read.csv(paste(path, "Saved Output Data Files/InteracDome/binding_positions_DF_0.csv", sep = ""), 
+                                             header = TRUE, check.names = FALSE, row.names = 1)
 
 # Nucleic Acids Only
 #interacdome_conf <- read.csv(paste(path, "Input Data Files/InteracDome/InteracDome_v0.3-confident_nucacids.csv", sep = ""), header = TRUE, check.names = FALSE)
@@ -235,7 +236,7 @@ proteome_subset_missense <- get_proteome_subset(proteome, maf_swissprot_ids_miss
 proteome_subset_missense_symb <- get_proteome_subset(proteome, maf_symbols_missense, 'hugo')
 
 length(unique(proteome_subset_missense))  # check the number of protein sequences remaining
-  # The length of this subset: BRCA - 8675, TCGA (ALL) - 17899
+  # The length of this subset: BRCA - 8675 (11068 for missense + nonsense), TCGA (ALL) - 17899
 
 # Write proteome subset to a FASTA
 write.fasta(proteome_subset_missense, names = names(proteome_subset_missense), as.string = TRUE, 
@@ -306,7 +307,7 @@ accessions_numeric <- regmatches(accessions_missense, regexpr("[[:digit:]]+", ac
 intersecting_domain_acc_missense <- intersect(accessions_numeric, binding_domains_ids_noPF)
 length(intersecting_domain_acc_missense)
 
-  # BRCA is 1162 intersecting domains; TCGA (ALL) is 1453 domains
+  # BRCA is 1162 intersecting domains (1250 for missense + nonsense); TCGA (ALL) is 1453 domains
   # NUC ACIDS ONLY: BRCA is 218 intersecting domains, TCGA (ALL) is 279
 
 
@@ -407,7 +408,7 @@ domains_missense_iprotein_sub <- merge_proteome_and_domains(domains_missense_ipr
 ############################################################
 # Examine how many actual unique accessions we have
 length(unique(domains_missense_iprotein_sub$Accession))  
-  # All Ligands: BRCA: 1910; TCGA (ALL): 2767
+  # All Ligands: BRCA: 1910 (2092 missense + nonsense); TCGA (ALL): 2767
   # Nucleic Acids Only: BRCA: 257; TCGA (ALL): 324
 
 # Write this table to a CSV
@@ -443,7 +444,7 @@ swissprot_ids_missense_iprotein <- extract_swissprot_ids(domains_missense_iprote
 protein_ids_missense_iprotein <- extract_protein_names(domains_missense_iprotein_sub)  
 length(protein_ids_missense_iprotein)
 
-# All Ligands: BRCA: 6214; TCGA (ALL): 11,939
+# All Ligands: BRCA: 6214 (7808 with missense + nonsense); TCGA (ALL): 11,939
 # Nuc. Acids Only: BRCA: 1914; TCGA (ALL): 3,644
 
 
@@ -483,8 +484,8 @@ add_patient_ids <- function(iprotein_sub, maf) {
   curr_patients <- ""
   new_col <- c()
   for (i in 1:nrow(iprotein_sub)) {
-    #prot <- unlist(strsplit(iprotein_sub[i, 'Query'], "|", fixed = TRUE))[2] 
-    prot <- unlist(iprotein_sub[i, 'Swissprot'])
+    prot <- unlist(strsplit(iprotein_sub[i, 'Query'], "|", fixed = TRUE))[2] 
+    #prot <- unlist(iprotein_sub[i, 'Swissprot'])
     print(prot)
     if (prot == curr_prot) {
       new_col <- c(new_col, curr_patients)

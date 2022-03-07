@@ -961,6 +961,190 @@ get_subtype_patient_list(brca_subtype, c("LumA", "LumB"), outpath, "Luminal.A.B"
 get_subtype_patient_list(brca_subtype, "LumA", outpath, "Luminal.A")
 
 
+############################################################
+#' DETERMINE THE NUMBER OF FUNCTIONAL COPIES OF A GIVEN GOI FOR EACH PATIENT SAMPLE
+#' Given a gene-of-interest, a MAF file, and a CNA file (with absolute CNs), determine
+#' for each patient sample the number of functional copies they have of the given GOI
+#' @param maf_file a TCGA MAF file, subsetted to only missense and nonsense mutations
+#' @param cna_file a TCGA CNA file, from the ASCAT2 pipeline
+#' @param patient_ids a set of 4-digit patient ids (XXXX) we are considering
+#' @param goi the ensembl (ENSG) ID of a gene of interest
+#' @param ts_or_onco a character string denoting whether the goi is a "tumor_suppressor"
+#' or an "oncogene"
+get_num_functional_copies <- function(maf_file, cna_file, patient_ids, goi, ts_or_onco) {
+ 
+  # Limit the MAF and CNA files to just the gene of interest
+  maf_sub <- maf_file[maf_file$Gene == goi,]
+  cna_sub <- cna_file[rownames(cna_file) == goi,]
+  
+  # Limit the MAF and CNA files to just the patients of interest
+  maf_sub$Patient_ID <- unlist(lapply(maf_sub$Tumor_Sample_Barcode, function(x)
+    unlist(strsplit(x, "-", fixed = TRUE))[3]))
+  maf_sub <- maf_sub[maf_sub$Patient_ID %in% patient_ids,]
+  
+  cna_pats <- unlist(lapply(colnames(cna_sub), function(x)
+    unlist(strsplit(x, "-", fixed = TRUE))[1]))
+  cna_sub <- cna_sub[,which(cna_pats %in% patient_ids)]
+  
+  # Create a new DF with all these patients
+  output_df <- data.frame("sample.id" = colnames(cna_sub))
+  
+  # Check what the copy number of the GOI is for each patient
+  output_df$Abs.CN <- unlist(lapply(1:nrow(output_df), function(i) {
+    samp <- output_df$sample.id[i]
+    return(cna_sub[,colnames(cna_sub) == samp])
+  }))
+  
+  #print(output_df)
+  
+  # Use helper function to get the number of copies with a missense and/or nonsense mutation
+  output_df$Num.Missense.Mut.Copies <- get_num_mut_copies(output_df, maf_sub, "Missense_Mutation")
+  output_df$Num.Nonsense.Mut.Copies <- get_num_mut_copies(output_df, maf_sub, "Nonsense_Mutation")
+  output_df$Num.Mut.Copies <- get_num_mut_copies(output_df, maf_sub, c("Missense_Mutation", "Nonsense_Mutation"))
+  
+  print(output_df)
+  
+  output_df$Num.Functional.Copies <- unlist(lapply(1:nrow(output_df), function(i) {
+    # If a total deletion (CNA of 0), we have no functional copies -- return 0
+    if(output_df[i, 'Abs.CN'] == 0) {return(0)}
+    # If we have one copy deleted, then we know we're down at least one functional copy;
+    # need to check and see if the other has a mutation (if it's a T.S.)
+    else if(output_df[i, 'Abs.CN'] == 1) {
+      if (ts_or_onco == "tumor_suppressor") {
+        if(output_df[i, 'Num.Mut.Copies'] >= 1) {return(0)}
+        else {return(1)}
+      # If this is an oncogene, we only need to check for nonsense mutations
+      } else {
+        if(output_df[i, 'Num.Nonsense.Mut.Copies'] >= 1) {return(0)}
+        else {return(1)}
+      }
+    # If we have at least 2 non-deleted copies, we just have to check for mutation status 
+    } else {
+      if (ts_or_onco == "tumor_suppressor") {
+        # If we have at least 1 mutated allele, subtract this from the total CN
+        if(output_df[i, 'Num.Mut.Copies'] >= 1) {
+          return(as.integer(output_df[i, 'Abs.CN']) - as.integer(output_df[i, 'Num.Mut.Copies']))
+        }
+        # If we have no mutated alleles, and no deletions, we have 2 (or more) functional copies
+        else {as.integer(output_df[i, 'Abs.CN'])}
+      } else {
+        # If this is an oncogene, we have to check whether the mutation is nonsense
+        # (If missense, likely GOF, and if nonsense, LOF)
+        if(output_df[i, 'Num.Nonsense.Mut.Copies'] >= 1) {
+          return(as.integer(output_df[i, 'Abs.CN']) - as.integer(output_df[i, 'Num.Nonsense.Mut.Copies']))
+        }
+        else {as.integer(output_df[i, 'Abs.CN'])}
+      }
+    }
+  }))
+  
+  return(output_df)
+}
+
+#' For each sample, return the allele-specific mutation status for the GOI
+#' @param output_df a data frame we are filling in 
+#' @param maf_sub a MAF file DF subsetting to a given patient and GOI
+#' @param classification either "Missense_Mutation" or "Nonsense_Mutation" to 
+#' to indicate the type of mutation we are looked at the mutation status for
+get_num_mut_copies <- function(output_df, maf_sub, classification) {
+  # Iterate through all the samples and, for each, get the number of mutant copies
+  # of a given classification
+  num_mut_copies <- unlist(lapply(1:nrow(output_df), function(i) {
+    samp <- output_df$sample.id[i]
+    
+    # Subset the MAF data frame to only this sample and variant type
+    if(length(classification) == 1) {
+      maf_samp <- maf_sub[(grepl(samp, maf_sub$Tumor_Sample_Barcode)) & 
+                            (maf_sub$Variant_Classification == classification),]
+    } else {
+      maf_samp <- maf_sub[(grepl(samp, maf_sub$Tumor_Sample_Barcode)) & 
+                            (maf_sub$Variant_Classification %in% classification),]
+    }
+    
+    num_mutant_copies <- 0
+    print(nrow(maf_samp))
+    
+    # If there's no remaining rows (aka mutations), we have no mutated copies -- return 0
+    if (nrow(maf_samp) == 0) {return(num_mutant_copies)}
+    
+    # Otherwise, look at the individual alleles
+    else {
+      #print(head(maf_samp))
+      mut_pattern <- list("allele1" = 0, "allele2" = 0)
+      
+      # If there are multiple rows of mutations, iterate through them to see which allele
+      # they are specific to
+      for (j in 1:nrow(maf_samp)) {
+        ref_allele <- maf_samp[j, 'Reference_Allele']
+        print(ref_allele)
+        # Is the first allele mutated?
+        if (maf_samp[j, 'Tumor_Seq_Allele1'] != ref_allele) {
+          # Have we already found a mutation of this classification on this allele?
+          if(mut_pattern[[1]] != 1) {
+            num_mutant_copies <- num_mutant_copies + 1
+            mut_pattern[[1]] <- mut_pattern[[1]] + 1
+          }
+        }
+        # Is the second allele mutated?
+        if (maf_samp[j, 'Tumor_Seq_Allele2'] != ref_allele) {
+          # Have we already found a mutation of this classification on this allele?
+          if(mut_pattern[[2]] != 1) {
+            num_mutant_copies <- num_mutant_copies + 1
+            mut_pattern[[2]] <- mut_pattern[[2]] + 1
+          }
+        }
+      }
+      return(num_mutant_copies)
+    }
+  }))
+  return(num_mut_copies)
+}
+
+
+input_path <-  "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
+maf_df_misAndNon <- read.csv(paste0(input_path, "Somatic_Mut_Data/maf_file_df_missense_nonsense_iprotein.csv"), 
+                             header = TRUE, check.names = FALSE)
+output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
+cna_df <- read.csv(paste0(output_path, "CNV/Gene-level Raw/CNV_DF_AllGenes_CancerOnly.csv"), 
+                   header = TRUE, check.names = FALSE, row.names = 1)
+
+patient_ids <- read.table(paste0(output_path, "Linear Model/Tumor_Only/intersecting_ids.txt"), header = TRUE)[,1]
+
+goi <- "ENSG00000141510" # TP53
+goi <- "ENSG00000121879" # PIK3CA
+
+ts_or_onco <- "tumor_suppressor"
+ts_or_onco <- "oncogene"
+
+
+# Call function
+output_df <- get_num_functional_copies(maf_df_misAndNon, cna_df, patient_ids, goi, ts_or_onco)
+
+# Visualize the distribution of functional copies
+hist(output_df$Num.Functional.Copies, breaks = seq(min(output_df$Num.Functional.Copies)-0.5, 
+                                                   max(output_df$Num.Functional.Copies)+0.5, by =1),
+     xlab = "Num. Functional Copies", main = "TP53 Histogram of Num. Functional Copies (BRCA)")
+# Visualize when we log2(F + 1) the values
+new_vals <- log2(output_df$Num.Functional.Copies + 1)
+hist(new_vals, breaks = seq(min(new_vals), max(new_vals)+0.5, by =1),
+     xlab = "Log2(Num. Functional Copies + 1)", main = "TP53 Histogram of Log2(Num. Functional Copies + 1) (BRCA)")
+
+
+# Create a Venn diagram of patients with both a TP53 deletion and mutation
+ggVennDiagram(list("P53 Deletion" = output_df[output_df$Abs.CN %in% c(0,1), 'sample.id'], "P53 Mutation" = output_df[output_df$Num.Mut.Copies >= 1, 'sample.id']), 
+              label_alpha = 0, category.names = c("TP53 Deletion", "TP53 Mutation"), set_color = "black",
+              set_size = 10, label_size = 8, edge_size = 0) +
+  ggplot2::scale_fill_gradient(low="cornsilk1", high = "cadetblue3")
+
+
+# How many have no functional copies?
+barplot(unlist(list("Total P53 KO" = length(output_df[output_df$Num.Functional.Copies == 0, 'sample.id']), 
+                   "Partial P53 KO (1 Cp)" = length(output_df[output_df$Num.Functional.Copies == 1, 'sample.id']),
+                   ">=2 Functional P53 Cp" = length(output_df[output_df$Num.Functional.Copies >= 2, 'sample.id']))))
+
+
+# Write this to a file
+write.csv(output_df, paste0(output_path, "Linear Model/Tumor_Only/tp53_functional_copies_per_sample.csv"))
 
 #
 #
