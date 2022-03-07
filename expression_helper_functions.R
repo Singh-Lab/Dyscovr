@@ -37,9 +37,9 @@ pik3ca_ensg <- "ENSG00000121879"
 # Non-Tumor-Normal Matched Files
 methylation_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Methylation/methylation_M_CancerOnly_IntersectPatients.csv", sep = ""), 
                            header = TRUE, row.names = 1, check.names = FALSE)
-mutation_targ_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_CancerOnly_IntersectPatients.csv", sep = ""), 
+mutation_targ_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_nonsense_CancerOnly_IntersectPatients.csv", sep = ""), 
                              header = TRUE, row.names = 1, check.names = FALSE)
-mutation_regprot_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Regprot_Mutation/iprotein_results_missense_IntersectPatients.csv", sep = ""), 
+mutation_regprot_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Regprot_Mutation/iprotein_results_missense_nonsense_CancerOnly_IntersectPatients.csv", sep = ""), 
                                 header = TRUE, row.names = 1, check.names = FALSE)
 cna_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/CNV/CNA_AllGenes_CancerOnly_IntersectPatients.csv", sep = ""), 
                    header = TRUE, row.names = 1, check.names = FALSE)
@@ -71,7 +71,7 @@ ensg <- "ENSG00000073584"
 ### IMPORT EXPRESSION DATAFRAMES
 ############################################################
 expression_df_fpkm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_fpkm_CancerOnly_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
-expression_df_tmm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_tmm_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
+expression_df_tmm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_tmmSDGr1filtByExpr_CancerOnly_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
 expression_df_quantile_norm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_quantile_norm_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
 expression_df_rank_norm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_rank_norm_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
 
@@ -182,7 +182,7 @@ express_df_cancer_tmm_filt_foxa1 <- expression_df_tmm_filt_foxa1[,!(grepl("-11",
 #' regulatory protein
 #' @param ensg the ENSG ID of the target gene of interest
 get_expression_by_mut_group <- function(express_df_cancer, mutant_patients, ensg) {
-  colnames(express_df_cancer) <- unlist(lapply(colnames(express_df_cancer), function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
+  #colnames(express_df_cancer) <- unlist(lapply(colnames(express_df_cancer), function(x) unlist(strsplit(x, "-", fixed = TRUE))[1]))
   expression_mutants <- as.numeric(express_df_cancer[rownames(express_df_cancer) == ensg, colnames(express_df_cancer) %in% mutant_patients])
   expression_normal <- as.numeric(express_df_cancer[rownames(express_df_cancer) == ensg, !(colnames(express_df_cancer) %in% mutant_patients)])
   return(list("mutants" = expression_mutants, "normal" = expression_normal))
@@ -244,8 +244,6 @@ make_expression_by_mut_group_vis <- function(mutant_patients, ensg, tg_name, reg
   expression_tmm_normal <- expression_tmm[[2]]
   dataList_tmm <- list("No Mutation" = expression_tmm_normal, "Mutation" = expression_tmm_mutants)
   boxplot(dataList_tmm, ylab = "Expression (TMM)", main = paste(tg_name, paste("Expression By", paste(regprot_name, "Mutation Status"))))
-  boxplot(dataList_tmm, ylab = "Expression (TMM)", main = "")
-  
   
   # TMM, Outliers Filtered
   expression_tmm_filt <- get_expression_by_mut_group(express_df_cancer_tmm_filt, mutant_patients, ensg)
