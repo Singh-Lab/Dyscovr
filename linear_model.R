@@ -15,6 +15,7 @@ library(speedglm)
 library(argparse)
 library(stringr)
 library(glmnet)
+library(cli)
 
 
 # Source other files needed
@@ -637,6 +638,8 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
             }, error = function(cond) {
               message("There was a problem with this linear model run:")
               message(cond)
+	      print(formula)
+              print(head(lm_input_table))
               return(NA)
             })
           
@@ -1044,10 +1047,11 @@ construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
 
   
   # Additionally, if we have any columns that are uniform (the same value in all patients) we'd 
-  # like to remove those as well, as long as they are not MutStat_i
+  # like to remove those as well, as long as they are not MutStat_i or CNAStat_i
   uniform_val_ind <- which(sapply(lm_input_table, function(x) length(unique(x)) == 1))
   uniform_vals <- colnames(lm_input_table)[uniform_val_ind]
-  uniform_vals <- uniform_vals[!(uniform_vals == "MutStat_i")]
+  uniform_vals <- uniform_vals[!((uniform_vals == "MutStat_i") | (uniform_vals == "CNAStat_i") | 
+                                   (uniform_vals == "FNCStat_i"))]  
   colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% uniform_vals)]
   
   # Exclude the library size, as we are using this as an offset instead
@@ -1333,9 +1337,10 @@ process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn,
                                   debug, randomize, useNumFunctCopies) {
   # Order the file by p-value
   print(head(master_df))
-  try(master_df <- master_df[order(p.value)])
-  #master_df <- setorder(master_df, p.value)
-  
+  print(unique(master_df$term))
+  #try(master_df <- master_df[order(p.value)])
+  try(master_df <- setorder(master_df, cols = "p.value", order = -1, na.last = TRUE))  
+
   # Write the results to the given file, making the directory if it does not already exist
   outpath <- as.character(unlist(outpath[[1]]))
   print(outpath)
@@ -1351,6 +1356,11 @@ process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn,
   if(!useNumFunctCopies) {
     master_df_mut <- master_df[master_df$term == "MutStat_i",]
     master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
+
+    if(debug) {
+	print("MASTER DF MUT")
+	print(head(master_df_mut))
+    }
     
     # Write these to files as well 
     fwrite(master_df_mut, paste(outpath, paste(outfn, "_MUT.csv", sep = ""), sep = "/")) 
