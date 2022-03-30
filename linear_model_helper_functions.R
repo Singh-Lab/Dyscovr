@@ -64,7 +64,7 @@ filter_meth_by_ensg <- function(methylation_df, ensg_ids) {
 #' Possible values are "bucket_inclAmp", "bucket_exclAmp", "bucket_justAmp",
 #' "bucket_justDel", and "rawCNA"
 get_cna_stat <- function(cna_df, sample, cna_bucketing) {
-  
+
   # Log2(CNA Stat + 1)
   if(cna_bucketing == "rawCNA") {
     cna_stat <- unique(as.integer(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE])))
@@ -76,6 +76,7 @@ get_cna_stat <- function(cna_df, sample, cna_bucketing) {
   # 1 if amplified ("justAmp") or deleted ("justDel"), 0 if 2+ copies
   } else if ((cna_bucketing == "bucket_justAmp") | (cna_bucketing == "bucket_justDel")) {
     cna_stat <- unique(as.integer(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE])))
+    print(paste("CNA STAT PRE PROCESSING", cna_stat))
     if (length(cna_stat) > 1) {cna_stat <- cna_stat[1]}
     else if(length(cna_stat) < 1) {cna_stat <- NA}
     else if (is.nan(cna_stat) | is.na(cna_stat)) {cna_stat <- NA}
