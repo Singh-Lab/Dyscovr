@@ -630,6 +630,44 @@ make_expression_barplot(signif_hits_expression_data[(signif_hits_expression_data
 make_expression_barplot(signif_hits_expression_data[(signif_hits_expression_data$gene %in% pred_up_tp53_noEff_pik3ca) &
                                                       (signif_hits_expression_data$depmap_id %in% ids_of_interest),])
 
+#' For the given target genes, does a Wilcoxon test to see if there
+#' is significant DE between the GOI mutated and non-mutated DepMap groups.
+#' Prints the target gene and the p-value of the Wilcoxon test, along with 
+#' the directionality of the effect
+#' @param expression_df an expression data frame with mutational status appended
+#' @param goi the Hugo Symbol of a gene of interest
+wilcox_of_targs <- function(expression_df, goi) {
+  
+  targs <- unique(expression_df$gene)
+  print(targs)
+  pvals <- c()
+  
+  for (t in targs) {
+    print(paste("Target:", t))
+    
+    exp_mut <- as.numeric(expression_df[(expression_df$gene == t) & 
+                                          (expression_df[, goi] == 1), 'value'])
+    exp_noMut <- as.numeric(expression_df[(expression_df$gene == t) & 
+                                            (expression_df[, goi] == 0), 'value'])
+    
+    wilcox_res <- wilcox.test(exp_mut, exp_noMut, exact = FALSE)   # use default two-sided alternative
+    
+    pval <- wilcox_res$p.value
+    print(paste("Wilcoxon p-value:", pval))
+    pvals <- c(pvals, pval)
+    
+    if(mean(exp_mut) > mean(exp_noMut)) {print("Upregulation")}
+    else {print("Downregulation")}
+  }
+  return(list("Targets" = targs, "P.value" = pvals))
+}
+
+pvalues_depmap <- wilcox_of_targs(signif_hits_expression_data_primary_tp53, "TP53")
+
+pvalues$Signif <- unlist(lapply(pvalues$P.value, function(x) ifelse(x < 0.05, 1, 0)))
+pvalues$ChipEat <- unlist(lapply(pvalues$Targets, function(x) ifelse(x %in% tp53_chipeat_targs, 1, 0)))
+
+jac_res <- clujaccard(pvalues$ChipEat, pvalues$Signif, zerobyzero = NA)
 
 ###################################################################################
 # INVESTIGATE SLOPES USING A SIMPLE LM OF DEPMAP VAL ~ MUT/ AMP STATUS

@@ -7,29 +7,49 @@ library(rstatix)
 library(broom)
 library(ggrepel)
 library(rstatix)
+library(fpc)
 
-cptac_brca_mutation_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_cptac_2020/data_mutations.txt", sep = "\t", header = TRUE, check.names = FALSE)
-cptac_brca_missense_mutation_data <- cptac_brca_mutation_data[cptac_brca_mutation_data$Variant_Classification == "Missense_Mutation",]
+cptac_brca_mutation_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_cptac_2020/data_mutations.txt", 
+                                     sep = "\t", header = TRUE, check.names = FALSE)
+cptac_brca_missense_nonsense_mutation_data <- cptac_brca_mutation_data[(cptac_brca_mutation_data$Variant_Classification == "Missense_Mutation") |
+                                                                         (cptac_brca_mutation_data$Variant_Classification == "Nonsense_Mutation"),]
 
-cptac_brca_fpkm_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_cptac_2020/data_mrna_seq_fpkm.txt", sep = "\t", header = TRUE, check.names = FALSE)
+cptac_brca_fpkm_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_cptac_2020/data_mrna_seq_fpkm.txt", 
+                                 sep = "\t", header = TRUE, check.names = FALSE)
 cptac_brca_fpkm_data_complete <- cptac_brca_fpkm_data[rowSums(is.na(cptac_brca_fpkm_data[,2:ncol(cptac_brca_fpkm_data)])) == 0,]
 
-cptac_brca_tp53_mutation <- cptac_brca_missense_mutation_data[cptac_brca_missense_mutation_data$Hugo_Symbol == "TP53",]
+cptac_brca_proteomic_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_cptac_2020/data_protein_quantification.txt", 
+                                      sep = "\t", header = TRUE, check.names = FALSE, row.names = 1)
+rownames(cptac_brca_proteomic_data) <- unlist(lapply(rownames(cptac_brca_proteomic_data), function(x)
+  unlist(strsplit(x, "|", fixed = TRUE))[1]))
+
+cptac_brca_tp53_mutation <- cptac_brca_missense_nonsense_mutation_data[cptac_brca_missense_nonsense_mutation_data$Hugo_Symbol == "TP53",]
 tp53_mut_patients <- unique(cptac_brca_tp53_mutation$Tumor_Sample_Barcode)
 length(tp53_mut_patients)
-tp53_not_mut_patients <- setdiff(unique(cptac_brca_missense_mutation_data$Tumor_Sample_Barcode), tp53_mut_patients)
+tp53_not_mut_patients <- setdiff(unique(cptac_brca_missense_nonsense_mutation_data$Tumor_Sample_Barcode), tp53_mut_patients)
 
-cptac_brca_pik3ca_mutation <- cptac_brca_missense_mutation_data[cptac_brca_missense_mutation_data$Hugo_Symbol == "PIK3CA",]
+cptac_brca_pik3ca_mutation <- cptac_brca_missense_nonsense_mutation_data[cptac_brca_missense_nonsense_mutation_data$Hugo_Symbol == "PIK3CA",]
 pik3ca_mut_patients <- unique(cptac_brca_pik3ca_mutation$Tumor_Sample_Barcode)
 length(pik3ca_mut_patients)
-pik3ca_not_mut_patients <- setdiff(unique(cptac_brca_missense_mutation_data$Tumor_Sample_Barcode), pik3ca_mut_patients)
+pik3ca_not_mut_patients <- setdiff(unique(cptac_brca_missense_nonsense_mutation_data$Tumor_Sample_Barcode), pik3ca_mut_patients)
+
+cptac_brca_clinical_sample <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_cptac_2020/data_clinical_sample.txt", 
+                                       sep = "\t", header = TRUE, check.names = FALSE, row.names = 1, comment.char = "#")
+cptac_lumA_samples <- cptac_brca_clinical_sample[cptac_brca_clinical_sample$PAM50 == "LumA", 'SAMPLE_ID']
+cptac_lumB_samples <- cptac_brca_clinical_sample[cptac_brca_clinical_sample$PAM50 == "LumB", 'SAMPLE_ID']
+cptac_basal_samples <- cptac_brca_clinical_sample[cptac_brca_clinical_sample$PAM50 == "Basal", 'SAMPLE_ID']
+cptac_her2_samples <- cptac_brca_clinical_sample[cptac_brca_clinical_sample$PAM50 == "Her2", 'SAMPLE_ID']
+cptac_normLike_samples <- cptac_brca_clinical_sample[cptac_brca_clinical_sample$PAM50 == "Normal-like", 'SAMPLE_ID']
+
 
 # MTHFD1L + TP53
 ensg <- "ENSG00000120254"
 symbol <- "MTHFD1L"
 
-expression_mutants <- as.numeric(cptac_brca_fpkm_data_complete[cptac_brca_fpkm_data_complete$Hugo_Symbol == symbol, colnames(cptac_brca_fpkm_data_complete) %in% tp53_mut_patients])
-expression_normal <- as.numeric(cptac_brca_fpkm_data_complete[cptac_brca_fpkm_data_complete$Hugo_Symbol == symbol, !colnames(cptac_brca_fpkm_data_complete) %in% tp53_mut_patients])
+expression_mutants <- as.numeric(cptac_brca_fpkm_data_complete[cptac_brca_fpkm_data_complete$Hugo_Symbol == symbol, 
+                                                               colnames(cptac_brca_fpkm_data_complete) %in% tp53_mut_patients])
+expression_normal <- as.numeric(cptac_brca_fpkm_data_complete[cptac_brca_fpkm_data_complete$Hugo_Symbol == symbol, 
+                                                              !colnames(cptac_brca_fpkm_data_complete) %in% tp53_mut_patients])
 tp53_expression_by_mut_group <- list("Mutation" = expression_mutants, "No Mutation" = expression_normal)
 boxplot(tp53_expression_by_mut_group, ylab = "Expression (FPKM)", 
         main = "MTHFD1L Expression By TP53 Mutation Status")
@@ -40,8 +60,10 @@ wilcox.test(expression_mutants, y = expression_normal)
 ensg <- "ENSG00000176890"
 symbol <- "TYMS"
 
-expression_mutants <- as.numeric(unlist(cptac_brca_fpkm_data[cptac_brca_fpkm_data$Hugo_Symbol == symbol, colnames(cptac_brca_fpkm_data) %in% pik3ca_mut_patients]))
-expression_normal <- as.numeric(unlist(cptac_brca_fpkm_data[cptac_brca_fpkm_data$Hugo_Symbol == symbol, !colnames(cptac_brca_fpkm_data) %in% pik3ca_mut_patients]))
+expression_mutants <- as.numeric(unlist(cptac_brca_fpkm_data[cptac_brca_fpkm_data$Hugo_Symbol == symbol, 
+                                                             colnames(cptac_brca_fpkm_data) %in% pik3ca_mut_patients]))
+expression_normal <- as.numeric(unlist(cptac_brca_fpkm_data[cptac_brca_fpkm_data$Hugo_Symbol == symbol, 
+                                                            !colnames(cptac_brca_fpkm_data) %in% pik3ca_mut_patients]))
 pik3ca_expression_by_mut_group <- list("Mutation" = expression_mutants, "No Mutation" = expression_normal)
 boxplot(pik3ca_expression_by_mut_group, ylab = "Expression (FPKM)", 
         main = "TYMS Expression By PIK3CA Mutation Status")
@@ -102,18 +124,20 @@ fix_expression_df <- function(expression_df, mutation_df, goi) {
   return(exp_df_m)
 }
 
-cptac_brca_fpkm_data_complete_tp53 <- fix_expression_df(cptac_brca_fpkm_data_complete_tp53, cptac_brca_tp53_mutation, "TP53")
-cptac_brca_fpkm_data_complete_pik3ca <- fix_expression_df(cptac_brca_fpkm_data_complete_pik3ca, cptac_brca_pik3ca_mutation, "PIK3CA")
+cptac_brca_fpkm_data_complete_tp53 <- fix_expression_df(cptac_brca_fpkm_data_complete_tp53, 
+                                                        cptac_brca_tp53_mutation, "TP53")
+cptac_brca_fpkm_data_complete_pik3ca <- fix_expression_df(cptac_brca_fpkm_data_complete_pik3ca, 
+                                                          cptac_brca_pik3ca_mutation, "PIK3CA")
 
 cptac_brca_fpkm_data_complete_tp53$TP53_Mut <- as.factor(cptac_brca_fpkm_data_complete_tp53$TP53_Mut)
 cptac_brca_fpkm_data_complete_pik3ca$PIK3CA_Mut <- as.factor(cptac_brca_fpkm_data_complete_pik3ca$PIK3CA_Mut)
 
 
 # Plot boxplot of each gene's expression across CPTAC samples, by gene of interest mutation status
-ggplot(cptac_brca_fpkm_data_complete_tp53, aes_string(x = "Hugo_Symbol", y = "FPKM", fill = "TP53_Mut")) + geom_boxplot() +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-ggplot(cptac_brca_fpkm_data_complete_pik3ca, aes_string(x = "Hugo_Symbol", y = "FPKM", fill = "PIK3CA_Mut")) + geom_boxplot() +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+ggplot(cptac_brca_fpkm_data_complete_tp53, aes_string(x = "Hugo_Symbol", y = "FPKM", fill = "TP53_Mut")) + 
+  geom_boxplot() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+ggplot(cptac_brca_fpkm_data_complete_pik3ca, aes_string(x = "Hugo_Symbol", y = "FPKM", fill = "PIK3CA_Mut")) + 
+  geom_boxplot() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
 # Split this by predicted upregulation/ predicted downregulation, so we can see how closely DepMap aligns
 pred_upregulat_tp53 <- c("AHCY", "DLD", "FTCD", "GLDC", "GSTP1", "MTHFD1", "MTHFD1L", "PSPH", "SHMT2", "TYMS")
@@ -139,3 +163,74 @@ ggplot(cptac_brca_fpkm_data_complete_pik3ca[cptac_brca_fpkm_data_complete_pik3ca
        aes_string(x = "Hugo_Symbol", y = "FPKM", fill = "PIK3CA_Mut")) + geom_boxplot() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
+
+#' Get the patients that have a mutated version of each gene of interest and add to the proteomic DF
+#' @param proteomic_df a CPTAC proteomic DF 
+#' @param mutation_df a CPTAC mutation DF
+#' @param goi the Hugo Symbol of a gene of interest
+fix_proteomic_df <- function(proteomic_df, mutation_df, goi) {
+  
+  prot_df$gene.name <- rownames(prot_df)
+  prot_df_m <- melt(proteomic_df)
+  colnames(proteomic_df_m) <- c("Hugo_Symbol", "Patient_ID", "Prot.Quant")
+  
+  print(head(prot_df_m))
+  
+  # Add mutation status of the GOI
+  status <- unlist(lapply(prot_df_m$Patient_ID, function(id) {
+    if(id %in% mutation_df$Tumor_Sample_Barcode) {return(1)}
+    else {return(0)}
+  }))
+  prot_df_m[,4] <- status
+  lab <- paste0(goi, "_Mut")
+  colnames(prot_df_m)[4] <- lab
+  
+  prot_df_m <- na.omit(prot_df_m)
+  
+  return(prot_df_m)
+}
+
+
+#' For the given target genes, does a Wilcoxon test to see if there
+#' is significant DE between the GOI mutated and non-mutated CPTAC-3 groups.
+#' Prints the target gene and the p-value of the Wilcoxon test, along with 
+#' the directionality of the effect
+#' @param cptac_df a "complete" FPKM data frame with mutational status appended
+#' @param goi the Hugo Symbol of a gene of interest
+#' @param label either "FPKM" or "Prot.Quant" to indicate what kind of expression
+#' we are looking at
+wilcox_of_targs <- function(cptac_df, goi, label) {
+  
+  targs <- unique(cptac_df$Hugo_Symbol)
+  pvals <- c()
+  
+  for (t in targs) {
+    print(paste("Target:", t))
+    
+    colname <- paste(goi, "Mut", sep = "_")
+    exp_mut <- as.numeric(cptac_df[(cptac_df$Hugo_Symbol == t) & (cptac_df[,colname] == 1), label])
+    exp_noMut <- as.numeric(cptac_df[(cptac_df$Hugo_Symbol == t) & (cptac_df[,colname] == 0), label])
+    
+    wilcox_res <- wilcox.test(exp_mut, exp_noMut)   # use default two-sided alternative
+    
+    pval <- wilcox_res$p.value
+    print(paste("Wilcoxon p-value:", pval))
+    pvals <- c(pvals, pval)
+    
+    if(mean(exp_mut) > mean(exp_noMut)) {print("Upregulation")}
+    else {print("Downregulation")}
+  }
+  return(list("Targets" = targs, "P.value" = pvals))
+}
+
+pvalues <- wilcox_of_targs(cptac_brca_fpkm_data_complete_tp53, "TP53", "FPKM")
+pvalues <- wilcox_of_targs(cptac_brca_proteomic_data_m, "TP53", "Prot.Quant")
+
+
+pvalues$Signif <- unlist(lapply(pvalues$P.value, function(x) ifelse(x < 0.05, 1, 0)))
+pvalues$ChipEat <- unlist(lapply(pvalues$Targets, function(x) ifelse(x %in% tp53_chipeat_targs, 1, 0)))
+
+pvalues <- as.data.frame(pvalues)
+pvalues <- pvalues[order(pvalues$P.value),]
+
+jac_res <- clujaccard(pvalues$ChipEat, pvalues$Signif, zerobyzero = NA)

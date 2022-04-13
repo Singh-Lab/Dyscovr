@@ -323,7 +323,7 @@ get_genes_with_most_cna_events <- function(cna_df, output_path, all_genes_id_con
 #' the sample IDs to their cancer type
 visualize_patients_perc_genes_amplif <- function(cna_df, panOrPer, clinical_df) {
   
-  cna_df <- apply(cna_df[,2:ncol(cna_df)], as.integer)
+  cna_df <- apply(cna_df[,2:ncol(cna_df)], MARGIN = c(1,2), FUN = as.integer)
   
   # Create a new T/F data frame that indicates whether the copy # is 3 or more
   cna_df_TF <- apply(cna_df[,2:ncol(cna_df)], MARGIN = c(1,2), function(x) {
@@ -354,16 +354,55 @@ visualize_patients_perc_genes_amplif <- function(cna_df, panOrPer, clinical_df) 
     }))
     cna_df_percT_df <- cna_df_percT_df[!is.na(cna_df_percT_df$cancer_type),]
     ggplot(cna_df_percT_df, aes(cna_df_percT)) + geom_histogram() + 
-      labs(x = "% of Genes with CNA >= 3", y = "Num. Patients with Mutation") + 
+      labs(x = "% of Genes with CNA >= 3", y = "Num. Patients") + 
       facet_wrap(~cancer_type, scales = "free")
   }
-  
-
 }
 
 clinical_df <- read.csv(paste(path, "clinical_wMutCounts.csv", sep = ""), header = TRUE,
                         check.names = FALSE)
 
+visualize_patients_perc_genes_amplif(pc_cna_df, "Per", clinical_df)
+
+
+
+############################################################
+# VISUALIZE PERCENTAGE OF SAMPLES WITH AMPLIFICATIONS IN GIVEN GENE
+############################################################
+#' Creates a series of pie charts showing the copy number percentages 
+#' across a given sample population
+#' that have a copy number of >= 3 across X percentage of genes
+#' @param cna_df a copy number alteration DF (samples are columns, genes are rows)
+visualize_patients_perc_genes_amplif <- function(cna_df) {
+  
+  vals <- as.numeric(unlist(cna_df[1,]))
+  freq_ampl <- lapply(unique(unlist(cna_df[1,])), function(x) return(length(vals[vals == x])))
+  names(freq_ampl) <- as.character(unique(unlist(cna_df[1,])))
+  freq_ampl_dt <- as.data.frame(freq_ampl, check.names = FALSE)
+  print(freq_ampl_dt)
+  
+  #pie(as.numeric(freq_ampl_dt[1,]), labels = names(freq_ampl_dt))
+  print(freq_ampl_dt[,which(colnames(freq_ampl_dt) == 2)])
+  # Sort into normal/ amplified/ deleted
+  bucket_df <- data.frame("Normal" = freq_ampl_dt[,which(colnames(freq_ampl_dt) == 2)],
+                          "Deleted" = sum(freq_ampl_dt[,which(colnames(freq_ampl_dt) %in% c(0, 1))]),
+                          "Amplified" =  sum(freq_ampl_dt[,which(!(colnames(freq_ampl_dt) %in% c(0, 1, 2)))]))
+  print(head(bucket_df))
+  pie(as.numeric(bucket_df[1,]), labels = names(bucket_df))
+}
+
+# In this case, get a CNA DF limited to only patients with NO PIK3CA mutation (our set for which we are 
+# evaluating TP53 mutation)
+cna_df_brca_noPIK3CAmut <- cna_df_brca[,which(unlist(lapply(colnames(cna_df_brca), function(x) 
+  unlist(strsplit(x, "-", fixed = TRUE))[1])) %in% brca_pik3ca_noMut_mn)]
+#rownames(cna_df_brca_noPIK3CAmut) <- cna_df[,1]
+
+# Now, we want to limit this to just the CNA status for PIK3CA among this sample population; even if
+# we remove patients with PIK3CA mutation, do they still have a PIK3CA amplification?
+cna_df_brca_noPIK3CAmut_pik3ca <- cna_df_brca_noPIK3CAmut[rownames(cna_df_brca_noPIK3CAmut) == "ENSG00000121879",]
+
+# Visualize how many of these samples with NO PIK3CA mutation have a PIK3CA amplification -- is it a high %?
+visualize_patients_perc_genes_amplif(cna_df_brca_noPIK3CAmut_pik3ca)
 
 
 ### IMPORT NECESSARY FILES ###

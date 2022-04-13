@@ -19,6 +19,7 @@
 # install.packages("meta", "metasens")
 # BiocManager::install("ComplexHeatmap")
 # BiocManager::install("pathview")
+# BiocManager::install("RCy3")
 library("gplots")
 library("pheatmap")
 library(ComplexHeatmap)
@@ -36,6 +37,7 @@ library(gclus)
 library(meta)
 library(metasens)
 library(metafor)
+library("RCy3")
 
 # Path to output files
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
@@ -221,7 +223,7 @@ fwrite(master_df_cna_corrected, paste(main_path, "Linear Model/TP53/Non-Tumor-No
 create_heat_map <- function(results_table) {
   
   matrix <- create_hm_input_matrix(results_table)
-  
+
   # Plot a default heatmap
   #col <- colorRampPalette(brewer.pal(10, "RdYlBu"))(256)
   #heatmap(matrix, scale = "none", col = col)
@@ -231,7 +233,7 @@ create_heat_map <- function(results_table) {
   hm <- heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
                   density.info = "none", dendrogram = "row", Colv = FALSE, 
                   Rowv = TRUE, key = TRUE, key.title = NA, key.xlab = "Beta") 
-  plot(hm)
+  #plot(hm)
   #heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
   #density.info = "none", labCol = "", dendrogram = c("row"), 
   #add.expr = text(x = seq_along(colnames(matrix)), 
@@ -311,49 +313,48 @@ create_heat_map(master_df_cna_corrected, main_path)
 dev.off()
 
 
-# Additional playing with clustering
-matrix <- create_heat_map(master_df_mut_corrected, main_path)
-hm <- heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
-                density.info = "none")
-
-row_clust <- hclust(dist(matrix, method = "euclidean"), method = 'ward.D2')
-plot(row_clust)
-h2_sort <- sort(cutree(row_clust, h = 2))
-plot(row_clust)
-abline(h = 2, col = "red2", lty = 2, lwd = 2)
-
-h2_sort_df <- as.data.frame(h22_sort)
-colnames(h2_sort_df)[1] <- "cluster"
-h2_sort_df$targ_gene <- rownames(h2_sort_df)
-
-dendrogram <- as.dendrogram(row_clust)
-cols_branches <- c("darkred", "forestgreen", "orange", "firebrick1", "yellow", 
-                   "deeppink1", "cyan2", "darkslategray", "chartreuse")
-# Set the colors of 9 branches
-dendrogram <- color_branches(dendrogram, k = 9, col = cols_branches)
-col_labels <- get_leaves_branches_col(dendrogram)
-#col_labels <- list("1" = "Serine glycine biosynthesis", "2" ="GABA-B receptor II signaling", 
-                  # "3" = "Fructose galactose metabolism/ Glycolysis", "4" = "N/A", 
-                  # "5" = "S-adenosylmethionine biosynthesis", "6" = "Sulfate assimilation", 
-                  # "7" = "Fructose galactose metabolism/ Androgen/etrogene/progesterone biosynthesis", 
-                  # "8" = "2-arachidonoylglycerol biosynthesis", "9" = "O-antigen biosynthesis")
-col_labels <- col_labels[order(order.dendrogram(dendrogram))]
-
-
-h2_sort_df$labels <- unlist(lapply(1:length(unique(h2_sort_df$cluster)), function(i) {
-  num_entries <- nrow(h2_sort_df[h2_sort_df$cluster == i,])
-  return(rep(col_labels[[i]], times = num_entries))
-}))
-h22_sort_df$colors <- unlist(lapply(1:length(unique(h2_sort_df$cluster)), function(i) {
-  num_entries <- nrow(h2_sort_df[h2_sort_df$cluster == i,])
-  return(rep(cols_branches[[i]], times = num_entries))
-}))
-
-
-heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none", density.info = "none",
-          Rowv = dendrogram, key.xlab = "Beta", RowSideColors = col_labels,
-          colRow = col_labels)
-
+#' Create a clustered heatmap with gene target clusters colored
+#' @param master_df_mut_corrected a master DF output from model
+#' @param height_thres a height threshold for defining clusters
+create_colored_heatmap <- function(master_df_mut_corrected, height_thres) {
+  matrix <- create_heat_map(master_df_mut_corrected)
+  hm <- heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
+                  density.info = "none")
+  
+  row_clust <- hclust(dist(matrix, method = "euclidean"), method = 'ward.D2')
+  plot(row_clust)
+  h_sort <- sort(cutree(row_clust, h = height_thres))
+  plot(row_clust)
+  abline(h = height_thres, col = "red2", lty = 2, lwd = 2)
+  
+  h_sort_df <- as.data.frame(h_sort)
+  colnames(h_sort_df)[1] <- "cluster"
+  h_sort_df$targ_gene <- rownames(h_sort_df)
+  
+  dendrogram <- as.dendrogram(row_clust)
+  cols_branches <- c("darkred", "forestgreen", "orange", "firebrick1", "yellow", 
+                     "deeppink1", "cyan2", "darkslategray", "chartreuse")
+  # Set the colors of 9 branches
+  dendrogram <- color_branches(dendrogram, k = length(row_clust), col = cols_branches)
+  col_labels <- get_leaves_branches_col(dendrogram)
+  #col_labels <- list("1" = "Serine glycine biosynthesis", "2" ="GABA-B receptor II signaling", 
+  # "3" = "Fructose galactose metabolism/ Glycolysis", "4" = "N/A", 
+  # "5" = "S-adenosylmethionine biosynthesis", "6" = "Sulfate assimilation", 
+  # "7" = "Fructose galactose metabolism/ Androgen/etrogene/progesterone biosynthesis", 
+  # "8" = "2-arachidonoylglycerol biosynthesis", "9" = "O-antigen biosynthesis")
+  col_labels <- col_labels[order(order.dendrogram(dendrogram))]
+  
+  leaf_cols <- as.data.frame(leaf_Colors(dendrogram))
+  leaf_cols$targ_gene <- rownames(leaf_cols)
+  colnames(leaf_cols)[1] <- "colors"
+  h_sort_df <- merge(h_sort_df, leaf_cols, by = "targ_gene")
+  h_sort_df <- h_sort_df[order(h_sort_df$cluster),]
+  
+  hm_col <- heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none", density.info = "none",
+            Rowv = dendrogram, key.xlab = "Beta", RowSideColors = col_labels,
+            colRow = col_labels)
+  plot(hm_col)
+}
 
 
 # Cluster when sorting the x-axis by order from another heat map (e.g. all BRCA)
@@ -692,8 +693,8 @@ grid::grid.draw(plt)
 compute_and_print_spearman <- function(results_table, ri_1, ri_2) {
   if((ri_1 %fin% results_table$R_i.name) & (ri_2 %fin% results_table$R_i.name)) {
     
-    target_genes <- unique(results_table$T_k.name)
-    
+    target_genes <- setdiff(unique(results_table$T_k.name), c(ri_1, ri_2))
+
     # Mini functions to get Betas/t-statistics for each target gene
     #' @param results_table the master DF 
     #' @param target_genes the list of target genes
@@ -707,12 +708,16 @@ compute_and_print_spearman <- function(results_table, ri_1, ri_2) {
           est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "statistic"]
         }
         if (length(est) == 0) {est <- 0}  # To ensure the lengths of the Beta vectors are the same
+        if(length(est) > 1) {est <- est[1]}
         return(est)
       }))
     }
     
     grp1_Betas <- get_values(results_table, target_genes, ri_1, "Betas")
     grp2_Betas <- get_values(results_table, target_genes, ri_2, "Betas")
+    
+    print(length(grp1_Betas))
+    print(length(grp2_Betas))
     
     # Get Betas spearman
     betas_spearman <- cor.test(grp1_Betas, grp2_Betas, method = "spearman")
@@ -1134,8 +1139,21 @@ patient_set_lumB <- intersect(read.table(paste0(main_path, "Patient Subsets/Lumi
 patient_set_basal <- intersect(read.table(paste0(main_path, "Patient Subsets/Basal_patient_ids.txt"), header = TRUE)[,1], patient_set)
 patient_set_her2 <- intersect(read.table(paste0(main_path, "Patient Subsets/HER2_patient_ids.txt"), header = TRUE)[,1], patient_set)
 
+patient_set_pc <- read.table(paste0(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt"), header = TRUE)[,1]
+
+blca_subtype <- TCGAquery_subtype(tumor = "BLCA")
+hnsc_subtype <- TCGAquery_subtype(tumor = "HNSC")
+blca_subtype$justPat <- unlist(lapply(blca_subtype$patient, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
+hnsc_subtype$patient <- as.character(hnsc_subtype$patient)
+hnsc_subtype$justPat <- unlist(lapply(hnsc_subtype$patient, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
+
+patient_set_blca <- intersect(patient_set_pc, blca_subtype$justPat)
+patient_set_hnsc <- intersect(patient_set_pc, hnsc_subtype$justPat)
+
+
 n_of_subtypes <- c(length(patient_set_lumA), length(patient_set_lumB), length(patient_set_basal), length(patient_set_her2))
-  
+n_of_subtypes <- c(length(patient_set), length(patient_set_blca), length(patient_set_hnsc))
+
 meta_input_tab_p53 <- create_meta_input_tab(master_df_list_p53, n_of_subtypes, "DDB2")
 meta_input_tab_p53 <- create_meta_input_tab(master_df_list_p53, n_of_subtypes, "SRD5A1")
 
@@ -1143,24 +1161,80 @@ meta_input_tab_p53 <- create_meta_input_tab(master_df_list_p53, n_of_subtypes, "
 #' @param meta_input_tab an input table for meta-analysis as created by helper function
 #' @param targ the external gene name of the target gene of interest
 perform_meta_analysis <- function(meta_input_tab, targ) {
-  ma_model <- rma(yi = as.numeric(meta_input_tab$tstat), 
-                  sei = as.numeric(meta_input_tab$std.error))
-  print(summary(ma_model))
-  
+  rma_model <- rma(yi = as.numeric(unlist(meta_input_tab$tstat)), 
+                  sei = as.numeric(unlist(meta_input_tab$std.error)))
+  print(summary(rma_model))
+
   # Make a forest plot 
-  forest(ma_model, slab = meta_input_tab$study)
+  forest(rma_model, slab = meta_input_tab$study)
   
   # Add details
   text(-10, -1.5, pos=4, cex=0.75, bquote(paste("RE Model (Q = ", 
-                                              .(formatC(ma_model$QE, digits=2, format="f")), ", df = ", .(ma_model$k - ma_model$p),
+                                              .(formatC(rma_model$QE, digits=2, format="f")), ", df = ", .(rma_model$k - rma_model$p),
                                               ", p = ", .(formatC(ma_model$QEp, digits=2, format="f")), "; ", I^2, " = ",
-                                              .(formatC(ma_model$I2, digits=1, format="f")), "%)")))
+                                              .(formatC(rma_model$I2, digits=1, format="f")), "%)")))
   # Add title
   grid.text(paste(targ, "Meta-Analysis"), .5, .8, gp=gpar(cex=1.5))
+  
+  return(rma_model)
 }
 
 perform_meta_analysis(meta_input_tab_p53, "DDB2")
 perform_meta_analysis(meta_input_tab_p53, "SRD5A1")
+
+
+#' Perform meta-analysis across a large gene set, getting a p-value for each gene of interest
+#' based on the given cancer types or subtypes.
+#' @param list_of_master_dfs a list of the master DFs with results we are interested
+#' in combining in our meta-analysis. These are already subsetted to only have results
+#' for one regulatory protein of interest. List names are the names of the subgroups.
+#' @param vect_of_n a vector the same length as the above list, with the number of 
+#' samples for each subgroup (n)
+#' @param vect_of_targets a vector of gene targets we are interested in doing a 
+#' meta-analysis on
+perform_meta_analysis_across_genes <- function(list_of_master_dfs, vect_of_n, 
+                                               vect_of_targets) {
+  output_df <- data.frame("gene.name" = vect_of_targets)
+  
+  out <- lapply(vect_of_targets, function(targ) {
+    input_tab <- create_meta_input_tab(list_of_master_dfs, vect_of_n, targ)
+    res <- perform_meta_analysis(input_tab, targ)
+    pval <- res$pval
+    estimate <- res$beta
+    return(data.frame("p.value" = pval, "estimate" = estimate))
+  })
+  out_df <- do.call(rbind, out)
+  output_df <- cbind(output_df, out_df)
+  
+  return(output_df)
+}
+
+target_gene_set <- intersect(lumA_metabol_p53$T_k.name, intersect(lumB_metabol_p53$T_k.name,
+                             intersect(basal_metabol_p53$T_k.name, her2_metabol_p53$T_k.name)))
+target_gene_set <- intersect(brca_metabol_p53$T_k.name, intersect(blca_metabol_p53$T_k.name,
+                                                                  hnsc_metabol_p53$T_k.name))
+
+brca_subtypes_meta_analysis_res <- perform_meta_analysis_across_genes(master_df_list_p53, n_of_subtypes,
+                                                                      target_gene_set)
+cancerTypes_meta_analysis_res <- perform_meta_analysis_across_genes(master_df_list_p53, n_of_subtypes,
+                                                                    target_gene_set)
+
+# Order by pval
+brca_subtypes_meta_analysis_res <- brca_subtypes_meta_analysis_res[order(brca_subtypes_meta_analysis_res$p.value),]
+cancerTypes_meta_analysis_res <- cancerTypes_meta_analysis_res[order(cancerTypes_meta_analysis_res$p.value),]
+
+# Add q-values
+brca_subtypes_meta_analysis_res$q.value <- qvalue(brca_subtypes_meta_analysis_res$p.value)$qvalue
+cancerTypes_meta_analysis_res$q.value <- qvalue(cancerTypes_meta_analysis_res$p.value)$qvalue
+
+# Visualize pval distribution
+hist(brca_subtypes_meta_analysis_res$p.value, main = "", xlab = "P-Value")
+hist(cancerTypes_meta_analysis_res$p.value, main = "", xlab = "P-Value")
+
+# Write to a file
+write.csv(brca_subtypes_meta_analysis_res, paste0(main_path, "Linear Model/TP53/Tumor_Only/eQTL/Meta-Analysis Results/brca_subtypes_metabolism_meta_analysis.csv"))
+write.csv(cancerTypes_meta_analysis_res, paste0(main_path, "Linear Model/TP53/Meta-Analysis Results/brca_blca_hnsc_metabolism_meta_analysis.csv"))
+
 
 ############################################################
 ############################################################
@@ -1312,12 +1386,13 @@ plot_cancer_enrichment(master_df_cna_sig, known_cancer_genes_table, tfcancer_df)
 dev.off()
 
 
-#' Function to plot the enrichment of cancer genes among the significant target genes
+#' Function to plot the enrichment of ChIP-eat targets among the significant target genes
 #' @param master_df a master DF produced from run_linear_model() that has q-values
 #' @param chipeat_targs a vector of known ChIP-eat targets for a gene of interest (master
 #' DF should already be subsetted to just this gene)
 #' @param goi a string denoting the gene-of-interest, for labeling graph
-plot_chipseq_enrichment <- function(master_df, chipeat_targs, goi) {
+#' @param bin_size if binning, the bin size (0 indicates no binning)
+plot_chipseq_enrichment <- function(master_df, chipeat_targs, goi, bin_size) {
   # Get all the target genes 
   target_hits <- unlist(master_df$T_k.name)
   print(length(target_hits))
@@ -1340,11 +1415,197 @@ plot_chipseq_enrichment <- function(master_df, chipeat_targs, goi) {
     frac_chipeat_vect <- c(frac_chipeat_vect, frac)
   }
   
-  plot(ranks[1:100], frac_chipeat_vect[1:100], pch = 16, 
-       main = paste("Enrichment of Significant Target Genes in", paste(goi, "ChIP-eat Targets")),
-       xlab = "Rank", ylab = "Fraction of Target Genes that are ChIP-eat Targets")
+  if(bin_size == 0) {
+    plot(ranks, frac_chipeat_vect, pch = 16, 
+         main = paste("Enrichment of Significant Target Genes in", paste(goi, "ChIP-eat Targets")),
+         xlab = "Rank", ylab = "Fraction of Target Genes that are ChIP-eat Targets")
+  } else {
+    #num_bins <- ceiling(length(ranks) / bin_size)
+    spl_vals <- split(frac_chipeat_vect, ceiling(seq_along(frac_chipeat_vect) / bin_size))
+    head(spl_vals)
+
+    spl_vals_df <- data.frame("vals" = frac_chipeat_vect)
+    grp_labs <- rep(1:length(spl_vals), each = bin_size)
+    num_grps <- length(unique(grp_labs))
+    while(length(grp_labs) > nrow(spl_vals_df)) {grp_labs <- grp_labs[1:length(grp_labs)-1]}
+    spl_vals_df$grp <- as.integer(grp_labs)
+    print(head(spl_vals_df))
+    
+    
+    spl_vals_means <- data.frame("grp" = as.integer(1:num_grps), 
+                                 "mean" = as.numeric(lapply(1:num_grps, function(i) 
+                                   mean(as.numeric(spl_vals_df[spl_vals_df$grp == i, 'vals'])))))
+    print(head(spl_vals_means))
+
+    ggplot(spl_vals_df[spl_vals_df$grp %in% 1:75,], mapping = aes(x = as.factor(grp), y = vals)) + geom_boxplot(fill="#69b3a2") + 
+      geom_point(data = spl_vals_means[spl_vals_means$grp %in% 1:75,], mapping = aes(x = grp, y = mean), color="red") +
+      geom_line(data = spl_vals_means[spl_vals_means$grp %in% 1:75,], mapping = aes(x = grp, y = mean, group=1)) +
+      xlab(paste("Group #, Bin Size:", bin_size)) + ylab("Fraction of Targets that are ChIP-eat Targets") +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+  }
+}
+  
+#' Use a one-sided Fisher's exact test/ Hypergeometric test to test for enrichment statistically
+#' @param master_df a master DF produced from run_linear_model() that has q-values
+#' @param known_targs a vector of known targets for a gene of interest (master
+#' DF should already be subsetted to just this gene); ex. ChIP-eat targets, HumanBase
+compute_statistical_enrichment <- function(master_df, known_targs) {
+  sig_targets <- unique(master_df[master_df$q.value < 0.2, 'T_k.name'])
+  nonsig_targets <- unique(master_df[master_df$q.value > 0.2, 'T_k.name'])
+  targets <- unique(master_df$T_k.name)
+  
+  num_sig_targets <- length(sig_targets)
+  num_nonsig_targets <- length(nonsig_targets)
+  
+  known_targs_i <- intersect(known_targs, targets)
+  notknown_targs_i <- setdiff(targets, known_targs)
+  
+  num_known_targets <- length(known_targs_i)
+  num_notknown_targets <- length(notknown_targs_i)
+
+  num_known_sig_targets <- length(intersect(sig_targets, known_targs_i))
+  num_known_nonsig_targets <- length(intersect(nonsig_targets, known_targs_i))
+  num_notknown_sig_targets <- length(intersect(sig_targets, notknown_targs_i))
+  num_notknown_nonsig_targets <- length(intersect(nonsig_targets, notknown_targs_i))
+  
+  contigency_table <- matrix(c(num_known_sig_targets, num_known_nonsig_targets,
+                               num_notknown_sig_targets, num_notknown_nonsig_targets),
+                             nrow = 2, ncol = 2)
+  print(contigency_table)
+  
+  fisher_res <- fisher.test(contigency_table, alternative = "greater")
+  print(fisher_res$p.value)
+  
+  return(fisher_res)
 }
 
+# Call function
+fisher_res_tp53_hb <- compute_statistical_enrichment(allgene_sixMostMut_p53, tp53_nw_targs)
+fisher_res_tp53_string <- compute_statistical_enrichment(allgene_sixMostMut_p53, tp53_string_nw_targs)
+
+
+#' Function to plot the enrichment of network targets among the significant target genes
+#' @param master_df a master DF produced from run_linear_model() that has q-values
+#' @param network_targs a vector of gene targets from HumanBase/ STRING for the given protein
+#' of interest in the given tissue
+#' @param goi a string denoting the gene-of-interest, for labeling graph
+#' @param bin_size if binning, the bin size (0 indicates no binning)
+plot_network_enrichment <- function(master_df, network_targs, goi, bin_size) {
+  # Combine all the target genes above the given threshold into one vector
+  target_hits <- unlist(master_df$T_k.name)
+  print(length(target_hits))
+
+  # Fill in a vector of 0 and 1 for each significant target hit to indicate if it 
+  # is a HumanBase
+  nw_vect <- unlist(lapply(target_hits, function(x) {
+    return(ifelse(x %fin% network_targs, 1, 0))
+  }))
+  
+  # Plot the enrichment (fraction of network genes at/ above given rank)
+  ranks <- 1:length(target_hits)
+  frac_nw_vect <- c()
+  count_of_nw_genes <- 0
+  for (i in 1:length(target_hits)) {
+    val_of_curr_tg <- nw_vect[i]
+    count_of_nw_genes <- count_of_nw_genes + val_of_curr_tg
+    frac <- count_of_nw_genes / i
+    frac_nw_vect <- c(frac_nw_vect, frac)
+  }
+  
+  if(bin_size == 0) {
+    p <- plot(ranks[1:100], frac_nw_vect[1:100], pch = 16, 
+         main = paste("Enrichment of Significant Target Genes in", paste(goi, "Network Targets")),
+         xlab = "Rank", ylab = "Fraction of Target Genes that are Network Targets")
+    
+  } else {
+    spl_vals <- split(frac_nw_vect, ceiling(seq_along(frac_nw_vect) / bin_size))
+    head(spl_vals)
+    
+    spl_vals_df <- data.frame("vals" = frac_nw_vect)
+    grp_labs <- rep(1:length(spl_vals), each = bin_size)
+    num_grps <- length(unique(grp_labs))
+    while(length(grp_labs) > nrow(spl_vals_df)) {grp_labs <- grp_labs[1:length(grp_labs)-1]}
+    spl_vals_df$grp <- as.integer(grp_labs)
+    print(head(spl_vals_df))
+    
+    
+    spl_vals_means <- data.frame("grp" = as.integer(1:num_grps), 
+                                 "mean" = as.numeric(lapply(1:num_grps, function(i) 
+                                   mean(as.numeric(spl_vals_df[spl_vals_df$grp == i, 'vals'])))))
+    print(head(spl_vals_means))
+    
+    p <- ggplot(spl_vals_df[spl_vals_df$grp %in% 1:15,], mapping = aes(x = as.factor(grp), y = vals)) + geom_boxplot(fill="#69b3a2") + 
+      geom_point(data = spl_vals_means[spl_vals_means$grp %in% 1:15,], mapping = aes(x = grp, y = mean), color="red") +
+      geom_line(data = spl_vals_means[spl_vals_means$grp %in% 1:15,], mapping = aes(x = grp, y = mean, group=1)) +
+      xlab(paste("Group #, Bin Size:", bin_size)) + ylab("Fraction of TP53 STRING NW Targets") +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 12),
+            axis.text.y = element_text(size = 12),
+            axis.title = element_text(size = 12, face = "bold"))
+  
+  }
+  return(p)
+}
+
+goi <- "TP53"
+goi <- "PIK3CA"
+
+# Import the network interaction files from HumanBase for the genes of interest
+nw_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Network_Data/"
+tp53_mamm_epi_nw <- read.table(paste0(nw_path, "hb_mammary_epithelium_tp53_network.txt"), 
+                               header = TRUE, sep = ",")
+tp53_mamm_gl_nw <- read.table(paste0(nw_path, "hb_mammary_gland_tp53_network.txt"), 
+                              header = TRUE, sep = ",")
+pik3ca_mamm_epi_nw <- read.table(paste0(nw_path, "hb_mammary_epithelium_pik3ca_network.txt"), 
+                                 header = TRUE, sep = ",")
+pik3ca_mamm_gl_nw <- read.table(paste0(nw_path, "hb_mammary_gland_pik3ca_network.txt"), 
+                                header = TRUE, sep = ",")
+
+# Get rid of any white space
+tp53_mamm_epi_nw <- as.data.frame(lapply(tp53_mamm_epi_nw, trimws))
+tp53_mamm_gl_nw <- as.data.frame(lapply(tp53_mamm_gl_nw, trimws))
+pik3ca_mamm_epi_nw <- as.data.frame(lapply(pik3ca_mamm_epi_nw, trimws))
+pik3ca_mamm_gl_nw <- as.data.frame(lapply(pik3ca_mamm_gl_nw, trimws))
+
+# Limit the interactions to just gois
+tp53_mamm_epi_nw <- tp53_mamm_epi_nw[(tp53_mamm_epi_nw$GENE1 == "TP53") | (tp53_mamm_epi_nw$GENE2 == "TP53"),]
+tp53_mamm_gl_nw <- tp53_mamm_gl_nw[(tp53_mamm_gl_nw$GENE1 == "TP53") | (tp53_mamm_gl_nw$GENE2 == "TP53"),]
+pik3ca_mamm_epi_nw <- pik3ca_mamm_epi_nw[(pik3ca_mamm_epi_nw$GENE1 == "TP53") | (pik3ca_mamm_epi_nw$GENE2 == "PIK3CA"),]
+pik3ca_mamm_gl_nw <- pik3ca_mamm_gl_nw[(pik3ca_mamm_gl_nw$GENE1 == "TP53") | (pik3ca_mamm_gl_nw$GENE2 == "PIK3CA"),]
+
+# Limit the interactions to just those above a specific confidence threshold
+conf_thres <- 0.5
+
+tp53_mamm_epi_nw_sig <- tp53_mamm_epi_nw[tp53_mamm_epi_nw$WEIGHT > conf_thres,]
+tp53_mamm_gl_nw_sig <- tp53_mamm_gl_nw[tp53_mamm_gl_nw$WEIGHT > conf_thres,]
+pik3ca_mamm_epi_nw_sig <- pik3ca_mamm_epi_nw[pik3ca_mamm_epi_nw$WEIGHT > conf_thres,]
+pik3ca_mamm_gl_nw_sig <- pik3ca_mamm_gl_nw[pik3ca_mamm_gl_nw$WEIGHT > conf_thres,]
+
+# Get a union of the significant targets for each goi
+tp53_nw_targs <- unique(c(tp53_mamm_epi_nw_sig$GENE1, tp53_mamm_epi_nw_sig$GENE2, 
+                          tp53_mamm_gl_nw_sig$GENE1, tp53_mamm_gl_nw_sig$GENE2))
+tp53_nw_targs <- tp53_nw_targs[tp53_nw_targs != "TP53"]
+pik3ca_nw_targs <- unique(c(pik3ca_mamm_epi_nw_sig$GENE1, pik3ca_mamm_epi_nw_sig$GENE2, 
+                            pik3ca_mamm_gl_nw_sig$GENE1, pik3ca_mamm_gl_nw_sig$GENE2))
+pik3ca_nw_targs <- pik3ca_nw_targs[pik3ca_nw_targs != "PIK3CA"]
+
+# Call function
+plot_network_enrichment(lumA_allgenes_mut_p53, tp53_nw_targs, "TP53", 10)
+
+
+# Import STRING network targets (top 100)
+tp53_string_nw_targs <- read.table(paste0(nw_path, "TP53_interactors_string_top100.txt"),
+                             header = FALSE)[,1]
+pik3ca_string_nw_targs <- read.table(paste0(nw_path, "PIK3CA_interactors_string_top100.txt"),
+                                   header = FALSE)[,1]
+
+# Call function
+plot_network_enrichment(allgene_sixMostMut_p53, tp53_string_nw_targs, "TP53", 10)
+
+
+# Create a stacked plot with both enrichments on the same plot
+tp53_hb_plt <- plot_network_enrichment(allgene_sixMostMut_p53, tp53_nw_targs, "TP53", 10)
+tp53_string_plt <- plot_network_enrichment(allgene_sixMostMut_p53, tp53_string_nw_targs, "TP53", 10)
+ggarrange(tp53_hb_plt, tp53_string_plt, labels = c("A", "B"), ncol = 1, nrow = 2)
 
 ############################################################
 #### ANNOTATE WHETHER TF REGULATION PREDICTIONS ALIGN WITH

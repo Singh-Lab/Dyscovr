@@ -18,7 +18,7 @@ main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Ou
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
 
 input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
-#input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TCGA Data (ALL)/"
+#input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/"
 
 
 # Import clinical data
@@ -28,6 +28,9 @@ clinical_df_tnm <- read.csv(paste(input_path, "clinical_data_subset.csv", sep = 
 # Non-Tumor-Normal Matched
 clinical_df_ntnm <- read.csv(paste(input_path, "clinical_wMutCounts.csv", sep = ""), 
                         header = TRUE, check.names = FALSE)
+# For missense + nonsense 
+clinical_df_ntnm <- read.csv(paste(input_path, "clinical_data_subset_w_MN_MutCounts.csv", sep = ""), 
+                             header = TRUE, check.names = FALSE)
 
 is_brca <- TRUE
 # is_brca <- FALSE

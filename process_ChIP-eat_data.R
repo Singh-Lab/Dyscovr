@@ -138,3 +138,32 @@ get_chipeat_targets <- function(bed_comb_file, prot, output_path) {
 
 targets <- get_chipeat_targets(bed_comb_table, protein_name)
 
+
+############################################################
+# ANNOTATE TARGETS USING CHIPSEQANNO PACKAGE
+############################################################
+#' Create a table that, for each ChIP-eat target for the given gene,
+#' records the number of peaks associated with that gene
+#' @param anno_df a ChIPpeakAnno annotation table
+get_num_peaks_per_targ <- function(anno_df) {
+  # Filter out the rows that have "NA" for the target symbol
+  anno_df_filt <- anno_df[!is.na(anno_df$symbol),]
+  
+  unique_targs <- unique(anno_df_filt$symbol)
+  
+  outdf <- data.frame("target" = unique_targs)
+  outdf$num_peaks <- unlist(lapply(unique_targs, function(targ) {
+    return(nrow(anno_df_filt[anno_df_filt$symbol == targ,]))
+  }))
+  print(outdf)
+  return(outdf)
+}
+
+# Import the output file from ChIPpeakAnno
+anno_table <- read.csv(paste0(output_path, "TP53_peak_annotation.csv"), header = TRUE, check.names = FALSE)
+
+# Run the function
+num_peaks_tab <- get_num_peaks_per_targ(anno_table)
+
+# Write this to a file
+write.csv(num_peaks_tab, paste0(output_path, "TP53_num_peaks_per_targ.csv"))

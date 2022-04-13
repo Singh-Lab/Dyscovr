@@ -14,6 +14,7 @@ library("gplots")
 library(ggplot2)
 
 path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Somatic_Mut_Data/"
+# path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Somatic_Mut_Data/"
 
 ##############################################################################
 ### BRCA DATA ###

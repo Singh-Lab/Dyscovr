@@ -162,6 +162,7 @@ get_mutant_patients <- function(mutation_regprot_df, regprot_name) {
 mutation_regprot_df <- as.data.frame(mutation_regprot_df)
 foxa1_mutant_patients <- get_mutant_patients(mutation_regprot_df, "FOXA1")
 tp53_mutant_patients <- get_mutant_patients(mutation_regprot_df, "P53")
+pik3ca_mutant_patients <- get_mutant_patients(mutation_regprot_df, "PK3CA")
 
 # Limit the expression data frame to just cancer samples
 express_df_cancer_counts <- expression_df_counts[,!(grepl("-11", colnames(expression_df_counts)))]
@@ -187,6 +188,36 @@ get_expression_by_mut_group <- function(express_df_cancer, mutant_patients, ensg
   expression_normal <- as.numeric(express_df_cancer[rownames(express_df_cancer) == ensg, !(colnames(express_df_cancer) %in% mutant_patients)])
   return(list("mutants" = expression_mutants, "normal" = expression_normal))
 }
+
+#' Get the expression in each of the functional copy groups 
+#' @param express_df_cancer a data frame with expression values (columns are patient IDs-sample IDs, 
+#' rows are ENSG IDs), subsetted to only cancer samples
+#' @param funct_copy_dict a two-column data frame with sample ID and # of functional copies
+#' @param ensg the ENSG ID of the target gene of interest
+#' @param ts_or_onco a character value indicating whether or not this is a "tumor_suppressor" 
+#' or an "oncogene"
+get_expression_by_fnc <- function(express_df_cancer, funct_copy_dict, ensg, ts_or_onco) {
+  funct_copy_list <- list()
+  num_funct_copy_options <- length(unique(funct_copy_dict$Num.Functional.Copies))
+  for (i in 1:num_funct_copy_options) {
+    samp_ids <- funct_copy_dict[funct_copy_dict$Num.Functional.Copies == (i-1), 'sample.id']
+    funct_copy_list[[i]] <- as.numeric(express_df_cancer[rownames(express_df_cancer) == ensg, colnames(express_df_cancer) %in% samp_ids])
+  }
+  if(ts_or_onco == "tumor_suppressor") {
+    grouped_list <- list("Full KO" = funct_copy_list[[1]], "Partial KO" = funct_copy_list[[2]],
+                         "Normal/Amp" = unlist(funct_copy_list[3:length(funct_copy_list)]))
+    #grouped_list <- list("Full/Partial KO" =  c(funct_copy_list[[1]], funct_copy_list[[2]]),
+                          #"Normal/Amp" = unlist(funct_copy_list[3:length(funct_copy_list)]))
+  } else if (ts_or_onco == "oncogene") {
+    grouped_list <- list("Full or Partial KO" = c(funct_copy_list[[1]], funct_copy_list[[2]]), "Normal" = funct_copy_list[[3]],
+                         "Amplification" = unlist(funct_copy_list[4:length(funct_copy_list)]))
+    
+  } else {print("Must supply either 'tumor_suppressor' or 'oncogene'.")}
+  return(grouped_list)
+}
+
+expression_tmm <- get_expression_by_fnc(expression_df_tmm, output_df[,c("sample.id", "Num.Functional.Copies")], ensg, "tumor_suppressor")
+boxplot(expression_tmm, ylab = "Expression (FPKM)", main = paste("CTSA", paste("Expression By", paste("TP53", "FNC Status"))))
 
 
 ### MAKE VISUALIZATIONS ###

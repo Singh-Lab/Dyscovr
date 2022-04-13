@@ -8,6 +8,7 @@
 
 library(ggplot2)
 library(gplots)
+library(stats)
 library(RColorBrewer)
 library(ggVennDiagram)
 library("gage")
@@ -24,6 +25,9 @@ keytypes(org.Hs.eg.db)
 
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
+
+output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Output Visualizations/BRCA/GSEA/"
+#output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Output Visualizations/Pan-Cancer/GSEA/"
 
 
 # Generalized ID conversion table from BiomaRt

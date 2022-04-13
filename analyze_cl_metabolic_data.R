@@ -210,7 +210,7 @@ print_signif_corr <- function(mut_df) {
   for(i in 1:nrow(mut_df)) {
     if(grepl("TRUE", mut_df$Signif.Hit[i])) {
       true_false_vect <- as.integer(as.logical(unlist(strsplit(mut_df$Signif.Hit[i], ",", fixed = TRUE))))
-      str <- "TP53 mutation correlated with"
+      str <- "Mutation correlated with"
       estimate <- mut_df$t.statistic[i]
       if(estimate > 0) {str <- paste(str, "upregulation of")}
       else {str <- paste(str, "downregulation of")}
@@ -236,5 +236,42 @@ length(intersect(metabolism_gene_list_ensg, unlist(strsplit(as.character(unlist(
 # For TP53; 141 genes of 166 genes from paper; 1837 metabolic genes from Recon3D (there are 25 genes here that were not tested in the metabolism model)
 
 
+################################################################
+# PLOT ENRICHMENT IN GENES RELATED TO TOP HIT METABOLITES
+################################################################
+#' For the top hits of a given protein-of-interest, plot an 
+#' enrichment curve for whether these hits are associated with 
+#' a significantly dysregulated metabolite from this paper
+#' @param master_df a master DF produced from our model, subsetted
+#' to the given protein of interest
+#' @param mut_df a metabolism DF for a particular protein of interest 
+#' @param thres a qvalue threshold for significance
+plot_target_assoc_w_metabol_enrichment <- function(master_df, mut_df, thres) {
+  master_df_sig <- master_df[master_df$q.value < thres,]
+  
+  sig_hits <- unique(unlist(master_df_sig$T_k.name))
+  
+  rank <- 1:length(sig_hits)
+  
+  cumulat_val <- 0
+  enrich_vals <- c()
+  
+  for(i in 1:length(sig_hits)) {
+    sig_hit <- sig_hits[i]
+    if(sig_hit %in% (unlist(lapply(unname(mut_df$Assoc.Gene.Names), function(x) 
+      unlist(strsplit(x, ",", fixed = TRUE)))))) {
+      cumulat_val <- cumulat_val + 1
+    }
+    frac <- cumulat_val / i
+    print(frac)
+    enrich_vals <- c(enrich_vals, frac)
+  }
+  
+  plot(rank, enrich_vals, main = "Enrichment of Significant Target Genes in P53-Assoc. Metabolic Regulators from Li. et al. (2019)",
+       xlab = "Rank", ylab = "Fraction of Target Genes that are Signif. Metabolic Reg.", pch = 19)
+  
+}
+
+plot_target_assoc_w_metabol_enrichment(master_df_mut, tp53_mut_df, 0.2)
 
 

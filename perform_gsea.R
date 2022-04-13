@@ -88,6 +88,7 @@ perform_gsea <- function(results_table, n, all_genes_id_conv, output_path) {
         
       terms <- res@result$Description[res@result$enrichmentScore > 0][1:n]
       terms <- terms[!is.na(terms)]
+      print(head(terms))
       if (length(terms) > 0) {
         termIDs <- sapply(terms, function(x) {res@result$ID[which(res@result$Description == x)]})
         pdf(file = paste0(plotdir, regprot,'_gse_',gst,'_gseaCurve_top', n, 'terms_up.pdf'),
@@ -98,6 +99,7 @@ perform_gsea <- function(results_table, n, all_genes_id_conv, output_path) {
       }
       terms <- res@result$Description[res@result$enrichmentScore < 0][1:n]
       terms <- terms[!is.na(terms)]
+      print(head(terms))
       if (length(terms) > 0) {
         termIDs <- sapply(terms, function(x) {res@result$ID[which(res@result$Description == x)]})
         pdf(file = paste0(plotdir, regprot,'_gse_',gst,'_gseaCurve_top', n, 'terms_down.pdf'),

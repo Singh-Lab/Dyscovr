@@ -64,8 +64,11 @@ write.csv(sample_sheet, paste(path, "Expression_Data/Counts/gdc_sample_sheet_tot
 # Import the GDC sample sheet for file conversions
 sample_sheet <- read.csv(paste(path, "Expression_Data/Counts/gdc_sample_sheet.csv", sep = ""), header = TRUE, 
                          check.names = FALSE, row.names = 1)
+#sample_sheet <- read.csv(paste(path, "Expression_Data/Counts/gdc_sample_sheet_total.csv", sep = ""), header = TRUE, 
+                         #check.names = FALSE, row.names = 1)
 #sample_sheet <- read.csv(paste(path, "Expression_Data/FPKM/gdc_sample_sheet.csv", sep = ""), header = TRUE, 
 #check.names = FALSE, row.names = 1)
+
 sample_sheet$`File Name` <- unlist(lapply(sample_sheet$`File Name`, function(x) 
   paste(unlist(strsplit(x, ".", fixed = TRUE))[1:3], collapse = ".")))
 
@@ -186,8 +189,9 @@ list_of_ct_targets <- lapply(list_of_ct_targets, distinct)
 group_by_mutation_status <- function(targets_sub, prot, mutation_df) {
   
   # Get the patients with/ without a mutation in the given protein
-  mutation_df_sub <- mutation_df[rownames(mutation_df) == prot,]
-  patients_mut <- colnames(mutation_df_sub[,(mutation_df_sub[1,] > 0)])
+  mutation_df_sub <- mutation_df[mutation_df$Gene_Symbol == prot, 2:ncol(mutation_df)]
+  patients_mut <- colnames(mutation_df_sub)[which(mutation_df_sub[1,] > 0)]
+  print(colnames(mutation_df_sub)[which(mutation_df_sub[1,] > 0)])
   #patients_nonmut <- setdiff(colnames(mutation_df_sub), patients_mut)
   
   # Add these new groups to the edgeR targets DF under the 'group' label 
@@ -205,13 +209,11 @@ prot_of_interest <- "TP53"  # TP53
 # prot_of_interest <- "PIK3CA"  # PIK3CA
 
 # Import the mutation count DF
-mut_count_matrix <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Mutation/Mutation Count Matrices/mut_count_matrix_missense.csv",
+mut_count_matrix <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_nonsense_CancerOnly_IntersectPatients.csv",
                          header = TRUE, check.names = FALSE, row.names = 1)
-# Adjust the column names to keep just the patient ID and not the sample ID
-colnames(mut_count_matrix) <- unlist(lapply(colnames(mut_count_matrix), function(x)
-  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
 
 targets_sub3_groupedByTP53Mut <- group_by_mutation_status(targets_sub3, prot_of_interest, mut_count_matrix)
+targets_sub3_groupedByTP53Mut <- distinct(targets_sub3_groupedByTP53Mut)
 
 ############################################################
 ### USE EDGER FOR COUNT NORMALIZATION (TMM) ###
@@ -315,33 +317,122 @@ lapply(d_list, visualize_dispersion)
 #' differences between the DE genes by mutation status of a 
 #' given protein (e.g. TP53).  
 #' @param d edgeR output data structure to visualize
-visualize_de_by_mut_status <- function(d) {
+#' @param target_group an optional vector of gene ensg IDs of interest (e.g. metabolic genes)
+#' @param method BH or Qvalue, to denote our MHT correction method
+#' @param thres an adjusted p/ qvalue threshold for significance
+#' @param an ID conversion table from BioMart
+visualize_de_by_mut_status <- function(d, target_group, method, thres, all_genes_id_conv) {
   
+  # Subset to the target group
+  d_rownames <- unlist(lapply(unlist(rownames(d$counts)), function(x) 
+    unlist(strsplit(x, ".", fixed = TRUE))[1]))
+  d <- d[which(d_rownames %in% target_group),]
+
   d <- visualize_dispersion(d)
   
   # Get the DE genes across groups (1 is mutated, 0 is not mutated)
-  et <- exactTest(d)
-  topTags <- topTags(et, n = 15000, adjust.method = "BH", p.value = 0.05)
-  print(topTags)
-  de1 <- decideTestsDGE(et, adjust.method = "BH", p.value = 0.05)
-  print(summary(de1))
+  #et <- exactTest(d)
+  count_norm <- cpm(d)
+  count_norm <- as.data.frame(count_norm)
+
+  conditions <- d$samples[, c("description", "group")]
+
+  # Run the Wilcoxon rank-sum test for each gene
+  pvalues <- sapply(1:nrow(count_norm), function(i){
+    data <- cbind.data.frame(gene.exp = as.numeric(t(count_norm[i,])), 
+                             mut.stat = conditions$group)
+    #print(head(data))
+    p <- wilcox.test(gene.exp~mut.stat, data)$p.value
+    return(p)
+  })
+  pval_df <- data.frame("gene" = unlist(lapply(rownames(count_norm), function(x)
+    unlist(strsplit(x, ".", fixed = TRUE))[1])), "Pvalue" = pvalues)  
+  print(head(pval_df))
   
-  # Adjust the topTags table
-  rownames(topTags$table) <- unlist(lapply(rownames(topTags$table), function(x) 
-    unlist(strsplit(as.character(x), ".", fixed = TRUE))[1]))
-  print(head(topTags$table))
-  topTags$table$gene.name <- unlist(lapply(rownames(topTags$table), function(ensg)
-    paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == ensg, 'external_gene_name'])), collapse = ";")))
+  if(method == "BH") {
+    topTags <- topTags(et, n = 10000, adjust.method = "BH", p.value = thres)
+    #print(topTags)
+    de1 <- decideTestsDGE(et, adjust.method = "BH", p.value = thres)
+    print(summary(de1))
+    
+    # Adjust the topTags table
+    rownames(topTags$table) <- unlist(lapply(rownames(topTags$table), function(x) 
+      unlist(strsplit(as.character(x), ".", fixed = TRUE))[1]))
+    print(head(topTags$table))
+    topTags$table$gene.name <- unlist(lapply(rownames(topTags$table), function(ensg)
+      paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == ensg, 
+                                            'external_gene_name'])), collapse = ";")))
+    
+    return(topTags)
+  } 
   
-  return(topTags)
+  else if(method == "Qvalue") {
+    # Alternatively, add a qvalue and do the filtering this way
+    #et_table <- et$table
+    #qobj <- qvalue(et_table$PValue)
+    #et_table$QValue <- qobj$qvalues
+    
+    # Add gene names
+    #rownames(et_table_sub) <- unlist(lapply(rownames(et_table_sub), function(x) 
+      #unlist(strsplit(x, ".", fixed = TRUE))[1]))
+    #et_table_sub$gene.name <- unlist(lapply(rownames(et_table_sub), function(ensg)
+      #paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == ensg, 
+                                            #'external_gene_name'])), collapse = ";")))
+    #print(head(et_table_sub))
+    #return(et_table_sub)
+    
+    pval_df <- na.omit(pval_df)
+    pval_df <- pval_df[!(is.nan(pval_df$Pvalue) | is.infinite(pval_df$Pvalue)),]
+    print(range(pval_df$Pvalue))
+    print(length(pval_df$Pvalue))
+    print(hist(pval_df$Pvalue))
+    print(as.numeric(pval_df$Pvalue))
+    return(pval_df)
+    qobj <- qvalue(as.numeric(pval_df$PValue))
+    pval_df$QValue <- qobj$qvalues
+    
+    pval_df_sub <- pval_df[pval_df$QValue < thres, ]
+    
+    # Add gene names
+    pval_df_sub$gene.name <- unlist(lapply(rownames(pval_df_sub), function(ensg)
+      paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == ensg, 
+                                            'external_gene_name'])), collapse = ";")))
+    print(head(pval_df_sub))
+    return(pval_df_sub)
+  }
+  
+  else {
+    print("Only implemented for BH and Qvalue")
+    return(NA)
+  }
 }
 
 
-topHits_tp53 <- visualize_de_by_mut_status(d_tp53)
+topHits_tp53 <- visualize_de_by_mut_status(d_tp53, metabolism_gene_list_ensg, "Qvalue", 0.2, all_genes_id_conv)
 # topHits_pik3ca <- visualize_de_by_mut_status(d_pik3ca)
 
 # Or, if we are looking pan-cancer, apply to each item in list
 lapply(d_list, visualize_de_by_mut_status)
+
+metabolism_gene_list_ensg <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/metabolism_gene_list_ensg.txt", 
+                                        header = TRUE)[,1]
+metabolism_gene_list <- unlist(lapply(metabolism_gene_list_ensg, function(x) 
+  paste(unique(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
+                                 'external_gene_name']), collapse = ";")))
+
+topHits_tp53 <- visualize_de_by_mut_status(d_tp53, metabolism_gene_list_ensg)
+
+# By subtype
+d$samples$description <- unlist(lapply(d$samples$description, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
+d_lumA <- d[,which(unlist(d$samples$description) %in% patient_set_lumA)]
+d_lumB <- d[,which(unlist(d$samples$description) %in% patient_set_lumB)]
+d_basal <- d[,which(unlist(d$samples$description) %in% patient_set_basal)]
+d_her2 <- d[,which(unlist(d$samples$description) %in% patient_set_her2)]
+
+topHits_tp53_lumA <- visualize_de_by_mut_status(d_lumA, metabolism_gene_list_ensg, "Qvalue", 0.2, all_genes_id_conv)
+topHits_tp53_lumB <- visualize_de_by_mut_status(d_lumB, metabolism_gene_list_ensg, "Qvalue", 0.2, all_genes_id_conv)
+topHits_tp53_basal <- visualize_de_by_mut_status(d_basal, metabolism_gene_list_ensg, "Qvalue", 0.2, all_genes_id_conv)
+topHits_tp53_her2 <- visualize_de_by_mut_status(d_her2, metabolism_gene_list_ensg, "Qvalue", 0.2, all_genes_id_conv)
 
 
 #' Visualize the top DE genes by mutation status of multiple proteins of interest using a heat map
@@ -492,6 +583,7 @@ vd_pik3ca <- venn.diagram(list(tophits_pik3ca, logFC_matrix_metabolism$PIK3CA.lo
                         fontfamily = "sans", cat.cex = 2, cat.fontface = "bold", cat.fontfamily = "sans")
 grid::grid.draw(vd_pik3ca)
 
+
 ############################################################
 ### WRITE NORMALIZED RESULTS TO FILES ###
 ############################################################
@@ -512,16 +604,27 @@ for (i in 1:length(d_list)) {
 # Also, merge TMM-normalized expression and samples into "master files" and write these as well
 tmm_list <- lapply(tmm_list, as.data.frame)
 tmm_list <- lapply(tmm_list, tibble::rownames_to_column)
+
+# Optionally, limit to only cancer samples
+tmm_list_to <- lapply(tmm_list, function(x) x[,c(1, which(grepl("-0", colnames(x)[2:ncol(x)])))])
+# Currently filtering non-TCGA data types doing this; may want to fix later
+tmm_list_to <- Filter(function(x) typeof(x) == "list", tmm_list_to)
+
+# Optionally, filter each by SD < 1
+tmm_list_filt <- lapply(tmm_list, filter_by_sd)
+tmm_list_to_filt <- lapply(tmm_list_to, filter_by_sd)
+
 tmm_normalized_full <- tmm_list %>% purrr::reduce(full_join, by = 'rowname')
 rownames(tmm_normalized_full) <- tmm_normalized_full$rowname
 tmm_normalized_full <- tmm_normalized_full[,2:ncol(tmm_normalized_full)]
 write.csv(tmm_normalized_full, paste(output_path, "ALL_CT_tmm_normalized_expression_counts.csv", sep = ""))
 
-
 samples_list <- lapply(d_list, function(d) return(as.data.frame(d$samples)))
 samples_full <- do.call(rbind, samples_list)
 write.csv(samples_full, paste(output_path, "ALL_CT_tmm_normalized_expression_samples.csv", sep = ""))
 
+samples_full_to <- samples_full[grepl("-0", samples_full$description),]
+write.csv(samples_full_to, paste(output_path, "ALL_CT_tmm_normalized_expression_samples_TO.csv", sep = ""))
 
 ############################################################
 ############################################################
@@ -661,6 +764,10 @@ filter_by_sd <- function(expression_df) {
 
 expression_dataframe_filt <- filter_by_sd(expression_dataframe)
 
+# Or, do this on each cancer type individually
+
+
+write.csv(expression_dataframe_filt, paste0(output_path, "ALL_tmm_normalized_expression_filtByExpr_SDGr1.csv"))
 
 ############################################################
 ############################################################
@@ -749,8 +856,6 @@ expression_dataframe_counts_minAvg10_perCt <- as.data.frame(filter_per_ct(patien
 expression_dataframe_counts_minMed10_perCt <- as.data.frame(filter_per_ct(patient_cancer_mapping,
                                                             expression_dataframe_counts_tcga,
                                                             "Med", 10))
-
-# Remove any entirely NA rows
 
 
 write.csv(expression_dataframe_counts_minAvg10_perCt, paste0(output_path, "expression_counts_DF_mean_Gr10_perCt.csv"))

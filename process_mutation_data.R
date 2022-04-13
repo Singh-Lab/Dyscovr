@@ -94,12 +94,12 @@ concavity_binding_site_df <- read.csv(paste(path, "Saved Output Data Files/ConCa
 ############################################################
 # Upload MAF file of interest (do not merge mutation types to "Mutation")
 maf_filename <- paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/TCGA.BRCA.muse.b8ca5856-9819-459c-87c5-94e91aca4032.DR-10.0.somatic.maf", sep = "")
-# maf_filename <- paste(path, "Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/TCGA.Aggregate.muse.aggregated.somatic.maf", sep = "")
+# maf_filename <- paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/TCGA.Aggregate.muse.aggregated.somatic.maf", sep = "")
 # maf_file <- import.MAF(maf_filename, sep = "\t", is.TCGA = TRUE, merge.mutation.types = FALSE)
   # This will return the MAF file in TRONCO format; set to.TRONCO to FALSE to import as DF
 # Alternatively, upload each individual MAF file for each cancer type to separately filter
   # hypermutators by cancer type
-maf_filenames <- list.files(paste(path, "Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/Individual Pan-Cancer MAF Files/", sep = ""), pattern = ".somatic")
+maf_filenames <- list.files(paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/Individual Pan-Cancer MAF Files/", sep = ""), pattern = ".somatic")
 
 maf_file_df_unfilt <- import.MAF(maf_filename, sep = "\t", is.TCGA = TRUE, 
                                  merge.mutation.types = FALSE, to.TRONCO = FALSE) 
@@ -108,7 +108,7 @@ maf_file_df_unfilt <- import.MAF(maf_filename, sep = "\t", is.TCGA = TRUE,
   # TCGA (All): Number of mutations (rows): X, Number of unique Swissprot IDs: X; Number of unique symbols: X
 # If we're using individual MAF files....
 maf_file_dfs_unfilt <- lapply(maf_filenames, function(x) import.MAF(paste(path, 
-                                                                          paste("Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/Individual Pan-Cancer MAF Files/", x, sep = ""), sep = ""), 
+                                                                          paste("Input Data Files/Pan-Cancer/Somatic_Mut_Data/Individual Pan-Cancer MAF Files/", x, sep = ""), sep = ""), 
                                                                     sep = "\t", is.TCGA = TRUE, merge.mutation.types = FALSE, to.TRONCO = FALSE) )
 
 ############################################################
@@ -117,7 +117,7 @@ maf_file_dfs_unfilt <- lapply(maf_filenames, function(x) import.MAF(paste(path,
 # NOTE: This assumes that the clinical file has already been processed; make sure that 
 # process_clinical_data.R has been run through properly first!
 clin_filename <- paste(path, "Input Data Files/BRCA Data/clinical_data_subset.csv", sep = "")
-#clin_filename <- paste(path, "Input Data Files/TCGA Data (ALL)/clinical_data_subset.csv", sep = "")
+#clin_filename <- paste(path, "Input Data Files/Pan-Cancer/clinical_data_subset.csv", sep = "")
 clinical_df <- read.csv(clin_filename, header = TRUE)
 
 # Filter by case ID
@@ -149,7 +149,7 @@ for (i in 1:length(maf_filenames)) {
   maf_filename <- maf_filenames[i]
   cancer_type_label <- unlist(strsplit(maf_filename, split = ".", fixed = TRUE))[2]
   maf_df <- maf_file_dfs[[i]]
-  hypermut_res <- filter_hypermutators(paste(path, paste("Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/Individual Pan-Cancer MAF Files/", 
+  hypermut_res <- filter_hypermutators(paste(path, paste("Input Data Files/Pan-Cancer/Somatic_Mut_Data/Individual Pan-Cancer MAF Files/", 
                                                          maf_filename, sep = ""), sep = ""), maf_df)
   maf_file_dfs[[i]] <- hypermut_res[[1]]
   write.csv(hypermut_res[[2]], paste(path, paste("Saved Output Data Files/Pan-Cancer/Mutation/Mutation Count Matrices/total_mut_count_matrix_per_patient_", 
@@ -180,11 +180,11 @@ maf_file_df_missense <- maf_file_df[maf_file_df$Variant_Classification == "Misse
   # BRCA: Narrows to 16689 entries, 8685 unique SWISSPROT IDs, 8954 unique Hugo IDs
   # TCGA (ALL): Narrows to 300796 entries, 17944 unique SWISSPROT IDs, and 18660 unique Hugo IDs
 write.csv(maf_file_df_missense, paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/maf_file_df_missense.csv", sep = ""))
-#write.csv(maf_file_df_missense, paste(path, "Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/maf_file_df_missense.csv", sep = ""))
+#write.csv(maf_file_df_missense, paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/maf_file_df_missense.csv", sep = ""))
 
 # If already done, read back the file
 maf_file_df_missense <- read.csv(paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/maf_file_df_missense.csv", sep = ""), header = TRUE)
-#maf_file_df_missense <- read.csv(paste(path, "Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/maf_file_df_missense.csv", sep = ""), header = TRUE)
+#maf_file_df_missense <- read.csv(paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/maf_file_df_missense.csv", sep = ""), header = TRUE)
 
 
 ############################################################
@@ -236,7 +236,7 @@ proteome_subset_missense <- get_proteome_subset(proteome, maf_swissprot_ids_miss
 proteome_subset_missense_symb <- get_proteome_subset(proteome, maf_symbols_missense, 'hugo')
 
 length(unique(proteome_subset_missense))  # check the number of protein sequences remaining
-  # The length of this subset: BRCA - 8675 (11068 for missense + nonsense), TCGA (ALL) - 17899
+  # The length of this subset: BRCA - 8675 (11068 for missense + nonsense), TCGA (ALL) - 17899 (18062 for missense + nonsense)
 
 # Write proteome subset to a FASTA
 write.fasta(proteome_subset_missense, names = names(proteome_subset_missense), as.string = TRUE, 
@@ -270,12 +270,12 @@ domains_missense <- get_cdsearch_res("missense")      # see batch_cdsearch_helpe
 
 # Write to a file 
 write.csv(domains_missense, paste(path, "Input Data Files/BRCA Data/CD-Search/missense_cdsearch_domains_all.csv", sep = ""))
-# write.csv(domains_missense, paste(path, "Input Data Files/TCGA Data (ALL)/CD-Search/missense_cdsearch_domains_all.csv", sep = ""))
+# write.csv(domains_missense, paste(path, "Input Data Files/Pan-Cancer/CD-Search/missense_cdsearch_domains_all.csv", sep = ""))
 
 # If we have already done the above once, simply import the saved domains files
 domains_missense <- read.csv(paste(path, "Input Data Files/BRCA Data/CD-Search/missense_cdsearch_domains_all.csv", sep = ""), header = TRUE,
                              check.names = FALSE)
-# domains_missense <- read.csv(paste(path, "Input Data Files/TCGA Data (ALL)/CD-Search/missense_cdsearch_domains_all.csv", sep = ""), header = TRUE)
+# domains_missense <- read.csv(paste(path, "Input Data Files/Pan-Cancer/CD-Search/missense_cdsearch_domains_all.csv", sep = ""), header = TRUE)
 
 
 ############################################################
@@ -307,7 +307,7 @@ accessions_numeric <- regmatches(accessions_missense, regexpr("[[:digit:]]+", ac
 intersecting_domain_acc_missense <- intersect(accessions_numeric, binding_domains_ids_noPF)
 length(intersecting_domain_acc_missense)
 
-  # BRCA is 1162 intersecting domains (1250 for missense + nonsense); TCGA (ALL) is 1453 domains
+  # BRCA is 1162 intersecting domains (1250 for missense + nonsense); TCGA (ALL) is 1453 domains (1437 for missense + nonsense)
   # NUC ACIDS ONLY: BRCA is 218 intersecting domains, TCGA (ALL) is 279
 
 
@@ -408,7 +408,7 @@ domains_missense_iprotein_sub <- merge_proteome_and_domains(domains_missense_ipr
 ############################################################
 # Examine how many actual unique accessions we have
 length(unique(domains_missense_iprotein_sub$Accession))  
-  # All Ligands: BRCA: 1910 (2092 missense + nonsense); TCGA (ALL): 2767
+  # All Ligands: BRCA: 1910 (2092 missense + nonsense); TCGA (ALL): 2767 (2749 missense + nonsense)
   # Nucleic Acids Only: BRCA: 257; TCGA (ALL): 324
 
 # Write this table to a CSV
@@ -444,7 +444,7 @@ swissprot_ids_missense_iprotein <- extract_swissprot_ids(domains_missense_iprote
 protein_ids_missense_iprotein <- extract_protein_names(domains_missense_iprotein_sub)  
 length(protein_ids_missense_iprotein)
 
-# All Ligands: BRCA: 6214 (7808 with missense + nonsense); TCGA (ALL): 11,939
+# All Ligands: BRCA: 6214 (7808 with missense + nonsense); TCGA (ALL): 11,939 (11,989 with missense + nonsense)
 # Nuc. Acids Only: BRCA: 1914; TCGA (ALL): 3,644
 
 
@@ -464,11 +464,11 @@ swissprot_ids_missense_iprotein <- read.csv(paste(path, "Saved Output Data Files
 # Use these IDs to subset the MAF file
 maf_subset_df_missense <- maf_file_df_missense[maf_file_df_missense$SWISSPROT %in% swissprot_ids_missense_iprotein,]
 write.csv(maf_subset_df_missense, paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/maf_file_df_missense_iprotein.csv", sep = ""))
-#write.csv(maf_subset_df_missense, paste(path, "Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/maf_file_df_missense_iprotein.csv", sep = ""))
+#write.csv(maf_subset_df_missense, paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/maf_file_df_missense_iprotein.csv", sep = ""))
 
 # If already done, read back the file
 maf_subset_df_missense <- read.csv(paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/maf_file_df_missense_iprotein.csv", sep = ""), header = TRUE)
-#maf_subset_df_missense <- read.csv(paste(path, "Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/maf_file_df_missense_iprotein.csv", sep = ""), header = TRUE)
+#maf_subset_df_missense <- read.csv(paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/maf_file_df_missense_iprotein.csv", sep = ""), header = TRUE)
 
 
 ############################################################
@@ -701,14 +701,14 @@ write.csv(swissprot_ids_missense_idomain, file = paste(path, "Saved Output Data 
 # Use these IDs to further subset the MAF file
 maf_subset_df_missense_idom <- maf_subset_df_missense[maf_subset_df_missense$SWISSPROT %in% swissprot_ids_missense_idomain,]
 write.csv(maf_subset_df_missense_idom, paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/maf_file_df_missense_idomain.csv", sep = ""))
-#write.csv(maf_subset_df_missense_idom, paste(path, "Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/maf_file_df_missense_idomain.csv", sep = ""))
+#write.csv(maf_subset_df_missense_idom, paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/maf_file_df_missense_idomain.csv", sep = ""))
 
 # Read these files back if needed
 # 
 # 
 # 
 maf_subset_df_missense <- read.csv(paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/maf_file_df_missense_idomain.csv", sep = ""), header = TRUE)
-#maf_subset_df_missense <- read.csv(paste(path, "Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/maf_file_df_missense_idomain.csv", sep = ""), header = TRUE)
+#maf_subset_df_missense <- read.csv(paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/maf_file_df_missense_idomain.csv", sep = ""), header = TRUE)
 
 domains_missense_idomain_sub <- read.csv(paste(path, "Saved Output Data Files/BRCA/Mutation/idomain_results_missense.csv", sep = ""), header = TRUE)
 # domains_missense_idomain_sub <- read.csv(paste(path, "Saved Output Data Files/Pan-Cancer/Mutation/idomain_results_missense.csv", sep = ""), header = TRUE)
@@ -856,7 +856,7 @@ write.csv(swissprot_ids_missense_ibindingpos, file = paste(path, "Saved Output D
 # Use these IDs to further subset the MAF file
 maf_subset_df_missense_ibp <- maf_subset_df_missense_idom[maf_subset_df_missense_idom$SWISSPROT %in% swissprot_ids_missense_ibindingpos,]
 write.csv(maf_subset_df_missense_ibp, paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/maf_file_df_missense_ibp.csv", sep = ""))
-#write.csv(maf_subset_df_missense_ibp, paste(path, "Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/maf_file_df_missense_ibp.csv", sep = ""))
+#write.csv(maf_subset_df_missense_ibp, paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/maf_file_df_missense_ibp.csv", sep = ""))
 
 #
 #
@@ -866,4 +866,4 @@ domains_missense_ibindingpos_sub <- read.csv(paste(path, "Saved Output Data File
 swissprot_ids_missense_ibindingpos <- read.csv(paste(path, "Saved Output Data Files/BRCA/Mutation/swissprot_ids_missense_ibindingpos.csv", sep = ""))
 #swissprot_ids_missense_ibindingpos <- read.csv(paste(path, "Saved Output Data Files/Pan-Cancer/Mutation/swissprot_ids_missense_ibindingpos.csv", sep = ""))
 maf_subset_df_missense_ibp <- read.csv(paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/maf_file_df_missense_ibp.csv", sep = ""))
-# maf_subset_df_missense_ibp <- read.csv(paste(path, "Input Data Files/TCGA Data (ALL)/Somatic_Mut_Data/maf_file_df_missense_ibp.csv", sep = ""))
+# maf_subset_df_missense_ibp <- read.csv(paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/maf_file_df_missense_ibp.csv", sep = ""))
