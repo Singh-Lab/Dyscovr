@@ -245,8 +245,8 @@ if(!useNumFunctCopies) {
 #' @param all_genes_id_conv a bioMart file with conversions between different gene ID types
 add_targ_regprot_gns <- function(master_df_sig, all_genes_id_conv) {
   master_df_sig$T_k.name <- unlist(lapply(master_df_sig$T_k, function(x) 
-    paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
-                                   'external_gene_name']), collapse = ";")))
+    paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
+                                          'external_gene_name'])), collapse = ";")))
   
   # Add a column for the regulatory protein name
   master_df_sig$R_i.name <- unlist(lapply(master_df_sig$R_i, function(x) 
