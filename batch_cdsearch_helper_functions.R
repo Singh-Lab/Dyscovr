@@ -14,8 +14,9 @@
 #' web interface
 #' @param proteome the full human proteome in FASTA format
 #' @param label a string for labeling that indicates whether we are looking at 
-#' missense mutations, silent mutations, or both ('full', 'missense', or 'silent')
-prep_cdsearch_files <- function(proteome, label) {
+#' missense mutations, silent mutations, or both ('full', 'missense', 'misAndNon', or 'silent')
+#' @param dataset either "tcga", "metabric", "icgc", or "cptac3"
+prep_cdsearch_files <- function(proteome, label, dataset) {
   
   path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Proteome/BRCA"
   #path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Proteome/Pan-Cancer"
@@ -27,12 +28,22 @@ prep_cdsearch_files <- function(proteome, label) {
     # Write a FASTA file for each proteome subset
     for (i in 1:length(proteome_subsets)) {
       prot_subset <- proteome_subsets[i]
-      output_fasta_name <- paste(paste(paste(paste("proteome_subset_", label, sep = ""), 
-                                             "_part", sep = ""), i, sep = ""), ".fasta", sep = "")
+      output_fasta_name <- ""
+      if(dataset == "tcga") {
+        output_fasta_name <- paste0(paste0(paste0(paste0("proteome_subset_", label), "_part"), i), ".fasta")
+      } else {
+        output_fasta_name <- paste0(paste0(paste0(paste(paste0("proteome_subset_", label), dataset, sep = "_"), "_part"), i), ".fasta")
+      }
+      
       write.fasta(prot_subset[[1]], names = names(prot_subset[[1]]), as.string = TRUE, file.out = paste(path_cdsearch, output_fasta_name))
     }
   } else {
-    output_filename <- paste(paste("proteome_subset", label, sep = "_"), ".fasta", sep = "")
+    output_filename <- ""
+    if(dataset == "tcga") {
+      output_filename <- paste(paste("proteome_subset", label, sep = "_"), ".fasta", sep = "")
+    } else {
+      output_filename <- paste(paste(paste("proteome_subset", label, sep = "_"), dataset, sep = "_"), ".fasta", sep = "")
+    }
     write.fasta(proteome, names = names(proteome), as.string = TRUE, file.out = paste(path_cdsearch, output_filename))
   }
 }
@@ -72,16 +83,19 @@ split_into_subproteomes <- function(proteome) {
 #' NOTE: Batch CD-Search files must have following naming scheme: "<LABEL>_proteome_partX_hitdata.csv" if multipart
 #' @param label a string for file retrieval that indicates whether we are looking at 
 #' missense mutations, silent mutations, or both ('full', 'missense', or 'silent')
-get_cdsearch_res <- function(label) {
+#' @param dataset either "tcga", "metabric", "icgc", or "cptac3"
+get_cdsearch_res <- function(label, dataset) {
   path = "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/CD-Batch Results"
   #path = "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/CD-Batch Results"
   
   all_files <- list.files(path)
   subset_files <- all_files[unlist(lapply(all_files, FUN = function(x) {startsWith(x, label)}))]
+  if(dataset == "tcga") {subset_files <- subset_files[grepl(paste0(label, "_part"), subset_files)]}
+  else {subset_files <- subset_files[grepl(dataset, subset_files)]}
   
   # Loop through files of interest, read into DF, and recombine into a single DF
   full_filename_1 <- paste(path, subset_files[1], sep = "/")
-  print(full_filename_1)
+  #print(full_filename_1)
   cd_search_res_df <- read.csv(full_filename_1, header = TRUE, check.names = FALSE)
   if (length(subset_files) > 1) {
     for (i in 2:length(subset_files)) {

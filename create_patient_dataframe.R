@@ -1,6 +1,6 @@
 ############################################################
 ### Create Patient Data Frame
-### Written By: Sara Camilli, July 2020
+### Written By: Sara Geraghty, July 2020
 ############################################################
 
 # This file uses a clinical data frame, and a variable declaring whether the data of interest
@@ -9,19 +9,24 @@
   # Columns: Linear model input variables (Gender, Age (buckets 1-10), Race (buckets 1-5), 
     # Prior malignancies, Treatment-radiation, Treatment-pharmacological, Cancer Type or Subtype,
     # and first 2 PCs generated from genotype matrices)
-  # Rows: Patients that have all necessary data types 1...j...L (Unique 4-digit ID)
+  # Rows: Patients that have all necessary data types 1...j...L (Unique ID)
   # Entries: 0 or 1 values
 
 library(TCGAbiolinks)
 
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
+#main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/cBioPortal/METABRIC/"
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
 
 input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
+#input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_metabric/"
 #input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/"
 
 
-# Import clinical data
+############################################################
+# IMPORT CLINICAL DATA
+############################################################
+### TCGA ###
 # Tumor-Normal Matched
 clinical_df_tnm <- read.csv(paste(input_path, "clinical_data_subset.csv", sep = ""), 
                         header = TRUE, row.names = 1, check.names = FALSE)
@@ -32,12 +37,24 @@ clinical_df_ntnm <- read.csv(paste(input_path, "clinical_wMutCounts.csv", sep = 
 clinical_df_ntnm <- read.csv(paste(input_path, "clinical_data_subset_w_MN_MutCounts.csv", sep = ""), 
                              header = TRUE, check.names = FALSE)
 
+### METABRIC ###
+clinical_df <- read.table(paste0(input_path, "data_clinical_patient_sub.txt"), 
+                          header = TRUE, check.names = FALSE, sep = ",")
+
+
+############################################################
+# SET IF BREAST OR PAN-CANCER
+############################################################
 is_brca <- TRUE
 # is_brca <- FALSE
 
 is_pc <- FALSE
 # is_pc <- TRUE
 
+
+############################################################
+# IMPORT SUBTYPE INFORMATION (TCGA)
+############################################################
 general_cancer_types <- c("ACC", "BRCA", "BLCA", "CESC", "CHOL", "COAD", "ESCA",
                           "GBM", "HNSC", "KICH", "KIRC", "KIRP", "LGG", "LIHC",
                           "LUAD", "LUSC", "PAAD", "PCPG", "PRAD", "READ", "SKCM",
@@ -63,7 +80,9 @@ pc_subtype <- import_subtype_information(general_cancer_types)
 brca_subtype <- TCGAquery_subtype(tumor = "BRCA")
 
 
-# Import PCA information
+############################################################
+# IMPORT SMARTPCA RESULTS (GENOTYPE PCAs)
+############################################################
 ### BRCA ###
 # Tumor-Normal Matched
 brca_smartpca_output_tnm <- read.table(paste(main_path, "smartpca/Tumor-Normal Matched/BRCA_output_eigenvect.pca", sep = ""),
@@ -80,19 +99,38 @@ pc_smartpca_output_ntnm <- read.table(paste(main_path, "smartpca/Non-Tumor-Norma
                                    header = FALSE, check.names = FALSE, row.names = 1)
 
 
-# Create data frame with all patient characteristics
+############################################################
+# CREATE SAMPLE DATA FRAME FOR LM
+############################################################
+### TCGA ###
 brca_patient_df_tnm <- create_patient_dataframe(clinical_df_tnm, is_brca, 
-                                                  brca_subtype, is_pc, brca_smartpca_output_tnm,
-                                                FALSE)
+                                                  brca_subtype, is_pc, NA, brca_smartpca_output_tnm,
+                                                FALSE, 'tcga')
 brca_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
-                                                  brca_subtype, is_pc, brca_smartpca_output_ntnm,
-                                                 FALSE)
+                                                  brca_subtype, is_pc, NA, brca_smartpca_output_ntnm,
+                                                 FALSE, 'tcga')
 pc_patient_df_tnm <- create_patient_dataframe(clinical_df_tnm, is_brca, 
-                                                pc_subtype, is_pc, pc_smartpca_output_tnm,
-                                              FALSE)
+                                                pc_subtype, is_pc, NA, pc_smartpca_output_tnm,
+                                              FALSE, 'tcga')
 pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
-                                                 pc_subtype, is_pc, pc_smartpca_output_ntnm,
-                                               FALSE)
+                                                 pc_subtype, is_pc, NA, pc_smartpca_output_ntnm,
+                                               FALSE, 'tcga')
+
+# Alternatively, get BRCA subtypes in a pan-cancer DF
+pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
+                                               pc_subtype, is_pc, list("BRCA" = brca_subtype), 
+                                               pc_smartpca_output_ntnm, FALSE, 'tcga')
+
+# Get subtypes for multiple cancer types
+blca_subtype <- TCGAquery_subtype(tumor = "BLCA")
+hnsc_subtype <- TCGAquery_subtype(tumor = "HNSC")
+colnames(hnsc_subtype)[2] <- "subtype"
+colnames(blca_subtype)[which(colnames(blca_subtype) == "Histologic subtype")] <- "histology"
+
+additional_subtype_info_list <- list("BRCA" = brca_subtype, "BLCA" = blca_subtype, "HNSC" = hnsc_subtype)
+pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
+                                               pc_subtype, is_pc, additional_subtype_info_list, 
+                                               pc_smartpca_output_ntnm, FALSE, 'tcga')
 
 
 # Write this to a CSV
@@ -100,6 +138,16 @@ write.csv(brca_patient_df_tnm, paste(main_path, "Linear Model/Patient and Sample
 write.csv(brca_patient_df_ntnm, paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm.csv", sep = ""))
 write.csv(pc_patient_df_tnm, paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_tnm.csv", sep = ""))
 write.csv(pc_patient_df_ntnm, paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm.csv", sep = ""))
+
+
+### METABRIC ###
+brca_patient_df<- create_patient_dataframe(clinical_df, is_brca, NA, is_pc, 
+                                           NA, FALSE, 'metabric')
+
+# Write to CSV
+write.csv(brca_patient_df, paste(main_path, "Patient and Sample DFs/patient_dataframe.csv", sep = ""))
+
+
 
 
 ############################################################
@@ -115,12 +163,17 @@ write.csv(pc_patient_df_ntnm, paste(main_path, "Linear Model/Patient and Sample 
 #' @param subtype_file a file from TCGAbiolinks that has information about subtypes
 #' or, alternatively (if pan-cancer) a file that identifies the cancer type of 
 #' each sample
+#' @param additional_subtype_info is 'NA' if is_pc is FALSE; is a list of separate subtypes file if
+#' we want to include individual cancer subtypes in our pan-cancer analysis (names of list items
+#' are the cancer type that subtype file is for)
 #' @param smartpca_output a file with output values for the top 10 PCs for each 
 #' sample, created from running smartpca
 #' @param age_bucketing a TRUE/FALSE value to indicate whether or not we are bucketing
 #' age (if not, we are normalizing it to be between 0 and 1)
-create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc,
-                                     smartpca_output, age_bucketing) {
+#' @param dataset either 'tcga', 'metabric', 'icgc' or 'cptac3'; to refer to proper column names
+create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc, 
+                                     additional_subtype_info, smartpca_output, 
+                                     age_bucketing, dataset) {
   
   # Create relational data frame to hold patient-dependent inputs to linear model
   # Columns: Linear model input variables 
@@ -137,9 +190,16 @@ create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc,
   }
 
   patient_characteristics <- add_cancer_type(patient_characteristics, is_pc, subtype_file,
-                                             clinical_df)
-  unique_patient_ids <- unique(unlist(lapply(clinical_df$case_submitter_id, function(x) 
-    unlist(strsplit(x, split = "-", fixed = TRUE))[3])))
+                                             additional_subtype_info, clinical_df, dataset)
+  
+  unique_patient_ids <- c()
+  if(dataset == 'tcga') {
+    unique_patient_ids <- unique(unlist(lapply(clinical_df$case_submitter_id, function(x) 
+      unlist(strsplit(x, split = "-", fixed = TRUE))[3])))
+  } else if (dataset == "metabric") {
+    unique_patient_ids <- unique(clinical_df$PATIENT_ID)
+  } else {print("Only implemented for TCGA and METABRIC datasets.")}
+  
   patient_dataframe <- data.frame(matrix(ncol = length(patient_characteristics), 
                                          nrow = length(unique_patient_ids)))
   colnames(patient_dataframe) <- patient_characteristics
@@ -148,50 +208,12 @@ create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc,
   # Input all the patient-specific information 
   patient_dataframe <- input_patient_specific_info(patient_dataframe, clinical_df, 
                                                    is_brca, subtype_file, is_pc,
-                                                   smartpca_output, age_bucketing)
+                                                   additional_subtype_info, smartpca_output, 
+                                                   age_bucketing, dataset)
   
   return(patient_dataframe)
 }
 
-############################################################
-
-#' Takes the vector of patient characteristics and adds buckets for the 
-#' appropriate number of subtypes (for a specific cancer type) or types 
-#' (for pan-cancer analysis). Returns the updated vector.
-#' @param patient_characterisitics a vector of existing patient characteristics
-#' to be updated with cancer type/subtype
-#' @param is_pc a TRUE/FALSE value indicating whether the cohort is pan-cancer or not
-#' @param subtype_file a file from TCGAbiolinks that has information about subtypes
-#' or, alternatively (if pan-cancer) a file that identifies the cancer type of 
-#' each sample (TODO: make this file!)
-#' @param clinical_df clinical data file from the TCGA for the given patient cohort
-add_cancer_type <- function(patient_characteristics, is_pc, subtype_file, clinical_df) {
-  # Pan-Cancer: look at cancer type
-  if (is_pc) {
-    # Find how many unique cancer types there are in total
-    #unique_cts <- unique(subtype_file$cancer.type)
-    #length_cts <- length(unique_cts)
-    unique_cts <- unique(clinical_df$project_id)
-    print(head(unique_cts))
-    length_cts <- length(unique_cts)
-  }
-  # Not pan-cancer: look at cancer subtype
-  else {
-    # Find the subtype column and check how many types are given
-    unique_subtypes <- unique(unlist(subtype_file[ ,grepl("subtype", colnames(subtype_file),  
-                                                      ignore.case = TRUE)]))
-    unique_subtypes <- unique_subtypes[!(is.na(unique_subtypes) | unique_subtypes == "NA")]
-    length_cts <- length(unique_subtypes)
-    
-  }
-  # Create buckets equivalent to the number of types or subtypes
-  new_buckets <- unlist(lapply(1:length_cts, function(x) paste("Cancer_type_b", x, sep = "")))
-  
-  # Add new buckets to the patient characteristics list and return
-  patient_characteristics <- c(patient_characteristics, new_buckets)
-  
-  return(patient_characteristics)
-}
 
 
 ############################################################
@@ -211,51 +233,86 @@ add_cancer_type <- function(patient_characteristics, is_pc, subtype_file, clinic
 #' or, alternatively (if pan-cancer) a file that identifies the cancer type of 
 #' each sample (TODO: make this file!)
 #' @param is_pc a TRUE/FALSE value indicating whether the cohort is pan-cancer or not
+#' @param additional_subtype_info is 'NA' if is_pc is FALSE; is a list of separate subtypes file if
+#' we want to include individual cancer subtypes in our pan-cancer analysis (names of list items
+#' are the cancer type that subtype file is for)
 #' @param smartpca_output a file with output values for the top 10 PCs for each 
 #' sample, created from running smartpca
 #' @param age_bucketing a TRUE/FALSE value to indicate whether or not we are bucketing
 #' age (if not, we are normalizing it to be between 0 and 1)
+#' @param dataset either 'tcga', 'metabric', 'icgc' or 'cptac3'; to refer to proper column names
 input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_file, 
-                                        is_pc, smartpca_output, age_bucketing) {
+                                        is_pc, additional_subtype_info, smartpca_output, 
+                                        age_bucketing, dataset) {
   input_dataframe_updated <- input_df
   
   # GENDER
   if (!is_brca) {
-    gender_vect <- clinical_df$gender[seq(1, length(clinical_df$gender), 2)]   
-    gender_vect_binary <- ifelse(gender_vect == "male", 0, 1)
+    gender_vect <- c()
+    if(dataset == 'tcga') {
+      gender_vect <- clinical_df$gender[seq(1, length(clinical_df$gender), 2)] 
+    } else if (dataset == "metabric") {
+      gender_vect <- clinical_df$SEX
+    } else {print("Only implemented for TCGA and METABRIC.")}
+    gender_vect_binary <- ifelse((gender_vect == "male") | (gender_vect == "Male"), 0, 1)
     input_dataframe_updated[,'Gender'] <- gender_vect_binary
   } 
   # AGE
   if(age_bucketing) {
-    age_bin_df <- convert_age_to_bins(clinical_df$age_at_index)
+    age_bin_df <- data.frame()
+    if(dataset == 'tcga') {
+      age_bin_df <- convert_age_to_bins(clinical_df$age_at_index, dataset)
+    } else if (dataset == 'metabric') {
+      age_bin_df <- convert_age_to_bins(clinical_df$AGE_AT_DIAGNOSIS, dataset)
+    }
     input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
                                                            age_bin_df) 
   } else {
-    age_vect <- as.numeric(clinical_df$age_at_index)[seq(1, length(clinical_df$age_at_index), 2)] / 100
+    age_vect <- c()
+    if(dataset == 'tcga') {
+      age_vect <- as.numeric(clinical_df$age_at_index)[seq(1, length(clinical_df$age_at_index), 2)] / 100
+    } else if (dataset == 'metabric') {
+      age_vect <- clinical_df$AGE_AT_DIAGNOSIS / 100
+    }
     input_dataframe_updated[,'Age'] <- age_vect
   }
   
-  # RACE
-  race_bin_df <- convert_race_to_bins(clinical_df$race, clinical_df$ethnicity)
-  input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
-                                                         race_bin_df) 
+  # RACE (NOTE: METABRIC Clinical Info does not include race)
+  if(dataset == 'tcga') {
+    race_bin_df <- convert_race_to_bins(clinical_df$race, clinical_df$ethnicity)
+    input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
+                                                           race_bin_df) 
+  }
+  
   # PRIOR_MALIG
-  prior_malig_vect <- clinical_df$prior_malignancy[seq(1, length(clinical_df$prior_malignancy), 2)]
-  input_dataframe_updated[,'Prior_malig'] <- ifelse(prior_malig_vect == "no" | 
-                                                      prior_malig_vect == "not reported", 0, 1)
+  if(dataset == 'tcga') {
+    prior_malig_vect <- clinical_df$prior_malignancy[seq(1, length(clinical_df$prior_malignancy), 2)]
+    input_dataframe_updated[,'Prior_malig'] <- ifelse(prior_malig_vect == "no" | 
+                                                        prior_malig_vect == "not reported", 0, 1)
+  } else if (dataset == 'metabric') {
+    input_dataframe_updated[,'Prior_malig'] <- unlist(lapply(clinical_df$RFS_STATUS, function(x) 
+      unlist(strsplit(x, ":", fixed = TRUE))[1]))
+  }
+  
   # TREATMENT
-  treatment_or_ther_vect <- clinical_df$treatment_or_therapy
-  treatment_type_vect <- clinical_df$treatment_type
-  treatment_bin_df <- convert_treatments_to_bins(treatment_or_ther_vect, 
-                                                 treatment_type_vect)
+  treatment_bin_df <- data.frame()
+  if(dataset == 'tcga') {
+    treatment_or_ther_vect <- clinical_df$treatment_or_therapy
+    treatment_type_vect <- clinical_df$treatment_type
+    treatment_bin_df <- convert_treatments_to_bins(treatment_or_ther_vect, 
+                                                   treatment_type_vect)
+  } else if (dataset == 'metabric') {
+    treatment_bin_df <- convert_treatments_to_bins_metabric(clinical_df)
+  }
   input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
                                                          treatment_bin_df)
   # CANCER TYPE OR SUBTYPE
-  cancer_type_bin_df <- convert_ct_to_bins(subtype_file, clinical_df, input_dataframe_updated, is_pc)
+  cancer_type_bin_df <- convert_ct_to_bins(subtype_file, clinical_df, input_dataframe_updated, 
+                                           is_pc, additional_subtype_info, dataset)
   input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated,
                                                          cancer_type_bin_df)
   # TOTAL NUM MUTATIONS
-  tot_num_mut_df <- convert_tot_num_mut_to_bins(clinical_df$Total.Num.Muts)
+  tot_num_mut_df <- convert_tot_num_mut_to_bins(clinical_df$Total.Num.Muts, dataset)
   input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
                                                          tot_num_mut_df)
   # SMARTPCA PCs
@@ -291,10 +348,13 @@ merge_dataframes_by_colname <- function(main_df, partial_df) {
 #' (0 if they are not in that age bin, 1 if they are)
 #' @param age_vector a vector of all patient ages in the cohort, two entries 
 #' per patient
-convert_age_to_bins <- function(age_vector) {
+#' @param dataset either 'tcga', 'metabric', 'icgc' or 'cptac3'; to refer to proper column names
+convert_age_to_bins <- function(age_vector, dataset) {
   
-  # Get only every second item in the vector (patients all have two almost identical entries)
-  age_vector <- age_vector[seq(1, length(age_vector), 2)]
+  # For TCGA, get only every second item in the vector (patients all have two almost identical entries)
+  if(dataset == "tcga") {
+    age_vector <- age_vector[seq(1, length(age_vector), 2)]
+  } 
   
   # Create data frame (columns are bins, rows are patients)
   num_bins <- 10
@@ -439,6 +499,97 @@ rad_or_pharm_helper <- function(rad_or_pharm, treatment, treatment_df, i) {
   return(treatment_df)
 }
 
+
+############################################################ 
+
+#' METABRIC-specific function for converting treatment to bins. Takes a
+#' clinical data frame and converts to a binned treatment DF. Groups 
+#' hormone therapy and chemotherapy together as "pharmacological" therapy.
+#' @param clinical_df a patient clinical DF from METABRIC
+convert_treatments_to_bins_metabric <- function(clinical_df) {
+  treatment_df <- data.frame(matrix(nrow = nrow(clinical_df), ncol = 2))
+  rownames(treatment_df) <- clinical_df$PATIENT_ID
+  colnames(treatment_df) <- c("Treatment_rad", "Treatment_pharm")
+  
+  for(i in 1:nrow(clinical_df)) {
+    # Get radiation status
+    treatment_df[i, 'Treatment_rad'] <- ifelse(clinical_df[i, 'RADIO_THERAPY'] == "YES", 1, 0)
+    # Get pharmacological status
+    treatment_df[i, 'Treatment_pharm'] <- ifelse((clinical_df[i, 'CHEMOTHERAPY'] == "YES") |
+                                                   (clinical_df[i, 'HORMONE_THERAPY'] == "YES"), 1, 0)
+  }
+  print(head(treatment_df))
+  
+  return(treatment_df)
+}
+
+
+############################################################
+
+#' Takes the vector of patient characteristics and adds buckets for the 
+#' appropriate number of subtypes (for a specific cancer type) or types 
+#' (for pan-cancer analysis). Returns the updated vector.
+#' @param patient_characterisitics a vector of existing patient characteristics
+#' to be updated with cancer type/subtype
+#' @param is_pc a TRUE/FALSE value indicating whether the cohort is pan-cancer or not
+#' @param subtype_file a file from TCGAbiolinks that has information about subtypes
+#' or, alternatively (if pan-cancer) a file that identifies the cancer type of 
+#' each sample 
+#' @param additional_subtype_info is 'NA' if is_pc is FALSE; is a list of separate subtypes file if
+#' we want to include individual cancer subtypes in our pan-cancer analysis (names of list items
+#' are the cancer type that subtype file is for)
+#' @param clinical_df clinical data file from the TCGA for the given patient cohort
+#' @param dataset either 'tcga', 'metabric', 'icgc' or 'cptac3'; to refer to proper column names
+add_cancer_type <- function(patient_characteristics, is_pc, subtype_file, 
+                            additional_subtype_info, clinical_df, dataset) {
+  # Pan-Cancer: look at cancer type
+  if (is_pc) {
+    # Find how many unique cancer types there are in total
+    #unique_cts <- unique(subtype_file$cancer.type)
+    #length_cts <- length(unique_cts)
+    unique_cts <- unique(clinical_df$project_id)
+    print(head(unique_cts))
+    
+    # If we are including additional cancer subtypes with our other cancer types, do this now
+    if(!is.na(additional_subtype_info)) {
+      # Remove the broader "cancer type" label for the cancer types that have subtype information we want to include
+      unique_cts <- unique_cts[!grepl(paste(names(additional_subtype_info), collapse = "|"), unique_cts)]
+      unique_subtypes <- unlist(lapply(1:length(additional_subtype_info), function(i) {
+        subtype_df <- additional_subtype_info[[i]]
+        unique_sub <- unique(unlist(subtype_df[ ,grepl("subtype|mRNA cluster", colnames(subtype_df),  
+                                                                        ignore.case = TRUE)]))
+        unique_sub <- unique_sub[!(is.na(unique_sub) | unique_sub == "NA")]
+      }))
+      unique_cts <- c(unique_cts, unique_subtypes)
+    }
+    length_cts <- length(unique_cts)
+  }
+  # Not pan-cancer: look at cancer subtype
+  else {
+    # Find the subtype column and check how many types are given
+    if (dataset == 'tcga') {
+      unique_subtypes <- unique(unlist(subtype_file[ ,grepl("subtype|mRNA cluster", colnames(subtype_file),  
+                                                            ignore.case = TRUE)]))
+    } else if (dataset == 'metabric') {
+      unique_subtypes <- unique(unlist(clinical_df[, 'CLAUDIN_SUBTYPE']))
+      unique_subtypes <- unique_subtypes[unique_subtypes != "claudin-low"]
+      
+    } else {print("Only implemented for TCGA and METABRIC.")}
+    
+    unique_subtypes <- unique_subtypes[!(is.na(unique_subtypes) | unique_subtypes == "NA")]
+    length_cts <- length(unique_subtypes)
+    
+  }
+  # Create buckets equivalent to the number of types or subtypes
+  new_buckets <- unlist(lapply(1:length_cts, function(x) paste("Cancer_type_b", x, sep = "")))
+  
+  # Add new buckets to the patient characteristics list and return
+  patient_characteristics <- c(patient_characteristics, new_buckets)
+  
+  return(patient_characteristics)
+}
+
+
 ############################################################ 
 
 #' Takes a file with information about cancer type or subtype
@@ -452,7 +603,11 @@ rad_or_pharm_helper <- function(rad_or_pharm, treatment, treatment_df, i) {
 #' @param input_dataframe_updated the work-in-progress input data frame with all
 #' the patient characteristics for the linear model
 #' @param is_pc a TRUE/FALSE value indicating whether the cohort is pan-cancer or not
-convert_ct_to_bins <- function(subtype_file, clinical_df, input_dataframe_updated, is_pc) {
+#' @param additional_subtype_info is NA if is_pc is FALSE; may include a separate list of 
+#' subtype files if we want to include individual cancer subtypes in our pan-cancer analysis
+#' @param dataset either 'tcga', 'metabric', 'icgc' or 'cptac3'; to refer to proper column names
+convert_ct_to_bins <- function(subtype_file, clinical_df, input_dataframe_updated, 
+                               is_pc, additional_subtype_info, dataset) {
   
   # Create a blank data frame with all the same patient IDs as the input data frame
   cancer_type_bin_df <- input_dataframe_updated[, grepl("Cancer_type", colnames(input_dataframe_updated))]
@@ -460,23 +615,61 @@ convert_ct_to_bins <- function(subtype_file, clinical_df, input_dataframe_update
   # Keep a growing map of which type will correspond to which bucket
   ct_to_bucket_map <- data.frame(ct = rep(NA, ncol(cancer_type_bin_df)), 
                                  bucket_num = 1:ncol(cancer_type_bin_df))
+
+  patients_w_subtype_info <- c()
+  if(!is.na(additional_subtype_info)) {
+    patients_w_subtype_info <- unlist(lapply(additional_subtype_info, function(x) {
+      pats <- unlist(lapply(as.character(x$patient), function(p) 
+        unlist(strsplit(p, "-", fixed = TRUE))[3]))
+      return(pats)                       
+    }))
+  }
   
   # Go through each patient and find their subtype/type info, then add to the appropriate bucket
   for (i in 1:nrow(cancer_type_bin_df)) {
     patient_id <- rownames(cancer_type_bin_df)[i]
     print(patient_id)
+    
+    ct <- NA
+    
     # Pan-cancer: get the cancer type
     if (is_pc) {
-      ct <- as.character(unlist(clinical_df[grepl(patient_id, clinical_df$case_submitter_id), 
-                                             'project_id']))
-      ct <- unlist(strsplit(ct, "-", fixed = TRUE))[2]
-      print(ct)
+      # Check if we are using specific subtypes in our pan-cancer analysis
+      if(length(patients_w_subtype_info) != 0) {
+        pat_found <- 0
+        for(v in 1:length(additional_subtype_info)) {
+          subtype_df <- additional_subtype_info[[v]]
+          if(TRUE %in% grepl(patient_id, subtype_df$patient)) {
+            ct <- as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                       grepl("subtype|mRNA cluster", colnames(subtype_df), 
+                                             ignore.case = TRUE)]))
+            ct <- paste(names(additional_subtype_info)[v], ct, collapse = ".")
+            pat_found <- 1
+          }
+        }
+        if(pat_found == 0) {
+          ct <- as.character(unlist(clinical_df[grepl(patient_id, clinical_df$case_submitter_id), 
+                                                'project_id']))
+          ct <- unlist(strsplit(ct, "-", fixed = TRUE))[2]
+        }
+      } else {
+        ct <- as.character(unlist(clinical_df[grepl(patient_id, clinical_df$case_submitter_id), 
+                                              'project_id']))
+        ct <- unlist(strsplit(ct, "-", fixed = TRUE))[2]
+      }
+      print(paste("CT:", ct))
     } 
     # Not pan-cancer: get the cancer subtype
     else {
-      ct <- as.character(unlist(subtype_file[grepl(patient_id, subtype_file$patient), 
-                                             grepl("subtype", colnames(subtype_file), 
-                                                   ignore.case = TRUE)]))
+      if(dataset == "tcga") {
+        ct <- as.character(unlist(subtype_file[grepl(patient_id, subtype_file$patient), 
+                                               grepl("subtype|mRNA cluster", colnames(subtype_file), 
+                                                     ignore.case = TRUE)]))
+      } else if (dataset == "metabric") {
+        ct <- as.character(clinical_df[grepl(patient_id, clinical_df$PATIENT_ID), 'CLAUDIN_SUBTYPE'])
+        if (ct == 'claudin-low') {ct <- "Basal"}
+      } else {print("Only implemented for TCGA and METABRIC.")}
+      
     }
 
     # If this cancer type isn't already in the cancer type-to-bucket mapping, add it
@@ -487,6 +680,7 @@ convert_ct_to_bins <- function(subtype_file, clinical_df, input_dataframe_update
     }
     # Get the bucket that it's in
     bucket_num <- ct_to_bucket_map[ct_to_bucket_map$ct == ct, 'bucket_num']
+    bucket_num <- bucket_num[!is.na(bucket_num)]
     # Create a new row where there is a '1' for this bucket and a '0' for 
     # everything else
     new_row <- rep(0, times = ncol(cancer_type_bin_df))
@@ -508,10 +702,13 @@ convert_ct_to_bins <- function(subtype_file, clinical_df, input_dataframe_update
 #' values for each patient (0 if they are not in that bin, 1 if they are)
 #' @param total_num_muts a vector of the total number of mutations for each
 #' patients' primary tumor sample
-convert_tot_num_mut_to_bins <- function(total_num_muts) {
+#' @param dataset either 'tcga', 'metabric', 'icgc', or 'cptac3'
+convert_tot_num_mut_to_bins <- function(total_num_muts, dataset) {
   
-  # Get only every second item in the vector (patients all have two almost identical entries)
-  total_num_muts <- total_num_muts[seq(1, length(total_num_muts), 2)]
+  # For TCGA, get only every second item in the vector (patients all have two almost identical entries)
+  if(dataset == "tcga") {
+    total_num_muts <- total_num_muts[seq(1, length(total_num_muts), 2)]
+  }
   
   # Create data frame (columns are bins, rows are samples)
   num_bins <- 3
@@ -519,16 +716,18 @@ convert_tot_num_mut_to_bins <- function(total_num_muts) {
   colnames(tot_mut_df) <- c("Tot_Mut_b1", "Tot_Mut_b2", "Tot_Mut_b3")
   
   # For each item in the vector, determine which bin the mutation number goes in and add it
+  thresh <- c(30, 60)
+  if (dataset == "metabric") {thresh <- c(4, 8)}
   for (i in 1:length(total_num_muts)) {
     tnm <- total_num_muts[i]
     
     tot_mut_df[i,] <- rep(0, num_bins)              # set all cols for that row equal to 0
     
-    if (tnm <= 30) {
+    if (tnm <= thresh[1]) {
       tot_mut_df[i,"Tot_Mut_b1"] <- 1      # set this bucket for that row equal to 1
-    } else if (tnm > 30 & tnm <= 60) {
+    } else if (tnm > thresh[1] & tnm <= thresh[2]) {
       tot_mut_df[i,"Tot_Mut_b2"] <- 1      # set this bucket for that row equal to 1
-    } else if (tnm > 60) {
+    } else if (tnm > thresh[2]) {
       tot_mut_df[i,"Tot_Mut_b3"] <- 1      # set this bucket for that row equal to 1
     } else {
       print("This is an invalid tot_num_mut. Please address this issue & re-try.")

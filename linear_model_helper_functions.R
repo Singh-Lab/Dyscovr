@@ -5,8 +5,41 @@
 
 # This file contains a set of helper functions that will be called by the linear
 # model (from linear_model.R or linear_model.R) while it is running.
+
 library(stringr)
 library(caret)
+
+
+############################################################
+
+#' Given a patient/ sample DF (as a data.table object), as well
+#' as a vector of PCs to include, restricts the patient/sample DF
+#' to only these PCs
+#' @param patient_df a data.table object of imported patient/sample DF
+#' @param mut_pc_vect a vector of integers denoting mutation matrix PCs
+#' to include, given as a character (e.g. "1,2,4")
+restrict_mut_pc_cols <- function(patient_df, mut_pc_vect) {
+  # Convert the PC vector to be numeric
+  mut_pc_vect <- as.numeric(unlist(strsplit(mut_pc_vect, ",", fixed = TRUE)))
+  
+  # Identify the PC columns within the patient DF
+  patient_df_pc_cols <- which(grepl("Mut_PC", colnames(patient_df)))
+  
+  # Ensure the largest given PC is within the DF (discard any that are larger than what we have)
+  if(TRUE %in% unlist(lapply(mut_pc_vect, function(x) ifelse(x > length(patient_df_pc_cols), TRUE, FALSE)))) {
+    print("Some mutation matrix PCs given exceed the number of PCs provided in patient DF. Restricting PCs
+          to those within given range.")
+    mut_pc_vect <- mut_pc_vect[mut_pc_vect <= length(patient_df_pc_cols)]
+  }
+
+  # Remove any PC columns we don't want to keep
+  cols_to_remove <- unlist(lapply(1:length(patient_df_pc_cols), function(i) {
+    if(!(i %in% mut_pc_vect)) {return(patient_df_pc_cols[i])}
+  }))
+  patient_df <- patient_df[, (cols_to_remove) := NULL]
+  
+  return(patient_df)
+}
 
 ############################################################
 
@@ -63,7 +96,8 @@ filter_meth_by_ensg <- function(methylation_df, ensg_ids) {
 #' @param cna_bucketing a string indicating if/how we are bucketing CNA values. 
 #' Possible values are "bucket_inclAmp", "bucket_exclAmp", "bucket_justAmp",
 #' "bucket_justDel", and "rawCNA"
-get_cna_stat <- function(cna_df, sample, cna_bucketing) {
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3'
+get_cna_stat <- function(cna_df, sample, cna_bucketing, dataset) {
 
   # Log2(CNA Stat + 1)
   if(cna_bucketing == "rawCNA") {
@@ -76,27 +110,49 @@ get_cna_stat <- function(cna_df, sample, cna_bucketing) {
   # 1 if amplified ("justAmp") or deleted ("justDel"), 0 if 2+ copies
   } else if ((cna_bucketing == "bucket_justAmp") | (cna_bucketing == "bucket_justDel")) {
     cna_stat <- unique(as.integer(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE])))
-    print(paste("CNA STAT PRE PROCESSING", cna_stat))
     if (length(cna_stat) > 1) {cna_stat <- cna_stat[1]}
-    else if(length(cna_stat) < 1) {cna_stat <- NA}
+    if(length(cna_stat) < 1) {cna_stat <- NA}
     else if (is.nan(cna_stat) | is.na(cna_stat)) {cna_stat <- NA}
     else {
       if (cna_bucketing == "bucket_justAmp") {
-        if(cna_stat > 2) {cna_stat <- 1}
-        else {cna_stat <- 0}
+        if(dataset == 'TCGA') {
+          if(cna_stat > 2) {cna_stat <- 1}
+          else {cna_stat <- 0}
+        } else if (dataset == "METABRIC") {
+          if(cna_stat > 0) {cna_stat <- 1}
+          else {cna_stat <- 0}
+        } else {print("Currently only implemented for TCGA and METABRIC."); return(NA)}
       } else {
-        if(cna_stat < 2) {cna_stat <- 1}
-        else {cna_stat <- 0}
+        if(dataset == "TCGA") {
+          if(cna_stat < 2) {cna_stat <- 1}
+          else {cna_stat <- 0}
+        } else if (dataset == "METABRIC") {
+          if(cna_stat < 0) {cna_stat <- 1}
+          else {cna_stat <- 0}
+        } else {print("Currently only implemented for TCGA and METABRIC."); return(NA)}
       }
     }
   
   # 3 buckets for deleted, normal, and amplified
   } else {
-    str_buckets <- as.character(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE]))
-    if(!(length(str_buckets) == 0)) {
-      buckets_list <- unlist(strsplit(unlist(strsplit(str_buckets, "(", fixed = TRUE))[2], ")", fixed = TRUE))[1]
-      cna_stat <- list(as.integer(unlist(strsplit(buckets_list, ",", fixed = TRUE))))
-    } else {cna_stat <- list(NA, NA, NA)}
+    if(dataset == "TCGA") {
+      str_buckets <- as.character(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE]))
+      if(!(length(str_buckets) == 0)) {
+        buckets_list <- unlist(strsplit(unlist(strsplit(str_buckets, "(", fixed = TRUE))[2], ")", fixed = TRUE))[1]
+        cna_stat <- list(as.integer(unlist(strsplit(buckets_list, ",", fixed = TRUE))))
+      } else {cna_stat <- list(NA, NA, NA)}
+    } else if (dataset == "METABRIC") {
+      cna_stat <- unique(as.integer(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE])))
+      if (length(cna_stat) > 1) {cna_stat <- cna_stat[1]}
+      if(length(cna_stat) < 1) {cna_stat <- list(NA, NA, NA)}
+      else if (is.nan(cna_stat) | is.na(cna_stat)) {cna_stat <- list(NA, NA, NA)}
+      else {
+        if(cna_stat < 0) {cna_stat <- list(1,0,0)}
+        else if (cna_stat > 0) {cna_stat <- list(0,0,1)}
+        else if (cna_stat == 0) {cna_stat <- list (0,1,0)}
+        else {print("Invalid CNA value. Returning NA."); return(NA)}
+      }
+    } else {print("Currently only implemented for TCGA and METABRIC."); return(NA)}
   }  
   
   return(cna_stat)
@@ -175,11 +231,16 @@ get_meth_stat <- function(methylation_df, sample, meth_bucketing, tumNormMatched
 #' @param sample the sample ID of the current sample
 #' @param tumNormMatched a TRUE/FALSE value indicating whether or not the analysis is 
 #' tumor-normal matched
-get_exp_stat <- function(expression_df, sample, tumNormMatched) {
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3'
+get_exp_stat <- function(expression_df, sample, tumNormMatched, dataset) {
   if(!tumNormMatched) {
-    # Add a pseudocount so we don't take the log of 0 (1 is typically used for logged values)
-    exp_stat <- log2(as.numeric(unlist(expression_df[, grepl(sample, colnames(expression_df)), 
-                                                     with = FALSE])) + 1)
+    exp_stat <- as.numeric(unlist(expression_df[, grepl(sample, colnames(expression_df)), 
+                                                with = FALSE]))
+    if(dataset == "TCGA") {
+      # Add a pseudocount so we don't take the log of 0 (1 is typically used for logged values)
+      exp_stat <- log2(exp_stat + 1)
+    }
+  
   } else {
     exp_stat <- get_tnm_fc(expression_df, sample)
   }
@@ -312,9 +373,12 @@ get_tnm_fc <- function(df, sample) {
 #' @param tumNormMatched a TRUE/ FALSE value indicating whether or not this is a 
 #' tumor-normal matched run
 #' @param QTL_type either "eQTL" or "meQTL" depending on the type of run we are running
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3'
 create_file_outpath <- function(cancerType, specificType, test, tester_name, 
-                                run_name, tumNormMatched, QTLtype) {
+                                run_name, tumNormMatched, QTLtype, dataset) {
   outpath <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/output_files"
+  
+  if(dataset != "TCGA") {outpath <- paste(outpath, dataset, sep = "/")}
   
   outpath <- paste(outpath, cancerType, sep = "/")
   if(!(specificType == "")) {outpath <- paste(outpath, specificType, sep = "/")}
@@ -323,11 +387,14 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
     outpath <- paste(outpath, tester_name, sep = "/")
   } else {outpath <- paste(outpath, run_name, sep = "/")}
   
-  if(tumNormMatched) {
-    outpath <- paste(outpath, "tumor_normal_matched", sep = "/")
-  } else {outpath <- paste(outpath, "tumor_only", sep = "/")}
+  if(dataset == "TCGA") {
+    if(tumNormMatched) {
+      outpath <- paste(outpath, "tumor_normal_matched", sep = "/")
+    } else {outpath <- paste(outpath, "tumor_only", sep = "/")}
+  }
   
   outpath <- paste(outpath, QTLtype, sep = "/")
+  print(paste("File outpath:", outpath))
   
   return(outpath)
 }
@@ -422,6 +489,8 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   
   # If we randomized expression, add "_RANDOMIZED" to the end of the file name
   if (randomize) {outfn <- paste(outfn, "_RANDOMIZED", sep = "")}
+  
+  print(paste("Outfile Name", outfn))
   
   return(outfn)
 }
@@ -618,7 +687,8 @@ combine_collinearity_diagnostics <- function(path, outfn, debug, randomize) {
 #' found on the rows or the columns of the DF (TRUE is columns, FALSE is rows)
 #' @param tumNormMatched a TRUE/FALSE value indicating whether we are looking at 
 #' tumor-normal matched samples (if FALSE, restrict to only cancer samples)
-subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3'
+subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched, dataset) {
   df <- as.data.frame(df)
   
   column_names_to_keep <- c("ensg_id", "Swissprot", "swissprot", "gene_name", "ensg_ids")
@@ -626,22 +696,27 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
   if(colNames == TRUE) {
     # Keep only intersecting patients
     label_col_indices <- which(colnames(df) %fin% column_names_to_keep)
-    just_patients <- unlist(lapply(colnames(df), function(x) 
-      unlist(strsplit(x, "-", fixed = TRUE))[1]))
+    just_patients <- colnames(df)
+    if(dataset == "TCGA") {
+      just_patients <- unlist(lapply(colnames(df), function(x) 
+        unlist(strsplit(x, "-", fixed = TRUE))[1]))
+    }
     df_adj <- df[, c(label_col_indices, which(just_patients %fin% patients))]
     #print(head(df_adj))
     
-    # Keep only cancer samples
-    if(!tumNormMatched) {
-      df_adj_label_col_indices <- which(colnames(df_adj) %fin% column_names_to_keep)
-      print(df_adj_label_col_indices)
-      print(which(grepl("-0", colnames(df_adj), fixed = TRUE)))
-      df_adj <- df_adj[, c(df_adj_label_col_indices, which(grepl("-0", colnames(df_adj), 
-                                                                 fixed = TRUE)))]
+    # Keep only cancer samples, if TCGA
+    if (dataset == "TCGA") {
+      if(!tumNormMatched) {
+        df_adj_label_col_indices <- which(colnames(df_adj) %fin% column_names_to_keep)
+        print(df_adj_label_col_indices)
+        print(which(grepl("-0", colnames(df_adj), fixed = TRUE)))
+        df_adj <- df_adj[, c(df_adj_label_col_indices, which(grepl("-0", colnames(df_adj), 
+                                                                   fixed = TRUE)))]
+      }
+      
+      # Remove any duplicate samples
+      df_adj <- df_adj[, !(grepl("-1", colnames(df_adj), fixed = TRUE))]
     }
-    
-    # Remove any duplicate samples
-    df_adj <- df_adj[, !(grepl("-1", colnames(df_adj), fixed = TRUE))]
     
   } else {
     if(length(unlist(strsplit(df$sample_id[1], "-", fixed = TRUE))) == 4) {
@@ -649,18 +724,24 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
         paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
     }
     # Keep only intersecting patients
-    just_patients <- unlist(lapply(df$sample_id, function(x) 
-      unlist(strsplit(x, "-", fixed = TRUE))[1]))
+    just_patients <- df$sample_id
+    if(dataset == "TCGA") {
+      just_patients <- unlist(lapply(df$sample_id, function(x) 
+        unlist(strsplit(x, "-", fixed = TRUE))[1]))
+    }
     df_adj <- df[which(just_patients %fin% patients),]
     print(head(df_adj))
     
     # Keep only cancer samples
-    if(!tumNormMatched) {
-      df_adj <- df_adj[which(grepl("-0", df_adj$sample_id, fixed = TRUE)),]
+    if(dataset == "TCGA") {
+      if(!tumNormMatched) {
+        df_adj <- df_adj[which(grepl("-0", df_adj$sample_id, fixed = TRUE)),]
+      }
+      
+      # Remove any duplicate samples
+      df_adj <- df_adj[!(grepl('-1', df_adj$sample_id, fixed = TRUE)),]
+      
     }
-    
-    # Remove any duplicate samples
-    df_adj <- df_adj[!(grepl('-1', df_adj$sample_id, fixed = TRUE)),]
   }
   return(as.data.table(df_adj))
 }
@@ -675,17 +756,22 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched) {
 #' @param mutation_regprot_df the data frame to subset using the patient ids
 #' @param tumNormMatched a TRUE/FALSE value indicating whether we are looking at 
 #' tumor-normal matched samples (if FALSE, restrict to only cancer samples)
-subset_regprot_df_by_intersecting_ids <- function(patients, mutation_regprot_df, tumNormMatched) {
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3'
+subset_regprot_df_by_intersecting_ids <- function(patients, mutation_regprot_df, 
+                                                  tumNormMatched, dataset) {
   
   # Adjust each row to remove patients not in the intersecting patients vector
   regprot_df_new_patient_labels <- lapply(mutation_regprot_df$Patient, function(x) {
     # Split apart the semicolon separated sample IDs
     spl_patients <- unlist(strsplit(x, ";", fixed = TRUE))
-    # Extract just the 4-digit patient ID
-    spl_patients_nosamp <- unlist(lapply(spl_patients, function(x) 
-      unlist(strsplit(x, "-", fixed = TRUE))[1]))
+    spl_patients_adj <- spl_patients
+    # Extract just the 4-digit patient ID, if TCGA
+    if(dataset == "TCGA") {
+      spl_patients_adj <- unlist(lapply(spl_patients, function(x) 
+        unlist(strsplit(x, "-", fixed = TRUE))[1]))
+    }
     # Check if this patient is in the intersecting patients list and return TRUE if so, F o.w.
-    matching_patient_ind <- unlist(lapply(spl_patients_nosamp, function(y) {
+    matching_patient_ind <- unlist(lapply(spl_patients_adj, function(y) {
       if(y %fin% patients) {
         return(TRUE)
       } else {return(FALSE)}
@@ -694,14 +780,16 @@ subset_regprot_df_by_intersecting_ids <- function(patients, mutation_regprot_df,
     if(TRUE %in% matching_patient_ind) {
       samps_to_keep <- spl_patients[matching_patient_ind]
       
-      # Keep only cancer samples
-      if(!tumNormMatched) {
-        samp_ids <- unlist(lapply(samps_to_keep, function(x) unlist(strsplit(x, "-", fixed = TRUE))[2]))
-        samps_to_keep <- samps_to_keep[unlist(lapply(samp_ids, function(x) startsWith(x, "0")))]
+      # Keep only cancer samples, if TCGA
+      if(dataset == "TCGA") {
+        if(!tumNormMatched) {
+          samp_ids <- unlist(lapply(samps_to_keep, function(x) unlist(strsplit(x, "-", fixed = TRUE))[2]))
+          samps_to_keep <- samps_to_keep[unlist(lapply(samp_ids, function(x) startsWith(x, "0")))]
+        }
+        
+        # Keep only non-duplicate samples
+        samps_to_keep <- samps_to_keep[!grepl(".1", samps_to_keep, fixed = TRUE)]
       }
-            
-      # Keep only non-duplicate samples
-      samps_to_keep <- samps_to_keep[!grepl(".1", samps_to_keep, fixed = TRUE)]
       
       # If we still have samples, return them in this row 
       if(length(samps_to_keep) > 0) {
@@ -723,7 +811,7 @@ subset_regprot_df_by_intersecting_ids <- function(patients, mutation_regprot_df,
 
 ############################################################
 #' Removes metastatic samples from a given data frame (sample ID will be
-#' -06 or -07 to indicate metastasis)
+#' -06 or -07 to indicate metastasis) - only for TCGA
 #' @param df the data frame to remove metastatic samples from
 #' @param colNames a TRUE/FALSE value indicating whether the patient/sample IDs are
 #' found on the rows or the columns of the DF (TRUE is columns, FALSE is rows)
@@ -759,7 +847,7 @@ remove_metastatic_samples <- function(df, colNames) {
 
 ############################################################
 #' Removes metastatic samples from a given regprot data frame (sample ID will be
-#' -06 or -07 to indicate metastasis)
+#' -06 or -07 to indicate metastasis) - only for TCGA
 #' @param df the regprot data frame to remove metastatic samples from
 remove_metastatic_samples_regprot <- function(df) {
 

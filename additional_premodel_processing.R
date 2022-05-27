@@ -1,10 +1,13 @@
 ############################################################
 ### Additional Pre-model Inputs & Processing 
-### Written By: Sara Camilli, April 2021
+### Written By: Sara Geraghty, April 2021
 ############################################################
 
 library(dplyr)
 library(VennDiagram)
+library(data.table)
+library(TCGAbiolinks)
+
 
 # This file contains additional pre-processing that is applied to all the data file
 # types that will be input to the linear model function.
@@ -19,6 +22,7 @@ library(VennDiagram)
   # 6. Find samples that have both an amplification and mutation, or deletion and mutation, in the same gene
 
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
+#main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/cBioPortal/METABRIC/"
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
 
 # Generalized ID conversion table from BiomaRt
@@ -59,7 +63,8 @@ colnames(expression_df_fpkm)[1] <- 'ensg_id'
 # 2. Filtered TMM 
 expression_df_tmm <- fread(paste(main_path, "Expression/tmm_normalized_expression_counts.csv", sep = ""), 
                           header = TRUE)
-# expression_df_tmm <- fread(paste(main_path, "Expression/expression_tmm_DF_TO.csv", sep = ""), header = TRUE)
+# expression_df_tmm <- fread(paste(main_path, "Expression/ALL_CT_tmm_normalized_expression_filtByExpr_counts.csv", sep = ""), 
+                        #header = TRUE)
 colnames(expression_df_tmm)[1] <- 'ensg_id'
 
 # 3. Quantile-Normalized
@@ -84,9 +89,9 @@ colnames(expression_df_rn)[1] <- 'ensg_id'
 
 ### NON-TUMOR-NORMAL MATCHED ###
 # Raw
-methylation_df_Beta <- fread(paste(main_path, "Methylation/methylation_DF_Beta.csv", sep = ""), 
+methylation_df_Beta <- fread(paste(main_path, "Methylation/methylation_DF_Beta_cancer_only.csv", sep = ""), 
                         header = TRUE)
-methylation_df_M <- fread(paste(main_path, "Methylation/methylation_DF_M.csv", sep = ""), 
+methylation_df_M <- fread(paste(main_path, "Methylation/methylation_DF_M_cancer_only.csv", sep = ""), 
                         header = TRUE)
 
 # Thresholded
@@ -138,7 +143,7 @@ colnames(mutation_targ_df)[2:ncol(mutation_targ_df)] <- unlist(lapply(colnames(m
 
 
 ### NON-TUMOR-NORMAL MATCHED ###
-mutation_regprot_df <- fread(paste(main_path, "Mutation/iprotein_results_missense.csv", sep = ""),
+mutation_regprot_df <- fread(paste(main_path, "Mutation/iprotein_results_missense_nonsense.csv", sep = ""),
                                 header = TRUE)   # I-Protein, all ligands
 mutation_regprot_df <- fread(paste(main_path, "Mutation/iprotein_results_missense_nucacids.csv", sep = ""),
                                 header = TRUE)   # I-Protein, nucleic acids only
@@ -205,8 +210,11 @@ patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/pat
 ### NON-TUMOR-NORMAL MATCHED ###
 #patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm.csv", sep = ""), 
                        #header = TRUE, row.names = 1)
-patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_normAge.csv", sep = ""), 
+patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_MN_normAge.csv", sep = ""), 
                        header = TRUE, row.names = 1)
+
+patient_df_brca_blca_hnsc <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_MN_normAge_inclBRCAsubtypes.csv", sep = ""), 
+                                      header = TRUE, row.names = 1)
 
 # If BRCA, eliminate the gender column
 is_brca <- TRUE
@@ -277,7 +285,8 @@ sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/samp
 #' patient characteristics are columns)
 #' @param sample_df the sample data frame (patient samples are
 #' rows, sample characteristics are columns)
-combine_patient_and_samp_dfs <- function(patient_df, sample_df) {
+#' @param dataset either 'tcga', 'metabric', 'icgc', or 'cptac3'
+combine_patient_and_samp_dfs <- function(patient_df, sample_df, dataset) {
   # For each sample, retrieve the corresponding patient info
   sample_dfs <- lapply(1:nrow(sample_df), function(i) {
     # Get the sample barcode and its row
@@ -286,13 +295,16 @@ combine_patient_and_samp_dfs <- function(patient_df, sample_df) {
     print(sample_barcode)
     #print(sample_row)
     
-    # Get the corresponding row from the patient DF
-    patient <- unlist(strsplit(sample_barcode, "-", fixed = TRUE))[3]
+    # Get the corresponding row from the patient DF, if tcga
+    patient <- sample_barcode
+    if(dataset == "tcga") {
+      patient <- unlist(strsplit(sample_barcode, "-", fixed = TRUE))[3]
+    }
     print(patient)
     
     if(patient %fin% rownames(patient_df)) {
       patient_row <- patient_df[rownames(patient_df) == patient,]
-      print(patient_row)
+      #print(patient_row)
       
       # Combine these together, so that the sample ID is maintained as the row name
       if(!((length(sample_row) == 0) | (length(patient_row) == 0))) {
@@ -316,9 +328,11 @@ combine_patient_and_samp_dfs <- function(patient_df, sample_df) {
 }
 
 # Call this function
-combined_pat_samp_df <- combine_patient_and_samp_dfs(patient_df, sample_df)
+combined_pat_samp_df <- combine_patient_and_samp_dfs(patient_df, sample_df, 'tcga')
 
-
+# Remove rows that are entirely NA
+combined_pat_samp_df <- combined_pat_samp_df[rowSums(is.na(combined_pat_samp_df)) != ncol(combined_pat_samp_df),]
+  
 
 # Write the results to a file
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_total_frac_tmm_ntnm.csv", sep = ""))
@@ -391,14 +405,14 @@ get_unique_patients <- function(sample_ids) {
 
 # Call this function for all representative data frames (check that other CNA, expression,
 # etc. data frames have the same patients)
-cna_patients <- get_unique_patients(colnames(cna_df_raw))    # 732
-methylation_patients <- get_unique_patients(colnames(methylation_df)[2:ncol(methylation_df)])  #-1]) # 734
+cna_patients <- get_unique_patients(colnames(cna_df_raw))    # 732; 6123
+methylation_patients <- get_unique_patients(colnames(methylation_df)[2:ncol(methylation_df)])  #-1]) # 734; 6411
 exp_samp_ids <- unlist(lapply(colnames(expression_df)[2:ncol(expression_df)], function(x)
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
-expression_patients <- get_unique_patients(exp_samp_ids)  # 738
-mutation_targ_patients <- unlist(get_unique_patients(colnames(mutation_targ_df)[2:ncol(mutation_targ_df)])) # 978
+expression_patients <- get_unique_patients(exp_samp_ids)  # 738; 7424
+mutation_targ_patients <- unlist(get_unique_patients(colnames(mutation_targ_df)[2:ncol(mutation_targ_df)])) # 978; 10002
 mutation_regprot_patients <- unique(unlist(lapply(mutation_regprot_df$Patient, function(x) 
-  unlist(strsplit(x, ";", fixed = TRUE)))))   # 619 -- ignore this
+  unlist(strsplit(x, ";", fixed = TRUE)))))   # 619; 6732 -- ignore this (6875 with nonsense)
 
 # If needed
 #patient_sample_df <- as.data.frame(patient_sample_df)
@@ -407,13 +421,13 @@ mutation_regprot_patients <- unique(unlist(lapply(mutation_regprot_df$Patient, f
 
 clin_samp_ids <- unlist(lapply(rownames(patient_sample_df), function(x)
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
-clinical_patients <- get_unique_patients(clin_samp_ids)  # 739
+clinical_patients <- get_unique_patients(clin_samp_ids)  # 739; 7745
 
 intersecting_patients <- intersect(cna_patients, 
                                    intersect(methylation_patients,
                                              intersect(expression_patients,
                                                        intersect(mutation_targ_patients, clinical_patients))))
-print(length(intersecting_patients)) # 664 in BRCA
+print(length(intersecting_patients)) # 664 in BRCA; 4545 PC
 
 #' Given a list of intersecting patient IDs (XXXX, e.g. A0WY), it subsets a 
 #' given data frame with column names that contain sample IDs (XXXX-XXX, e.g. A0WY-01A)
@@ -430,6 +444,7 @@ subset_by_intersecting_ids <- function(intersecting_patients, df, colNames) {
     cols_to_keep <- as.numeric(c(1,(which(just_patients %fin% intersecting_patients)+1)))
     df <- as.data.frame(df)
     df_adj <- df[, cols_to_keep]
+    
 
     # Keep only cancer samples
     just_samples <- unlist(lapply(colnames(df_adj)[2:ncol(df_adj)], function(x)
@@ -516,7 +531,7 @@ methylation_df_sub$ensg_ids <- unlist(lapply(methylation_df_sub$Gene_Symbol, fun
 
 # Re-write these all to to files
 write.csv(cna_df_sub, paste(main_path, "Linear Model/Tumor_Only/CNV/CNA_AllGenes_CancerOnly_IntersectPatients.csv", sep = ""))
-write.csv(methylation_df_sub, paste(main_path, "Linear Model/Tumor_Only/Methylation/methylation_0.8_CancerOnly_IntersectPatients.csv", sep = ""))
+write.csv(methylation_df_sub, paste(main_path, "Linear Model/Tumor_Only/Methylation/methylation_M_CancerOnly_IntersectPatients.csv", sep = ""))
 write.csv(expression_df_sub, paste(main_path, "Linear Model/Tumor_Only/Expression/expression_tmm_IntersectPatients.csv", sep = ""))
 write.csv(mutation_targ_df_sub, paste(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_IntersectPatients.csv", sep = ""))
 write.csv(mutation_regprot_df_sub, paste(main_path, "Linear Model/Tumor_Only/Regprot_Mutation/iprotein_results_missense_IntersectPatients.csv", sep = ""))
@@ -594,7 +609,7 @@ sample_targets <- curated_targets_df[,colnames(curated_targets_df) == sample_pro
 sample_targets <- sample_targets[!is.na(sample_targets)] 
 
 # For TP53, get targets from publication (Fischer, 2017, https://doi.org/10.1038/onc.2016.502)
-tp53_targets_df <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TP53_targets.csv", 
+tp53_targets_df <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Validation_Files/TP53_targets.csv", 
                             header = TRUE)
 tp53_targets_df <- tp53_targets_df[tp53_targets_df$Gene.Symbol != "",]
 sample_targets <- tp53_targets_df$Gene.Symbol
@@ -695,5 +710,180 @@ ensg <- "ENSG00000141510"
   
 gn <- "PIK3CA"
 ensg <- "ENSG00000121879"
+
+
+############################################################
+############################################################
+# 7. CREATE SAMPLE ID FILES WITH NO OVERLAP IN MUTATION 
+# BETWEEN TWO GIVEN GENES
+############################################################
+############################################################
+mutation_count_matrix <- read.csv(paste0(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_IntersectPatients.csv"), 
+                                  header = TRUE, row.names = 1, check.names = FALSE)
+mutation_count_matrix_MN <- read.csv(paste0(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_nonsense_IntersectPatients.csv"), 
+                                  header = TRUE, row.names = 1, check.names = FALSE)
+
+gene1 <- "TP53"
+gene2 <- "PIK3CA"
+
+#' Get patients without a mutation the given gene1 AND gene2 (eliminate overlap)
+#' @param mutation_count_matrix a mutation count matrix of all samples and genes
+#' @param gene1 the gene name of the first gene 
+#' @param gene2 the gene name of the second gene 
+eliminate_mutation_overlap <- function(mutation_count_matrix, gene1, gene2) {
+  mut_count_mat_sub <- mutation_count_matrix[(mutation_count_matrix$Gene_Symbol == gene1) | 
+                                               (mutation_count_matrix$Gene_Symbol == gene2),]
+  g1_mut_indices <- unlist(lapply(1:ncol(mut_count_mat_sub), function(i) 
+    ifelse(as.numeric(mut_count_mat_sub[1,i]) > 0, i, NA)))
+  g2_mut_indices <- unlist(lapply(1:ncol(mut_count_mat_sub), function(i) 
+    ifelse(as.numeric(mut_count_mat_sub[2,i]) > 0, i, NA)))
+  
+  g1_mut_indices <- g1_mut_indices[!is.na(g1_mut_indices)]
+  g2_mut_indices <- g2_mut_indices[!is.na(g2_mut_indices)]
+  
+  both_mut <- intersect(g1_mut_indices, g2_mut_indices)
+  
+  mut_count_mat_sub_excl_doub_mut <- mut_count_mat_sub[, -both_mut]
+  patients_no_mut_overlap <- unlist(lapply(colnames(mut_count_mat_sub_excl_doub_mut), function(x)
+    unlist(strsplit(x, "-", fixed = TRUE))[1]))
+  patients_no_mut_overlap <- patients_no_mut_overlap[!(patients_no_mut_overlap == "Gene_Symbol")]
+  
+  return(patients_no_mut_overlap)
+}
+
+
+# Call function
+patients_no_mut_overlap <- eliminate_mutation_overlap(mutation_count_matrix, gene1, gene2)
+patients_no_mut_overlap_MN <- eliminate_mutation_overlap(mutation_count_matrix_MN, gene1, gene2)
+
+# write to files
+write(patients_no_mut_overlap, paste0(main_path, "Patient Subsets/NotTP53andPIK3CAmut_patient_ids.txt"))
+write(patients_no_mut_overlap_MN, paste0(main_path, "Patient Subsets/NotTP53andPIK3CAMNmut_patient_ids.txt"))
+
+
+# Get overlap with other patient subsets
+patient_set_lt20pamp <- read.table(paste0(main_path, "Patient Subsets/LessThan20PercAmp_patient_ids.txt"), header = TRUE)[,1]
+patient_set_lumA <- read.table(paste0(main_path, "Patient Subsets/Luminal.A_patient_ids.txt"), header = TRUE)[,1]
+patient_set_lumB <- read.table(paste0(main_path, "Patient Subsets/Luminal.B_patient_ids.txt"), header = TRUE)[,1]
+patient_set_lumAB <- read.table(paste0(main_path, "Patient Subsets/Luminal.A.B_patient_ids.txt"), header = TRUE)[,1]
+patient_set_basal <- read.table(paste0(main_path, "Patient Subsets/Basal_patient_ids.txt"), header = TRUE)[,1]
+patient_set_her2 <- read.table(paste0(main_path, "Patient Subsets/HER2_patient_ids.txt"), header = TRUE)[,1]
+patient_set_normLike <- read.table(paste0(main_path, "Patient Subsets/Normal-like_patient_ids.txt"), header = TRUE)[,1]
+
+lumA_noMutOL <- intersect(patient_set_lumA, patients_no_mut_overlap_MN)
+lumB_noMutOL <- intersect(patient_set_lumB, patients_no_mut_overlap_MN)
+basal_noMutOL <- intersect(patient_set_basal, patients_no_mut_overlap_MN)
+her2_noMutOL <- intersect(patient_set_her2, patients_no_mut_overlap_MN)
+normLike_noMutOL <- intersect(patient_set_normLike, patients_no_mut_overlap_MN)
+lt20pamp_noMutOL <- intersect(patient_set_lt20pamp, patients_no_mut_overlap_MN)
+
+lt20pamp_lumA_noMutOL <- intersect(patient_set_lt20pamp, lumA_noMutOL)
+lt20pamp_lumB_noMutOL <- intersect(patient_set_lt20pamp, lumB_noMutOL)
+lt20pamp_basal_noMutOL <- intersect(patient_set_lt20pamp, basal_noMutOL)
+lt20pamp_her2_noMutOL <- intersect(patient_set_lt20pamp, her2_noMutOL)
+lt20pamp_normLike_noMutOL <- intersect(patient_set_lt20pamp, normLike_noMutOL)
+
+# Write these subsets to files
+write(lumA_noMutOL, paste0(main_path, "Patient Subsets/Luminal.A.NotTP53andPIK3CAMNmut_patient_ids.txt"))
+write(lumB_noMutOL, paste0(main_path, "Patient Subsets/Luminal.B.NotTP53andPIK3CAMNmut_patient_ids.txt"))
+write(basal_noMutOL, paste0(main_path, "Patient Subsets/Basal.NotTP53andPIK3CAMNmut_patient_ids.txt"))
+write(her2_noMutOL, paste0(main_path, "Patient Subsets/HER2.NotTP53andPIK3CAMNmut_patient_ids.txt"))
+write(normLike_noMutOL, paste0(main_path, "Patient Subsets/Normal-like.NotTP53andPIK3CAMNmut_patient_ids.txt"))
+
+write(lt20pamp_lumA_noMutOL, paste0(main_path, "Patient Subsets/LT20PAmp.NotTP53andPIK3CAMNmut.LumA_patient_ids.txt"))
+write(lt20pamp_lumB_noMutOL, paste0(main_path, "Patient Subsets/LT20PAmp.NotTP53andPIK3CAMNmut.LumB_patient_ids.txt"))
+write(lt20pamp_basal_noMutOL, paste0(main_path, "Patient Subsets/LT20PAmp.NotTP53andPIK3CAMNmut.Basal_patient_ids.txt"))
+write(lt20pamp_her2_noMutOL, paste0(main_path, "Patient Subsets/LT20PAmp.NotTP53andPIK3CAMNmut.HER2_patient_ids.txt"))
+write(lt20pamp_normLike_noMutOL, paste0(main_path, "Patient Subsets/LT20PAmp.NotTP53andPIK3CAMNmut.NormLike_patient_ids.txt"))
+
+
+############################################################
+############################################################
+# 8. FIND SAMPLES WITH MUTATION IN ONE GENE & NO MUTATION
+# IN ANOTHER (INDEPENDENT POSITIVE AND NEGATIVE SETS)
+############################################################
+############################################################
+
+mutation_count_matrix <- read.csv(paste0(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense.csv"), 
+                                  header = TRUE, row.names = 1, check.names = FALSE)
+
+gene1 <- "TP53"
+gene2 <- "PIK3CA"
+
+#' Get patients with a mutation just in given gene1 and not in given gene2
+#' @param mutation_count_matrix a mutation count matrix of all samples and genes
+#' @param gene1 the gene name of the first gene (with mutation)
+#' @param gene2 the gene name of the second gene (no mutation)
+get_independent_mut_patient_sets <- function(mutation_count_matrix, gene1, gene2) {
+  # Subset the mutation count matrix to just these two genes
+  mutation_count_matrix_sub <- mutation_count_matrix[rownames(mutation_count_matrix) %in% c(gene1, gene2),]
+  
+  # Get the patients with a mutation in the first gene but no mutation in the second
+  g1_mut_g2_noMut <- mutation_count_matrix_sub[, intersect(which(mutation_count_matrix_sub[rownames(mutation_count_matrix_sub) == gene1,] == 1),
+                                                           (which(mutation_count_matrix_sub[rownames(mutation_count_matrix_sub) == gene2,] == 0)))]
+  g1_mut_g2_noMut_pats <- unique(unlist(lapply(colnames(g1_mut_g2_noMut), function(x) 
+    unlist(strsplit(x, "-", fixed = TRUE))[3])))
+  
+  return(g1_mut_g2_noMut_pats)
+}
+
+
+g1_mut_g2_noMut_pats <- get_independent_mut_patient_sets(mutation_count_matrix, gene1, gene2)
+g2_mut_g1_noMut_pats <- get_independent_mut_patient_sets(mutation_count_matrix, gene2, gene1)
+
+
+#' Get and return patients with no mutation in the given gene
+#' @param mutation_count_matrix a mutation count matrix of all samples and genes
+#' @param gene the gene name of the gene whose patients (with a mutation in this gene)
+#' we want to exclude
+get_patients_with_no_mut_in_gene <- function(mutation_count_matrix, gene) {
+  # Subset the mutation count matrix to just this gene
+  mutation_count_matrix_sub <- mutation_count_matrix[rownames(mutation_count_matrix) == gene,]
+  
+  # Get the patients without a mutation in the gene
+  gene_noMut <- mutation_count_matrix_sub[, which(mutation_count_matrix_sub[rownames(mutation_count_matrix_sub) == gene,] == 0)]
+  gene_noMut_pats <- unique(unlist(lapply(colnames(gene_noMut), function(x) 
+    unlist(strsplit(x, "-", fixed = TRUE))[3])))
+  
+  return(gene_noMut_pats)
+}
+
+g1_noMut_pats <- get_patients_with_no_mut_in_gene(mutation_count_matrix, gene1)
+g2_noMut_pats <- get_patients_with_no_mut_in_gene(mutation_count_matrix, gene2)
+
+# Get the intersection with our intersecting ids
+intersecting_pats <- read.table(paste(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt", sep = ""))[,1]
+
+g1_noMut_pats <- intersect(g1_noMut_pats, intersecting_pats)
+g2_noMut_pats <- intersect(g2_noMut_pats, intersecting_pats)
+
+noMut_pats_list <- list(gene1 = g1_noMut_pats, gene2 = g2_noMut_pats)
+
+# Plot a Venn diagram of the overlap
+ggVennDiagram(noMut_pats_list, label_alpha = 0, category.names = c(paste("No Mut,", gene1), paste("No Mut,", gene2)), set_color = "black",
+              set_size = 10, label_size = 8, edge_size = 0) +
+  ggplot2::scale_fill_gradient(low="cornsilk1", high = "cadetblue3")
+
+# Write these to files
+write(g1_noMut_pats, paste0(main_path, paste0("Patient Subsets/", paste0(gene1, ".NoMut_patient_ids.txt"))))
+write(g2_noMut_pats, paste0(main_path, paste0("Patient Subsets/", paste0(gene2, ".NoMut_patient_ids.txt"))))
+
+# Get the intersection with LT20PAmp patients
+lt20pamp_pats <- read.table(paste0(main_path, "Patient Subsets/LessThan20PercAmp_patient_ids.txt"))[,1]
+
+g1_noMut_pats_lt20pamp <- intersect(g1_noMut_pats, lt20pamp_pats)
+g2_noMut_pats_lt20pamp <- intersect(g2_noMut_pats, lt20pamp_pats)
+
+noMut_pats_lt20pamp_list <- list(gene1 = g1_noMut_pats_lt20pamp, gene2 = g2_noMut_pats_lt20pamp)
+
+# Plot a Venn diagram of the overlap
+ggVennDiagram(noMut_pats_lt20pamp_list, label_alpha = 0, category.names = c(paste("No Mut,", gene1), paste("No Mut,", gene2)), set_color = "black",
+              set_size = 10, label_size = 8, edge_size = 0) +
+  ggplot2::scale_fill_gradient(low="cornsilk1", high = "cadetblue3")
+
+# Write these to files
+write(g1_noMut_pats_lt20pamp, paste0(main_path, paste0("Patient Subsets/", paste0("LT20PAmp.", paste0(gene1, ".NoMut_patient_ids.txt")))))
+write(g2_noMut_pats_lt20pamp, paste0(main_path, paste0("Patient Subsets/", paste0("LT20PAmp.", paste0(gene2, ".NoMut_patient_ids.txt")))))
+
 
 

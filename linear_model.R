@@ -32,6 +32,10 @@ parser <- ArgumentParser()
 
 # Specify desired options for the parser
 
+# Data set we are running on
+parser$add_argument("--dataset", default = "TCGA", type = "character", 
+                    help = "TCGA, METABRIC, ICGC, or CPTAC3. Default is TCGA.")
+
 # Type of QTL to run 
 parser$add_argument("--QTLtype", default = "eQTL", type = "character", 
                     help = "eQTL or meQTL. Default is eQTL.")
@@ -69,6 +73,8 @@ parser$add_argument("--tester_uniprot_id", default = "P04637", type = "character
                     help = "Uniprot ID of regulatory protein if doing a 1-protein test. Defaults to TP53 (P04637).")
 parser$add_argument("--tester_ensg_id", default = "ENSG00000141510", type = "character",
                     help = "ENSG ID of regulatory protein if doing a 1-protein test. Defaults to TP53 (ENSG00000141510).")
+parser$add_argument("--incl_nextMutDriver", default = "FALSE", type = "character",
+                    help = "Currently implemented only for TP53 and PIK3CA in BRCA. If TRUE, will include mutation status, CNA status, and mutation interaction term of the other (TP53 if PIK3CA, PIK3CA if TP53) in the model as well.")
 
 # The files to use for the other inputs
 parser$add_argument("--protein_ids_df", default = "iprotein_protein_ids_df.csv", 
@@ -131,6 +137,8 @@ parser$add_argument("--num_PEER", default = 0, type = "integer",
                     help = "A value from 0 to 10 indicating the number of PEER factors we are using as covariates in our model. Default is 0.")
 parser$add_argument("--num_pcs", default = 2, type = "integer",
                     help = "A value between 0 and 2 indicating the number of principal components we are using as covariates in our model. Default is 2.")
+parser$add_argument("--mut_pc_vect", default = "0", type = "character",
+                    help = "either '0' for no mutational vectors, or a vector of PCs to include, e.g. 1,3,4. Default is 0.")
 
 # Add a flag for running collinearity diagnostics; can be useful but adds to runtime.
 parser$add_argument("--collinearity_diagn", default = "FALSE", type = "character",
@@ -195,6 +203,7 @@ collinearity_diagn <- str2bool(args$collinearity_diagn)
 removeCis <- str2bool(args$removeCis)
 removeMetastatic <- str2bool(args$removeMetastatic)
 useNumFunctCopies <- str2bool(args$useNumFunctCopies)
+incl_nextMutDriver <- str2bool(args$incl_nextMutDriver)
 
 
 ############################################################
@@ -203,14 +212,19 @@ useNumFunctCopies <- str2bool(args$useNumFunctCopies)
 # Set the paths
 input_file_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/"
 
+
 if(args$cancerType == "BRCA") {
   prot_path <- paste(input_file_path, "BRCA/", sep = "")
   targ_path <- paste(input_file_path, "BRCA/target_lists/", sep = "")
   
-  if(!tumNormMatched) {
-    main_path <- paste(input_file_path, "BRCA/tumor_only/", sep = "")
+  if(args$dataset == "METABRIC") {
+    main_path <- paste(input_file_path, "METABRIC/")
   } else {
-    main_path <- paste(input_file_path, "BRCA/tumor_normal_matched/", sep = "") 
+    if(!tumNormMatched) {
+      main_path <- paste(input_file_path, "BRCA/tumor_only/", sep = "")
+    } else {
+      main_path <- paste(input_file_path, "BRCA/tumor_normal_matched/", sep = "") 
+    }
   }
 } else {
   prot_path <- paste(input_file_path, "PanCancer/", sep = "")
@@ -247,6 +261,8 @@ if(!test) {
   sample_protein_uniprot <- args$tester_uniprot_id
   sample_protein_ensg <- args$tester_ensg_id
   sample_protein_name <- args$tester_name
+  
+  print(paste("Tester Protein:", sample_protein_name))
   
   protein_ids_df <- data.table(swissprot_ids = sample_protein_uniprot,
                                ensg_ids = sample_protein_ensg)
@@ -362,6 +378,9 @@ patient_df <- fread(paste(main_path, paste("patient/", args$patient_df, sep = ""
                     header = TRUE)
 colnames(patient_df)[1] <- "sample_id"
 
+# Restrict the Mut_PC columns to only those given in the argument vector
+patient_df <- restrict_mut_pc_cols(patient_df, args$mut_pc_vect)
+
 if(debug) {
   print("Patient DF")
   print(head(patient_df))
@@ -412,21 +431,23 @@ if(debug) {
 ############################################################
 # If we are using a data frame with the number of functional copies for the
 # given regulatory protein, import that here
-
-num_funct_copies_DF <- fread(paste(main_path, args$functional_copies_df, sep = ""), header = TRUE)
-colnames(num_funct_copies_DF)[1] <- "sample_id"
-
-if(debug) {
-  print("Num. Functional Copies DF")
-  print(head(num_funct_copies_DF))
+if(useNumFunctCopies) {
+  num_funct_copies_DF <- fread(paste(main_path, args$functional_copies_df, sep = ""), header = TRUE)
+  colnames(num_funct_copies_DF)[1] <- "sample_id"
+  
+  if(debug) {
+    print("Num. Functional Copies DF")
+    print(head(num_funct_copies_DF))
+  }
 }
+
 
 ############################################################
 #### OVERVIEW OF LINEAR MODEL
 ############################################################
 ### PATIENT CHARACTERISTICS ###
 # Gender : Gender of all samples 1..j..M (0 if male, 1 if female) -- ONLY INCLUDE IF NOT BRCA
-# Age : Age of all samples 1..j..M in years 
+# Age : Age of all samples 1..j..M in years / 100
 # If Buckets: 1 if 0-9, 2 if 10-19, 3 if 20-29, 4 if 30-39, 5 if 40-49, 6 if 50-59, 7 if 60-69, 8 if 70-79, 9 if 80-89, 10 if 90+
 # Race : Race/ Ethnicity of all samples 1..j..M -- CURRENTLY EXCLUDING
 # Buckets: 1 if White (not Latinx), 2 if White (Latinx), 3 if black or African, 4 if Asian, 5 if other
@@ -437,7 +458,7 @@ if(debug) {
 # Tumor_purity : An estimate of the 'purity' of the tumor (fraction of tumor cells within tumor sample) 
 # Buckets: 1 if low purity (0-0.5), 2 if medium purity (0.5-0.75), 3 if high purity (0.75-1.0)
 # Total_IC_Frac : An estimate of the fraction of tumor cells in the sample, from CIBERSORT Abs
-# Buckets: 1 if low ICI (0-0.3), 2 if medium ICI (0.3-0.7), 3 if high ICI (0.7-1.0)
+# Buckets: 1 if low ICI (0-0.3), 2 if medium ICI (0.3-0.7), 3 if high ICI (0.7-1.0), for TCGA
 # Tumor Type/ Subtype : The type or subtype classification of the tumor sample (buckets equivalent to the number of types/ subtypes)
 
 ### REGULATORY PROTEIN i CHARACTERISTICS ###
@@ -530,6 +551,10 @@ if(debug) {
 #' all cis pairings
 #' @param all_genes_id_conv an ID conversion file from BioMart, for use in removing 
 #' cis pairings if needed
+#' @param incl_nextMutDriver a TRUE/FALSE value indicating, if we are running just on
+#' TP53 or PIK3CA in BRCA, whether or not we include mutation/ CNA/ mutation interaction
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3', to denote what columns
+#' we are referencing/ specific data types we are using
 run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df, 
                              mutation_df_targ, mutation_df_regprot, methylation_df, 
                              methylation_df_meQTL, cna_df, expression_df, num_funct_copies_df,
@@ -537,7 +562,8 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                              tumNormMatched, randomize, cna_bucketing, meth_bucketing, 
                              useNumFunctCopies, num_PEER, num_pcs, 
                              debug, collinearity_diagn, outpath, outfn, regularization, 
-                             covs_to_incl, removeCis, all_genes_id_conv) {
+                             covs_to_incl, removeCis, all_genes_id_conv, incl_nextMutDriver,
+                             dataset) {
   
   # We need to get a mini-table for every r_i, t_k combo that we rbind into a master table of results
   results_df_list <- lapply(1:protein_ids_df[, .N], function(i) {
@@ -560,7 +586,9 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                                       useNumFunctCopies = useNumFunctCopies,
                                       cna_bucketing = cna_bucketing, 
                                       meth_bucketing = meth_bucketing, 
-                                      tumNormMatched = tumNormMatched, debug = debug)
+                                      tumNormMatched = tumNormMatched, 
+                                      incl_nextMutDriver = incl_nextMutDriver,
+                                      debug = debug, dataset = dataset)
     
     if(debug) {
       print("Starter DF, with Regprot Inputs")
@@ -605,7 +633,8 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                                            cna_bucketing = cna_bucketing,
                                            meth_bucketing = meth_bucketing, 
                                            analysis_type = analysis_type,
-                                           tumNormMatched = tumNormMatched, debug = debug)
+                                           tumNormMatched = tumNormMatched, 
+                                           debug = debug, dataset = dataset)
         
         
         if(length(lm_input_table) == 0) {return(NA)}
@@ -769,24 +798,37 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
 #' methylation values
 #' @param tumNormMatched a TRUE/FALSE value indicating whether or not the analysis is 
 #' tumor-normal matched
+#' @param incl_nextMutDriver a TRUE/FALSE value indicating, if we are running just on
+#' TP53 or PIK3CA in BRCA, whether or not we include mutation/ CNA/ mutation interaction
+#' terms for the other driver gene (e.g. for TP53 if PIK3CA or PIK3CA if TP53). If we
+#' are running on TTN (as a control), then we use PIK3CA covariates as a control
 #' @param debug a TRUE/FALSE value indicating if we are in debug mode and should 
 #' use additional prints
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3', to denote what columns
+#' we are referencing/ specific data types we are using
 fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg, 
                                 mutation_regprot_df, methylation_df, cna_df, num_funct_copies_df,
-                                useNumFunctCopies, cna_bucketing, meth_bucketing, tumNormMatched, debug) {
+                                useNumFunctCopies, cna_bucketing, meth_bucketing, tumNormMatched, 
+                                incl_nextMutDriver, debug, dataset) {
   
   # Filter the data frames to look at only this regulatory protein
   mutation_regprot_df_sub <- mutation_regprot_df[Swissprot %like% regprot_i_uniprot]
   cna_df_sub <- filter_cna_by_ensg(cna_df, regprot_i_ensg)   #TODO: try and make this faster
   methylation_df_sub <- filter_meth_by_ensg(methylation_df, regprot_i_ensg)  #TODO: try and make this faster
   
-  print(paste("REGPROTi ENSG:", regprot_i_ensg))
+  #print(paste("REGPROTi ENSG:", regprot_i_ensg))
   
-  # Optionally, add mutation, amplification status covariates for PIK3CA if regprot is TP53 (HACKY- need to fix)
+  # Optionally, add mutation, amplification status covariates for PIK3CA if regprot is TP53
+  # and vice versa (HACKY- need to fix)
   cna_df_pik3ca <- NA
-  if(regprot_i_ensg == "ENSG00000141510") {
+  cna_df_tp53 <- NA
+  if((regprot_i_ensg == "ENSG00000141510") & incl_nextMutDriver) {
     cna_df_pik3ca <- filter_cna_by_ensg(cna_df, "ENSG00000121879")
     mutation_regprot_df_pik3ca <- mutation_regprot_df[Swissprot %like% "P42336"]
+  }
+  if((regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) & incl_nextMutDriver) {
+    cna_df_tp53 <- filter_cna_by_ensg(cna_df, "ENSG00000141510")
+    mutation_regprot_df_tp53 <- mutation_regprot_df[Swissprot %like% "P04637"]
   }
   
   # If tumor-normal matched, limit to just cancer samples (we'll ID the matched normal in each run)
@@ -812,7 +854,7 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
     else {mut_stat <- 0}
     
     # Does this regulatory protein have a CNA in cancer?
-    cna_stat <- get_cna_stat(cna_df_sub, sample, cna_bucketing)
+    cna_stat <- get_cna_stat(cna_df_sub, sample, cna_bucketing, dataset)
     if(grepl("incl", cna_bucketing)) {cna_stat <- as.integer(cna_stat[[1]])}    
     
     # Does this regulatory protein have a methylation marker in cancer, or differential 
@@ -832,20 +874,34 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
       fnc_stat <- log2(fnc_stat + 1)
     }
     
-    pik3ca_cna_stat <- NA
-    pik3ca_mut_stat <- NA
-    pik3ca_p53_comb_stat <- NA
-    if(regprot_i_ensg == "ENSG00000141510") {
-      pik3ca_cna_stat <- get_cna_stat(cna_df_pik3ca, sample, "bucket_justAmp")
-      # Switch TP53's CNA stat to just_Del
-      cna_stat <- get_cna_stat(cna_df_sub, sample, "bucket_justDel")
-      mutation_regprot_df_pik3ca_sub <- mutation_regprot_df_pik3ca[Patient %like% sample]
-      if(mutation_regprot_df_pik3ca_sub[, .N] > 0) {
-        pik3ca_mut_stat <- 1
-      } else {pik3ca_mut_stat <- 0}
-      if ((mut_stat == 1) & (pik3ca_mut_stat == 1)) {
-        pik3ca_p53_comb_stat <- 1
-      } else {pik3ca_p53_comb_stat <- 0}
+    altern_cna_stat <- NA
+    altern_mut_stat <- NA
+    altern_comb_stat <- NA
+    if (incl_nextMutDriver) {
+      if(regprot_i_ensg == "ENSG00000141510") {
+        altern_cna_stat <- get_cna_stat(cna_df_pik3ca, sample, "bucket_justAmp", dataset)
+        # Switch TP53's CNA stat to just_Del
+        cna_stat <- get_cna_stat(cna_df_sub, sample, "bucket_justDel", dataset)
+        mutation_regprot_df_pik3ca_sub <- mutation_regprot_df_pik3ca[Patient %like% sample]
+        if(mutation_regprot_df_pik3ca_sub[, .N] > 0) {
+          altern_mut_stat <- 1
+        } else {altern_mut_stat <- 0}
+        if ((mut_stat == 1) & (altern_mut_stat == 1)) {
+          altern_comb_stat <- 1
+        } else {altern_comb_stat <- 0}
+      }
+      if(regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) {
+        altern_cna_stat <- get_cna_stat(cna_df_tp53, sample, "bucket_justDel", dataset)
+        # Switch PIK3CA's CNA stat to just_Amp
+        cna_stat <- get_cna_stat(cna_df_sub, sample, "bucket_justAmp", dataset)
+        mutation_regprot_df_tp53_sub <- mutation_regprot_df_tp53[Patient %like% sample]
+        if(mutation_regprot_df_tp53_sub[, .N] > 0) {
+          altern_mut_stat <- 1
+        } else {altern_mut_stat <- 0}
+        if ((mut_stat == 1) & (altern_mut_stat == 1)) {
+          altern_comb_stat <- 1
+        } else {altern_comb_stat <- 0}
+      }
     }
     
     if (debug) {
@@ -853,10 +909,11 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
       print(paste("CNA stat:", cna_stat))
       print(paste("Mut stat:", mut_stat))
       if(useNumFunctCopies) {print(paste("FNC stat:", fnc_stat))}
-      if(regprot_i_ensg == "ENSG00000141510") {
-        print(pik3ca_cna_stat)
-        print(pik3ca_mut_stat)
-        print(pik3ca_p53_comb_stat)
+      if((regprot_i_ensg %in% c("ENSG00000141510", "ENSG00000121879", "ENSG00000155657")) 
+         & incl_nextMutDriver) {
+        print(altern_cna_stat)
+        print(altern_mut_stat)
+        print(altern_comb_stat)
       }
     }
     
@@ -870,10 +927,15 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
                                          "MethStat_i_b2" = meth_stat[2], 
                                          "MethStat_i_b3" = meth_stat[3]))
       }
-      if(regprot_i_ensg == "ENSG00000141510") {
-        outdf[, 'PIK3CA_MutStat_i'] <- pik3ca_mut_stat
-        outdf[, 'PIK3CA_AmplStat_i'] <- pik3ca_cna_stat
-        outdf[, 'PIK3CAP53_MutStat_i'] <- pik3ca_p53_comb_stat
+      if((regprot_i_ensg == "ENSG00000141510") & incl_nextMutDriver) {
+        outdf[, 'PIK3CA_MutStat_i'] <- altern_mut_stat
+        outdf[, 'PIK3CA_AmplStat_i'] <- altern_cna_stat
+        outdf[, 'PIK3CAP53_MutStat_i'] <- altern_comb_stat
+      } 
+      if ((regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) & incl_nextMutDriver) {
+        outdf[, 'TP53_MutStat_i'] <- altern_mut_stat
+        outdf[, 'TP53_DelStat_i'] <- altern_cna_stat
+        outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_comb_stat
       }
     } else {
       if(!meth_bucketing) {
@@ -883,11 +945,17 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
           outdf <- data.table("MutStat_i" = mut_stat, "CNAStat_i_b1" = cna_stat[1], "CNAStat_i_b2" = cna_stat[2],
                               "CNAStat_i_b3" = cna_stat[3], "MethStat_i" = meth_stat)
         }
-        if(regprot_i_ensg == "ENSG00000141510") {
-          outdf[, 'PIK3CA_MutStat_i'] <- pik3ca_mut_stat
-          outdf[, 'PIK3CA_AmplStat_i'] <- pik3ca_cna_stat
-          outdf[, 'PIK3CAP53_MutStat_i'] <- pik3ca_p53_comb_stat
-        }      } else {
+        if((regprot_i_ensg == "ENSG00000141510") & incl_nextMutDriver) {
+          outdf[, 'PIK3CA_MutStat_i'] <- altern_mut_stat
+          outdf[, 'PIK3CA_AmplStat_i'] <- altern_cna_stat
+          outdf[, 'PIK3CAP53_MutStat_i'] <- altern_comb_stat
+        }      
+        if ((regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) & incl_nextMutDriver) {
+          outdf[, 'TP53_MutStat_i'] <- altern_mut_stat
+          outdf[, 'TP53_DelStat_i'] <- altern_cna_stat
+          outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_comb_stat
+        }
+      } else {
         if ((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing))) {
           outdf <- data.table("MutStat_i" = mut_stat, "CNAStat_i" = cna_stat, "MethStat_i_b1" = meth_stat[1],
                               "MethStat_i_b2" = meth_stat[2], "MethStat_i_b3" = meth_stat[3])
@@ -897,11 +965,16 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
                               "MethStat_i_b3" = meth_stat[3])
         }
       }
-      if(regprot_i_ensg == "ENSG00000141510") {
-        outdf[, 'PIK3CA_MutStat_i'] <- pik3ca_mut_stat
-        outdf[, 'PIK3CA_AmplStat_i'] <- pik3ca_cna_stat
-        outdf[, 'PIK3CAP53_MutStat_i'] <- pik3ca_p53_comb_stat
+      if((regprot_i_ensg == "ENSG00000141510") & incl_nextMutDriver) {
+        outdf[, 'PIK3CA_MutStat_i'] <- altern_mut_stat
+        outdf[, 'PIK3CA_AmplStat_i'] <- altern_cna_stat
+        outdf[, 'PIK3CAP53_MutStat_i'] <- altern_comb_stat
       }    
+      if ((regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) & incl_nextMutDriver) {
+        outdf[, 'TP53_MutStat_i'] <- altern_mut_stat
+        outdf[, 'TP53_DelStat_i'] <- altern_cna_stat
+        outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_comb_stat
+      }
     }
     return(outdf)
   })
@@ -952,9 +1025,11 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
 #' tumor-normal matched
 #' @param debug a TRUE/FALSE value indicating if we are in debug mode and should 
 #' use additional prints
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3', to denote what columns
+#' we are referencing/ specific data types we are using
 fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
                              methylation_df, cna_df, expression_df, cna_bucketing,
-                             meth_bucketing, analysis_type, tumNormMatched, debug) {
+                             meth_bucketing, analysis_type, tumNormMatched, debug, dataset) {
   
   if(debug) {
     print(paste("Target:", targ_k))
@@ -988,7 +1063,7 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
         mut_stat <- get_mut_stat_targ(mutation_targ_df, sample)
         
         # Is this target amplified or deleted?
-        cna_stat <- get_cna_stat(cna_df, sample, cna_bucketing)
+        cna_stat <- get_cna_stat(cna_df, sample, cna_bucketing, dataset)
         if(grepl("incl", cna_bucketing)) {cna_stat <- cna_stat[[1]]}    
         
         # Is this target methylated, or differentially methylated?
@@ -999,7 +1074,7 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
           if(length(meth_stat) > 3) {meth_stat <- meth_stat[1:3]}
         }
         # What is the expression of this target in this sample in cancer?
-        exp_stat <- unlist(get_exp_stat(expression_df, sample, tumNormMatched))
+        exp_stat <- unlist(get_exp_stat(expression_df, sample, tumNormMatched, dataset))
         
         if(debug) {
           print(paste("exp_stat:", exp_stat))
@@ -1111,7 +1186,7 @@ construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
 
   
   # Additionally, if we have any columns that are uniform (the same value in all patients) we'd 
-  # like to remove those as well, as long as they are not MutStat_i or FNCStat_i
+  # like to remove those as well, as long as they are not MutStat_i, CNAStat_i or FNCStat_i
   uniform_val_ind <- which(sapply(lm_input_table, function(x) length(unique(x)) == 1))
   uniform_vals <- colnames(lm_input_table)[uniform_val_ind]
   uniform_vals <- uniform_vals[!((uniform_vals == "MutStat_i") | (uniform_vals == "CNAStat_i") | 
@@ -1154,18 +1229,21 @@ if(args$cancerType == "PanCancer") {
     outpath <- lapply(cancer_types, function(ct) {
       return(create_file_outpath(cancerType = args$cancerType, specificType = ct, test = test, 
                                  tester_name = args$tester_name, run_name = args$run_name,
-                                 tumNormMatched = tumNormMatched, QTLtype = args$QTLtype))
+                                 tumNormMatched = tumNormMatched, QTLtype = args$QTLtype,
+                                 dataset = args$dataset))
     })
     names(outpath) <- cancer_types
   } else {
     outpath <- create_file_outpath(cancerType = args$cancerType, specificType = "", test = test, 
                                    tester_name = args$tester_name, run_name = args$run_name,
-                                   tumNormMatched = tumNormMatched, QTLtype = args$QTLtype)
+                                   tumNormMatched = tumNormMatched, QTLtype = args$QTLtype,
+                                   dataset = args$dataset)
   }
 } else {
   outpath <- create_file_outpath(cancerType = args$cancerType, specificType = "", test = test, 
                                  tester_name = args$tester_name, run_name = args$run_name,
-                                 tumNormMatched = tumNormMatched, QTLtype = args$QTLtype)
+                                 tumNormMatched = tumNormMatched, QTLtype = args$QTLtype,
+                                 dataset = args$dataset)
 }
 
 
@@ -1246,16 +1324,16 @@ if(is.na(patient_cancer_mapping)) {
   
   # If needed, subset these data tables by the given patient IDs of interest using helper functions
   if(patients_of_interest != "") {
-    patient_df <- subset_by_intersecting_ids(patients_of_interest, patient_df, FALSE, tumNormMatched)
-    mutation_targ_df <- subset_by_intersecting_ids(patients_of_interest, mutation_targ_df, TRUE, tumNormMatched)
-    mutation_regprot_df <- subset_regprot_df_by_intersecting_ids(patients_of_interest, mutation_regprot_df, tumNormMatched)
-    methylation_df <- subset_by_intersecting_ids(patients_of_interest, methylation_df, TRUE, tumNormMatched)
+    patient_df <- subset_by_intersecting_ids(patients_of_interest, patient_df, FALSE, tumNormMatched, args$dataset)
+    mutation_targ_df <- subset_by_intersecting_ids(patients_of_interest, mutation_targ_df, TRUE, tumNormMatched, args$dataset)
+    mutation_regprot_df <- subset_regprot_df_by_intersecting_ids(patients_of_interest, mutation_regprot_df, tumNormMatched, args$dataset)
+    methylation_df <- subset_by_intersecting_ids(patients_of_interest, methylation_df, TRUE, tumNormMatched, args$dataset)
     if(!is.na(methylation_df_meQTL)) {
-      methylation_df_meQTL <- subset_by_intersecting_ids(patients_of_interest, methylation_df_meQTL, TRUE, tumNormMatched)
+      methylation_df_meQTL <- subset_by_intersecting_ids(patients_of_interest, methylation_df_meQTL, TRUE, tumNormMatched, args$dataset)
     } else {methylation_df_meQTL <- NA} 
-    cna_df <- subset_by_intersecting_ids(patients_of_interest, cna_df, TRUE, tumNormMatched)
-    expression_df <- subset_by_intersecting_ids(patients_of_interest, expression_df, TRUE, tumNormMatched)
-    if(useNumFunctCopies) {num_funct_copies_DF <- subset_by_intersecting_ids(patients_of_interest, num_funct_copies_DF, FALSE, tumNormMatched)}
+    cna_df <- subset_by_intersecting_ids(patients_of_interest, cna_df, TRUE, tumNormMatched, args$dataset)
+    expression_df <- subset_by_intersecting_ids(patients_of_interest, expression_df, TRUE, tumNormMatched, args$dataset)
+    if(useNumFunctCopies) {num_funct_copies_DF <- subset_by_intersecting_ids(patients_of_interest, num_funct_copies_DF, FALSE, tumNormMatched, args$dataset)}
   }
   
   # If needed, exclude metastatic samples
@@ -1297,7 +1375,9 @@ if(is.na(patient_cancer_mapping)) {
                                 removeCis = removeCis,
                                 all_genes_id_conv = all_genes_id_conv,
                                 useNumFunctCopies = useNumFunctCopies,
-                                num_funct_copies_df = num_funct_copies_DF)
+                                num_funct_copies_df = num_funct_copies_DF,
+                                incl_nextMutDriver = incl_nextMutDriver,
+                                dataset = args$dataset)
   
 # Case 2: If we're running on multiple cancer types separately
 } else if (!(is.na(patient_cancer_mapping))) {
@@ -1317,16 +1397,16 @@ if(is.na(patient_cancer_mapping)) {
     outpath_i <- outpath[[i]]
     
     # Subset files using patient_ids (using helper function)
-    patient_df_sub <- subset_by_intersecting_ids(patient_ids, patient_df, FALSE, tumNormMatched)
-    mutation_targ_df_sub <- subset_by_intersecting_ids(patient_ids, mutation_targ_df, TRUE, tumNormMatched)
-    mutation_regprot_df_sub <- subset_regprot_df_by_intersecting_ids(patient_ids, mutation_regprot_df, tumNormMatched)
-    methylation_df_sub <- subset_by_intersecting_ids(patient_ids, methylation_df, TRUE, tumNormMatched)
+    patient_df_sub <- subset_by_intersecting_ids(patient_ids, patient_df, FALSE, tumNormMatched, args$dataset)
+    mutation_targ_df_sub <- subset_by_intersecting_ids(patient_ids, mutation_targ_df, TRUE, tumNormMatched, args$dataset)
+    mutation_regprot_df_sub <- subset_regprot_df_by_intersecting_ids(patient_ids, mutation_regprot_df, tumNormMatched, args$dataset)
+    methylation_df_sub <- subset_by_intersecting_ids(patient_ids, methylation_df, TRUE, tumNormMatched, args$dataset)
     if(!is.na(methylation_df_meQTL)) {
-      methylation_df_meQTL_sub <- subset_by_intersecting_ids(patient_ids, methylation_df_meQTL, TRUE, tumNormMatched)
+      methylation_df_meQTL_sub <- subset_by_intersecting_ids(patient_ids, methylation_df_meQTL, TRUE, tumNormMatched, args$dataset)
     } else {methylation_df_meQTL_sub <- NA} 
-    cna_df_sub <- subset_by_intersecting_ids(patient_ids, cna_df, TRUE, tumNormMatched)
-    expression_df_sub <- subset_by_intersecting_ids(patient_ids, expression_df, TRUE, tumNormMatched)
-    if(useNumFunctCopies) {num_funct_copies_DF_sub <- subset_by_intersecting_ids(patients_of_interest, num_funct_copies_DF, FALSE, tumNormMatched)}
+    cna_df_sub <- subset_by_intersecting_ids(patient_ids, cna_df, TRUE, tumNormMatched, args$dataset)
+    expression_df_sub <- subset_by_intersecting_ids(patient_ids, expression_df, TRUE, tumNormMatched, args$dataset)
+    if(useNumFunctCopies) {num_funct_copies_DF_sub <- subset_by_intersecting_ids(patients_of_interest, num_funct_copies_DF, FALSE, tumNormMatched, args$dataset)}
     
     # If needed, exclude metastatic samples
     if(removeMetastatic == TRUE) {
@@ -1368,7 +1448,9 @@ if(is.na(patient_cancer_mapping)) {
                                   removeCis = removeCis,
                                   all_genes_id_conv = all_genes_id_conv,
                                   useNumFunctCopies = useNumFunctCopies,
-                                  num_funct_copies_df = num_funct_copies_DF)
+                                  num_funct_copies_df = num_funct_copies_DF,
+                                  incl_nextMutDriver = incl_nextMutDriver,
+                                  dataset = args$dataset)
     
     return(master_df)
   })
@@ -1451,11 +1533,16 @@ if(is.na(patient_cancer_mapping)) {
   if(!useNumFunctCopies) {
     master_df_mut <- master_df[master_df$term == "MutStat_i",]
     master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
-    if(args$tester_name == "TP53") {
+    if((args$tester_name == "TP53") & incl_nextMutDriver) {
       master_df_pik3ca_mut <- master_df[master_df$term == "PIK3CA_MutStat_i",]
       master_df_pik3ca_cna <- master_df[master_df$term == "PIK3CA_AmplStat_i",]
       master_df_p53_pik3ca_mut <- master_df[master_df$term == "PIK3CAP53_MutStat_i",]
     }    
+    if((args$tester_name == "PIK3CA") & incl_nextMutDriver) {
+      master_df_tp53_mut <- master_df[master_df$term == "TP53_MutStat_i",]
+      master_df_tp53_cna <- master_df[master_df$term == "TP53_AmplStat_i",]
+      master_df_tp53_pik3ca_mut <- master_df[master_df$term == "TP53PIK3CA_MutStat_i",]
+    } 
   } else {
     master_df_fnc <- master_df[master_df$term == "FNCStat_i",]
   }
@@ -1474,10 +1561,15 @@ if(is.na(patient_cancer_mapping)) {
     if(!useNumFunctCopies) {
       master_df_mut <- master_df[master_df$term == "MutStat_i",]
       master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
-      if(args$tester_name == "TP53") {
+      if((args$tester_name == "TP53") & incl_nextMutDriver) {
         master_df_pik3ca_mut <- master_df[master_df$term == "PIK3CA_MutStat_i",]
         master_df_pik3ca_cna <- master_df[master_df$term == "PIK3CA_AmplStat_i",]
-        master_df_p53_pik3ca_mut <- master_df[master_df$term == "PIK3CAP53_MutStat_i",]
+        master_df_tp53_pik3ca_mut <- master_df[master_df$term == "PIK3CAP53_MutStat_i",]
+      }    
+      if((args$tester_name == "PIK3CA") & incl_nextMutDriver) {
+        master_df_tp53_mut <- master_df[master_df$term == "TP53_MutStat_i",]
+        master_df_tp53_cna <- master_df[master_df$term == "TP53_AmplStat_i",]
+        master_df_tp53_pik3ca_mut <- master_df[master_df$term == "TP53PIK3CA_MutStat_i",]
       }    
     } else {
       master_df_fnc <- master_df[master_df$term == "FNCStat_i",]

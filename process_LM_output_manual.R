@@ -11,7 +11,7 @@
 # 3. Perform multiple hypothesis testing correction
 # 4. Obtain significant correlations (q-value thresholding)
 # 5. Visualize enrichment of top hit genes in CGC/ Vogelstein,
-# and potentially other cancer gene lists
+# and network/ curated targets
 # 6. Annotate output with relevance to cancer using TFcancer database
 
 # install.packages("gplots")
@@ -20,6 +20,8 @@
 # BiocManager::install("ComplexHeatmap")
 # BiocManager::install("pathview")
 # BiocManager::install("RCy3")
+# BiocManager::install("gage")
+library(TCGAbiolinks)
 library("gplots")
 library("pheatmap")
 library(ComplexHeatmap)
@@ -38,6 +40,11 @@ library(meta)
 library(metasens)
 library(metafor)
 library("RCy3")
+library(grid)
+library(ggpubr)
+library("STRINGdb")
+library(igraph)
+library(EnsDb.Hsapiens.v86)
 
 # Path to output files
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
@@ -191,8 +198,8 @@ master_df_cna_corrected <- mh_correct(master_df_cna)
 #' @param all_genes_id_conv a bioMart file with conversions between different gene ID types
 add_targ_regprot_gns <- function(master_df_sig, all_genes_id_conv) {
   master_df_sig$T_k.name <- unlist(lapply(master_df_sig$T_k, function(x) 
-    paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
-                                   'external_gene_name']), collapse = ";")))
+    paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
+                                   'external_gene_name'])), collapse = ";")))
   
   # Add a column for the regulatory protein name
   master_df_sig$R_i.name <- unlist(lapply(master_df_sig$R_i, function(x) 
@@ -1233,7 +1240,7 @@ hist(cancerTypes_meta_analysis_res$p.value, main = "", xlab = "P-Value")
 
 # Write to a file
 write.csv(brca_subtypes_meta_analysis_res, paste0(main_path, "Linear Model/TP53/Tumor_Only/eQTL/Meta-Analysis Results/brca_subtypes_metabolism_meta_analysis.csv"))
-write.csv(cancerTypes_meta_analysis_res, paste0(main_path, "Linear Model/TP53/Meta-Analysis Results/brca_blca_hnsc_metabolism_meta_analysis.csv"))
+write.csv(cancerTypes_meta_analysis_res, paste0(main_path, "Linear Model/TP53/Tumor_Only/eQTL/Meta-Analysis Results/brca_blca_hnsc_metabolism_meta_analysis.csv"))
 
 
 ############################################################
@@ -1248,6 +1255,10 @@ write.csv(cancerTypes_meta_analysis_res, paste0(main_path, "Linear Model/TP53/Me
 # Import a table containing a compiled list of known cancer genes
 known_cancer_genes_table <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/GRCh38_driver_gene_list.tsv", sep = "\t",
                                        header = TRUE, check.names = FALSE, comment.char = "#")
+known_cancer_genes <- known_cancer_genes_table$primary_gene_names
+vogelstein_genes <- known_cancer_genes_table[grepl("V", known_cancer_genes_table$cancer_driver_status), 'primary_gene_names']
+curated_cancer_genes <- known_cancer_genes_table[grepl("V|K|L|B", known_cancer_genes_table$cancer_driver_status), 'primary_gene_names']
+cgc_genes <- known_cancer_genes_table[grepl("C", known_cancer_genes_table$cancer_driver_status), 'primary_gene_names']
 
 # Import TF cancer data table(s)
 tfcancer_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/"
@@ -1386,6 +1397,12 @@ plot_cancer_enrichment(master_df_cna_sig, known_cancer_genes_table, tfcancer_df)
 dev.off()
 
 
+############################################################
+############################################################
+#### VISUALIZE ENRICHMENT OF CHIP-eat/ NETWORK TARGETS/ etc.
+############################################################
+############################################################
+
 #' Function to plot the enrichment of ChIP-eat targets among the significant target genes
 #' @param master_df a master DF produced from run_linear_model() that has q-values
 #' @param chipeat_targs a vector of known ChIP-eat targets for a gene of interest (master
@@ -1444,44 +1461,77 @@ plot_chipseq_enrichment <- function(master_df, chipeat_targs, goi, bin_size) {
       theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
   }
 }
+
+tp53_chipeat_targs <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/ChIP-eat/tp53_chipeat_targets.txt", 
+                                 header = FALSE, check.names = FALSE)[,1]
   
-#' Use a one-sided Fisher's exact test/ Hypergeometric test to test for enrichment statistically
+#' Use a one-sided Fisher's exact test/ Hypergeometric test or a Kolmogorov-Smirnov
+#' test to test for enrichment statistically
 #' @param master_df a master DF produced from run_linear_model() that has q-values
 #' @param known_targs a vector of known targets for a gene of interest (master
 #' DF should already be subsetted to just this gene); ex. ChIP-eat targets, HumanBase
-compute_statistical_enrichment <- function(master_df, known_targs) {
-  sig_targets <- unique(master_df[master_df$q.value < 0.2, 'T_k.name'])
-  nonsig_targets <- unique(master_df[master_df$q.value > 0.2, 'T_k.name'])
-  targets <- unique(master_df$T_k.name)
-  
-  num_sig_targets <- length(sig_targets)
-  num_nonsig_targets <- length(nonsig_targets)
-  
-  known_targs_i <- intersect(known_targs, targets)
-  notknown_targs_i <- setdiff(targets, known_targs)
-  
-  num_known_targets <- length(known_targs_i)
-  num_notknown_targets <- length(notknown_targs_i)
+#' @param type the type of test, either "fisher's exact" or "k-s"
+compute_statistical_enrichment <- function(master_df, known_targs, type) {
+  if (type == "fisher's exact") {
+    sig_targets <- unique(master_df[master_df$q.value < 0.1, 'T_k.name'])
+    nonsig_targets <- unique(master_df[master_df$q.value > 0.1, 'T_k.name'])
+    targets <- unique(master_df$T_k.name)
+    
+    num_sig_targets <- length(sig_targets)
+    num_nonsig_targets <- length(nonsig_targets)
+    
+    known_targs_i <- intersect(known_targs, targets)
+    notknown_targs_i <- setdiff(targets, known_targs)
+    
+    num_known_targets <- length(known_targs_i)
+    num_notknown_targets <- length(notknown_targs_i)
+    
+    num_known_sig_targets <- length(intersect(sig_targets, known_targs_i))
+    num_known_nonsig_targets <- length(intersect(nonsig_targets, known_targs_i))
+    num_notknown_sig_targets <- length(intersect(sig_targets, notknown_targs_i))
+    num_notknown_nonsig_targets <- length(intersect(nonsig_targets, notknown_targs_i))
+    
+    contigency_table <- matrix(c(num_known_sig_targets, num_known_nonsig_targets,
+                                 num_notknown_sig_targets, num_notknown_nonsig_targets),
+                               nrow = 2, ncol = 2)
+    print(contigency_table)
+    
+    fisher_res <- fisher.test(contigency_table, alternative = "greater")
+    print(fisher_res$p.value)
+    
+    return(fisher_res)
+  }
+  else if (type == "k-s") {
+    # Create a uniform distribution the same length as the number of genes
+    uniform <- 1:length(master_df$T_k.name)
 
-  num_known_sig_targets <- length(intersect(sig_targets, known_targs_i))
-  num_known_nonsig_targets <- length(intersect(nonsig_targets, known_targs_i))
-  num_notknown_sig_targets <- length(intersect(sig_targets, notknown_targs_i))
-  num_notknown_nonsig_targets <- length(intersect(nonsig_targets, notknown_targs_i))
-  
-  contigency_table <- matrix(c(num_known_sig_targets, num_known_nonsig_targets,
-                               num_notknown_sig_targets, num_notknown_nonsig_targets),
-                             nrow = 2, ncol = 2)
-  print(contigency_table)
-  
-  fisher_res <- fisher.test(contigency_table, alternative = "greater")
-  print(fisher_res$p.value)
-  
-  return(fisher_res)
+    # Get the ranks of the known targets within our ranked list
+    ranks_of_targs <- unlist(lapply(known_targs, function(x) {
+      if(x %in% master_df$T_k.name) {return(min(which(master_df$T_k.name == x,)))}
+      else {return(NA)}
+    }))
+    ranks_of_targs <- ranks_of_targs[!(is.infinite(ranks_of_targs) | (is.na(ranks_of_targs)))]
+    #print(TRUE %in% duplicated(ranks_of_targs))
+    
+    # Perform the K-S test, two-sided with the uniform distribution
+    ks_res <- ks.test(ranks_of_targs, uniform, alternative = "greater")
+
+    print(ks_res)
+    print(ks_res$p.value)
+    return(ks_res)
+  }
+  else {
+    print("Only implemented for 'Fisher's exact' or 'k-s' tests.")
+    return(0)
+  }
 }
 
 # Call function
-fisher_res_tp53_hb <- compute_statistical_enrichment(allgene_sixMostMut_p53, tp53_nw_targs)
-fisher_res_tp53_string <- compute_statistical_enrichment(allgene_sixMostMut_p53, tp53_string_nw_targs)
+fisher_res_tp53_hb <- compute_statistical_enrichment(allgene_sixMostMut_p53, tp53_nw_targs, "fisher's exact")
+fisher_res_tp53_string <- compute_statistical_enrichment(allgene_sixMostMut_p53, tp53_string_nw_targs, "fisher's exact")
+
+ks_res_tp53_hb <- compute_statistical_enrichment(allgene_sixMostMut_p53, tp53_nw_targs, "k-s")
+ks_res_tp53_string <- compute_statistical_enrichment(allgene_sixMostMut_p53, tp53_string_nw_targs, "k-s")
 
 
 #' Function to plot the enrichment of network targets among the significant target genes
@@ -1513,9 +1563,13 @@ plot_network_enrichment <- function(master_df, network_targs, goi, bin_size) {
   }
   
   if(bin_size == 0) {
-    p <- plot(ranks[1:100], frac_nw_vect[1:100], pch = 16, 
-         main = paste("Enrichment of Significant Target Genes in", paste(goi, "Network Targets")),
-         xlab = "Rank", ylab = "Fraction of Target Genes that are Network Targets")
+    df <- data.frame("Rank" = as.factor(ranks[1:100]), "Frac.of.Targets" = frac_nw_vect[1:100])
+    p <- ggplot(df, mapping = aes(x = Rank, y = Frac.of.Targets)) + geom_point(fill="#69b3a2", size = 2) + 
+         #ggtitle(paste("Enrichment of Significant Target Genes in", paste(goi, "Network Targets"))) +
+         xlab("Gene Rank") + ylab("Enrichment of Network Genes") + 
+      scale_x_discrete(breaks = c(1, 25, 50, 75, 100), labels = c("1", "25", "50", "75", "100")) +
+      theme(axis.text.x =  element_text(size = 12), axis.text.y =  element_text(size = 12),
+            axis.title = element_text(size = 13, face = "bold"))
     
   } else {
     spl_vals <- split(frac_nw_vect, ceiling(seq_along(frac_nw_vect) / bin_size))
@@ -1537,7 +1591,7 @@ plot_network_enrichment <- function(master_df, network_targs, goi, bin_size) {
     p <- ggplot(spl_vals_df[spl_vals_df$grp %in% 1:15,], mapping = aes(x = as.factor(grp), y = vals)) + geom_boxplot(fill="#69b3a2") + 
       geom_point(data = spl_vals_means[spl_vals_means$grp %in% 1:15,], mapping = aes(x = grp, y = mean), color="red") +
       geom_line(data = spl_vals_means[spl_vals_means$grp %in% 1:15,], mapping = aes(x = grp, y = mean, group=1)) +
-      xlab(paste("Group #, Bin Size:", bin_size)) + ylab("Fraction of TP53 STRING NW Targets") +
+      xlab(paste("Group #, Bin Size:", bin_size)) + ylab(paste("Fraction of", paste(goi, "Network Targets"))) +
       theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 12),
             axis.text.y = element_text(size = 12),
             axis.title = element_text(size = 12, face = "bold"))
@@ -1551,6 +1605,8 @@ goi <- "PIK3CA"
 
 # Import the network interaction files from HumanBase for the genes of interest
 nw_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Network_Data/"
+# nw_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/"
+
 tp53_mamm_epi_nw <- read.table(paste0(nw_path, "hb_mammary_epithelium_tp53_network.txt"), 
                                header = TRUE, sep = ",")
 tp53_mamm_gl_nw <- read.table(paste0(nw_path, "hb_mammary_gland_tp53_network.txt"), 
@@ -1560,11 +1616,18 @@ pik3ca_mamm_epi_nw <- read.table(paste0(nw_path, "hb_mammary_epithelium_pik3ca_n
 pik3ca_mamm_gl_nw <- read.table(paste0(nw_path, "hb_mammary_gland_pik3ca_network.txt"), 
                                 header = TRUE, sep = ",")
 
+tp53_global_nw <- read.table(paste0(nw_path, "tp53_humanbase_global_top50.txt"), header = TRUE, sep = ",")
+pik3ca_global_nw <- read.table(paste0(nw_path, "pik3ca_humanbase_global_top50.txt"), header = TRUE, sep = ",")
+
+
 # Get rid of any white space
 tp53_mamm_epi_nw <- as.data.frame(lapply(tp53_mamm_epi_nw, trimws))
 tp53_mamm_gl_nw <- as.data.frame(lapply(tp53_mamm_gl_nw, trimws))
 pik3ca_mamm_epi_nw <- as.data.frame(lapply(pik3ca_mamm_epi_nw, trimws))
 pik3ca_mamm_gl_nw <- as.data.frame(lapply(pik3ca_mamm_gl_nw, trimws))
+
+tp53_global_nw <- as.data.frame(lapply(tp53_global_nw, trimws))
+pik3ca_global_nw <- as.data.frame(lapply(pik3ca_global_nw, trimws))
 
 # Limit the interactions to just gois
 tp53_mamm_epi_nw <- tp53_mamm_epi_nw[(tp53_mamm_epi_nw$GENE1 == "TP53") | (tp53_mamm_epi_nw$GENE2 == "TP53"),]
@@ -1598,6 +1661,17 @@ tp53_string_nw_targs <- read.table(paste0(nw_path, "TP53_interactors_string_top1
 pik3ca_string_nw_targs <- read.table(paste0(nw_path, "PIK3CA_interactors_string_top100.txt"),
                                    header = FALSE)[,1]
 
+# Other STRING target lists
+tp53_neighbors_dist2_weight5 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project FIles/Saved Output Data Files/Pan-Cancer/Network_Data/string_tp53_neighbors_dist2_weight5.txt",
+                                           header = TRUE)[,'SYMBOL']
+pik3ca_neighbors_dist2_weight5 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project FIles/Saved Output Data Files/Pan-Cancer/Network_Data/string_pik3ca_neighbors_dist2_weight5.txt",
+                                           header = TRUE)[,'SYMBOL']
+
+tp53_neighbors_conf100 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project FIles/Saved Output Data Files/Pan-Cancer/Network_Data/string_tp53_neighbors_confThres100.txt",
+                                           header = TRUE)[,'SYMBOL']
+pik3ca_neighbors_conf100 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project FIles/Saved Output Data Files/Pan-Cancer/Network_Data/string_pik3ca_neighbors_confThres100.txt",
+                                             header = TRUE)[,'SYMBOL']
+
 # Call function
 plot_network_enrichment(allgene_sixMostMut_p53, tp53_string_nw_targs, "TP53", 10)
 
@@ -1606,6 +1680,174 @@ plot_network_enrichment(allgene_sixMostMut_p53, tp53_string_nw_targs, "TP53", 10
 tp53_hb_plt <- plot_network_enrichment(allgene_sixMostMut_p53, tp53_nw_targs, "TP53", 10)
 tp53_string_plt <- plot_network_enrichment(allgene_sixMostMut_p53, tp53_string_nw_targs, "TP53", 10)
 ggarrange(tp53_hb_plt, tp53_string_plt, labels = c("A", "B"), ncol = 1, nrow = 2)
+
+
+# Import specific curated targets
+tp53_curated_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Validation_Files/TP53_Targets_Fischer_2017_Oncogene.csv",
+                                 header = FALSE, check.names = FALSE)[,1]
+tp53_curated_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Validation_Files/TP53_targets.csv",
+                                 header = FALSE, check.names = FALSE)[,'Gene.Symbol']
+
+trrust_df <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Validation_Files/trrust_rawdata.human.txt",
+                                header = FALSE, check.names = FALSE)
+trrust_df_tp53 <- trrust_df[(trrust_df[,1] == "TP53") | (trrust_df[,2] == "TP53"),]
+tp53_trrust_targets <- unique(c(trrust_df_tp53$V1, trrust_df_tp53$V2))
+tp53_trrust_targets <- tp53_trrust_targets[tp53_trrust_targets != "TP53"]  # 195 targets
+
+tf_target_df <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Validation_Files/TF-Target-information.txt",
+                           header = TRUE, check.names = FALSE, sep = "\t")
+tf_target_df_breast <- tf_target_df[grepl("breast", tf_target_df$tissue),]
+tf_target_df_tp53 <- tf_target_df[grepl("P53", tf_target_df$TF),]
+tf_target_df_tp53_full <- tf_target_df[grepl("P53", tf_target_df$TF) | grepl("P53", tf_target_df$target),]
+tf_target_tp53 <- tf_target_df_tp53$target
+tf_target_tp53_full <- c(unique(tf_target_df_tp53_full$TF, tf_target_df_tp53_full$target))
+tf_target_tp53_full <- tf_target_tp53_full[tf_target_tp53_full != "TP53"]
+  
+# Target genes from Cizkova et al., 2010: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3012715/
+pik3ca_curated_targs <- c("WNT5A", "TCF7L2", "MSX2", "TNFRSF11B", "SEC14L2", "MSX2", 
+                          "TFAP2B", "NRIP3", "CYP4Z1", "CYPZ2P", "SLC40A1", "LTF", "LIMCH1")
+
+# Breast DEGs (tumor vs. normal) from Pranavathiyani et al., 2019, Genes and Diseases: https://www.sciencedirect.com/science/article/pii/S2352304218300801?via%3Dihub#ec-research-data
+breast_degs <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Validation_Files/breast_degs_pranavathiyani_2019_genesAndDiseases.csv",
+                        header = TRUE, check.names = FALSE)[, 'DEG']
+breast_degs_p53 <- breast_degs[breast_degs != "TP53"]
+breast_degs_pik3ca <- breast_degs[breast_degs != "PIK3CA"]
+
+# Breast biomarker genes from meta-analysis, Abba et al., 2010, Biomarker Insights: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2978930/#SD2
+breast_biomarkers <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Validation_Files/breast_top_biomarkers_abba_2010_biomarkerInsights.csv",
+                              header = TRUE, check.names = FALSE)[, 'Gene']
+breast_biomarkers_p53 <- breast_biomarkers[breast_biomarkers != "TP53"]
+breast_biomarkers_pik3ca <- breast_biomarkers[breast_biomarkers != "PIK3CA"]
+
+
+
+#' Function to plot the enrichment of various target groups among the significant gene hits,
+#' together on one plot, where the enrichment in the given source is denoted by color and line form
+#' @param master_df a master DF produced from run_linear_model() that has q-values
+#' @param target_sets_list a list of each of the target sets we are interested in doing enrichment on,
+#' with each set's name/ label as the name for the list item
+#' @param goi a string denoting the gene-of-interest, for labeling graph
+#' @param thres a threshold for the number of hit genes we show in the full plot; in NA then we plot
+#' enrichment across all gene targets
+#' @param cutout_thres a threshold for the inset/cutout enrichment plot ('zoomed' in on)
+plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cutout_thres) {
+  
+  # Extract the target hits
+  target_hits <- unlist(master_df$T_k.name)
+  print(length(target_hits))
+  
+  # For each source, create a 0 and 1 vector for each  target hit to indicate if it 
+  # is a a hit in that source
+  target_set_vector_list <- lapply(target_sets_list, function(source) {
+    vect <- unlist(lapply(target_hits, function(x) {
+      return(ifelse(x %fin% source, 1, 0))
+    }))
+    return(vect)
+  })
+  names(target_set_vector_list) <- names(target_sets_list)
+  
+  # Get the fraction of genes at or above the given rank, for each set
+  target_set_fraction_list <- lapply(target_set_vector_list, function(vect) {
+    frac_nw_vect <- c()
+    count_of_nw_genes <- 0
+    for (i in 1:length(target_hits)) {
+      val_of_curr_tg <- vect[i]
+      count_of_nw_genes <- count_of_nw_genes + val_of_curr_tg
+      frac <- count_of_nw_genes / i
+      frac_nw_vect <- c(frac_nw_vect, frac)
+    }
+    return(frac_nw_vect)
+  })
+  names(target_set_fraction_list) <- names(target_sets_list)
+  target_sets_fraction_df <- as.data.frame(target_set_fraction_list)
+  target_sets_fraction_df$Rank <- 1:length(target_hits)
+  print(head(target_sets_fraction_df))
+  
+  # Melt data frame for plotting, using Rank as the ID variable
+  target_sets_fraction_df_m <- melt(target_sets_fraction_df, "Rank")
+  colnames(target_sets_fraction_df_m) <- c("Rank", "Source", "Frac")
+  print(head(target_sets_fraction_df_m))
+  print(unique(target_sets_fraction_df_m$Source))
+  
+  # Create inset plot
+  p2 <- ggplot(target_sets_fraction_df_m[target_sets_fraction_df_m$Rank %in% 1:cutout_thres,], 
+               mapping = aes(x = Rank, y = Frac, color = Source)) + geom_line(aes(linetype=Source)) +
+    geom_point(size = 1) + 
+    scale_x_continuous(limits = c(1,cutout_thres)) +
+    theme(legend.position = "none", axis.title.x = element_blank(), axis.title.y = element_blank(),
+          panel.grid.minor = element_blank())
+
+  p <- ggplot(target_sets_fraction_df_m[target_sets_fraction_df_m$Rank %in% 1:thres,], 
+              mapping = aes(x = Rank, y = Frac, color = Source)) + geom_line(aes(linetype=Source), size = 1.25) +
+    geom_point(size = 1) + 
+    ggtitle(paste("Enrichment of Model-Prioritized Target Genes in", paste(goi, "Sourced Targets"))) +
+    xlab("Gene Rank") + ylab("Enrichment in Source Gene Set") + 
+    scale_x_continuous(limits = c(1,thres)) +
+    theme(axis.text.x =  element_text(size = 12), axis.text.y =  element_text(size = 12),
+          axis.title = element_text(size = 13, face = "bold"), panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), panel.border = element_blank()) + theme_minimal() +
+    annotation_custom(ggplotGrob(p2), xmin =(thres-round(thres/1.5)), xmax = thres, ymin = 0.30, ymax = 1.0) +
+    geom_rect(data=target_sets_fraction_df_m[1:cutout_thres,], 
+              aes(xmin = 1, xmax = cutout_thres, ymin = 0, ymax = 1, fill = "gray"),
+              color = NA, fill = alpha("gray", .01))
+  
+  #vp <- viewport(width = 0.4, height = 0.4, x = 0.8, y = 0.2)
+  #print(p)
+  #print(p, vp = vp)
+    
+  return(p)
+}
+
+# Create a list of all the gene sets we want to look for enrichment in
+tp53_target_set_list <- list("ChIP-eat" = tp53_chipeat_targets, "Compiled.Cancer" = known_cancer_genes,
+                             "STRING" = tp53_string_nw_targs, "HumanBase" = tp53_nw_targs, 
+                             "Curated.Fischer.2017" = tp53_curated_targets)
+tp53_target_set_list <- list("Compiled.Cancer" = known_cancer_genes,
+                             "STRING" = tp53_string_nw_targs, "HumanBase" = tp53_nw_targs, 
+                             "Curated.Fischer.2017" = tp53_curated_targets, 
+                             "Curated.TRRUST" = tp53_trrust_targets, "Curated.TF-Target" = tp53_tfTarg_targets)
+
+pik3ca_target_set_list <- list("Compiled.Cancer" = known_cancer_genes,
+                               "STRING" = pik3ca_string_nw_targs, "HumanBase" = pik3ca_nw_targs,
+                               "Curated.Cizkova.2017" = pik3ca_curated_targs)
+
+
+# Call function
+plot_combined_enrichment(allgenes_p53, tp53_target_set_list, "TP53", 500, 50)
+plot_combined_enrichment(allgenes_pik3ca, pik3ca_target_set_list, "PIK3CA", 500, 50)
+
+
+
+#' Function to get the enrichment using the STRINGdB package, which has functions 
+#' to calculate enrichment in alternative sets (such as PubMed, etc.)
+#' @param master_df a master DF produced from run_linear_model() that has q-values
+#' @param qval_thres a q-value threshold for what we consider a significant model hit
+#' @param background if we ran the model on a subset of genes to begin with (e.g. 
+#' metabolic genes), provide this gene set as a background for enrichment (gene symbols)
+get_stringdb_enrichment <- function(master_df, qval_thres, background) {
+  # Instantiate the string DB object 
+  string_db <- STRINGdb$new(version="11.5", species=9606, score_threshold=0, 
+                             input_directory="")
+  
+  # Set the background, if needed
+  if(!is.na(background)) {
+    background <- as.data.frame(background)
+    colnames(background) <- "gene"
+    background <- string_db$map(background, "gene", removeUnmappedRows = TRUE)
+    
+    string_db <- string_db$set_background(background$STRING_id)
+  }
+
+  # Calculate the enrichment for all sources  
+  stringdb_enrichment <- string_db$get_enrichment(master_df[master_df$q.value < qval_thres, 'T_k.name'])
+  print(head(stringdb_enrichment, n=20))
+  
+  return(stringdb_enrichment)
+}
+
+stringdb_enrichment_tp53 <- get_stringdb_enrichment(allgenes_p53_panCts_inclBRCAsubtypes, 0.2, NA)
+stringdb_enrichment_pik3ca <- get_stringdb_enrichment(allgenes_pik3ca_panCts_inclBRCAsubtypes, 0.2, NA)
+
 
 ############################################################
 #### ANNOTATE WHETHER TF REGULATION PREDICTIONS ALIGN WITH

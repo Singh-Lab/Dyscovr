@@ -34,9 +34,15 @@ all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Proje
 ################################################################################
 ### IMPORT EXPRESSION RAW COUNT MATRIX
 ################################################################################
-output_filename_counts <- paste(output_path, "expression_counts_DF.csv", sep = "")
-expression_dataframe_counts <- read.csv(output_filename_counts, header = TRUE, 
+expression_dataframe_counts <- read.csv(paste0(output_path, "expression_counts_DF.csv"), header = TRUE, 
                                         row.names = 1, check.names = FALSE)
+# For METABRIC, use the unlogged intensity matrix
+#expression_dataframe_counts <- read.table(paste0(path, "cBioPortal/brca_metabric/data_mrna_agilent_microarray_unlogged.txt"), header = TRUE, 
+                                        #row.names = 1, check.names = FALSE)
+#expression_dataframe_counts <- distinct(expression_dataframe_counts)
+#rownames(expression_dataframe_counts) <- make.names(expression_dataframe_counts$Hugo_Symbol, unique = TRUE)
+#expression_dataframe_counts <- expression_dataframe_counts[, -c(1,2)]
+#expression_dataframe_counts <- na.omit(expression_dataframe_counts)
 
 # If desired, subset this expression count matrix to a desired cancer type
 gdc_sample_sheet <- read.csv(paste(path, "Expression_Data/Counts/gdc_sample_sheet_total.csv", sep = ""),
@@ -49,6 +55,10 @@ expression_dataframe_gbm <- expression_dataframe_counts[,colnames(expression_dat
 luad_patients <- gdc_sample_sheet[grepl("LUAD", gdc_sample_sheet$Project.ID), 'Sample.ID']
 expression_dataframe_luad <- expression_dataframe_counts[,colnames(expression_dataframe_counts) %fin% 
                                                           luad_patients]  #470 patients
+
+brca_patients <- gdc_sample_sheet[grepl("BRCA", gdc_sample_sheet$Project.ID), 'Sample.ID']
+expression_dataframe_brca <- expression_dataframe_counts[,colnames(expression_dataframe_counts) %fin% 
+                                                           brca_patients]  
 
 ################################################################################
 ### CREATE TPM EXPRESSION MATRIX FROM COUNT MATRIX
@@ -252,7 +262,6 @@ tpm_dataframe_gn_normal_only <- tpm_dataframe_gn[,grepl("-1", colnames(tpm_dataf
 
 # Import the 'sample' file
 sample_file <- read.csv(paste(path, "sample.csv"))
-separate_normals_by_type <- function()
 
 ################################################################################
 ### RUN IMMUNEDECONV METHODS
@@ -262,12 +271,12 @@ separate_normals_by_type <- function()
 
 
 # quanTIseq
-results_quantiseq <- immunedeconv::deconvolute(tpm_dataframe_gn_tumor_only, 'quantiseq')
+results_quantiseq <- immunedeconv::deconvolute(tpm_dataframe_gn_tumor_only, 'quantiseq', tumor = TRUE)
 results_quantiseq_tab <- as.data.frame(results_quantiseq)
 write.csv(results_quantiseq_tab, paste(output_path, "quanTIseq Cell Deconvolution/quantiseq_cellFrac.csv", sep = ""))
 
 # EPIC
-results_epic <- immunedeconv::deconvolute(tpm_dataframe_gn_tumor_only, "epic")
+results_epic <- immunedeconv::deconvolute(tpm_dataframe_gn_tumor_only, "epic", tumor = TRUE)
 results_epic_tab <- as.data.frame(results_epic)
 write.csv(results_epic_tab, paste(output_path, "EPIC Cell Deconvolution/epic_cellFrac_from_immunedeconv.csv", sep = ""))
 
@@ -289,11 +298,20 @@ write.csv(results_timer, paste(output_path, "TIMER Cell Deconvolution/timer_cell
 cibersort_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/CIBERSORT Source Code/"
 set_cibersort_binary(paste(cibersort_path, "CIBERSORT.R", sep = ""))
 set_cibersort_mat(paste(cibersort_path, "CIBERSORT_package/LM22.txt", sep = ""))
+
 results_cibersort <- deconvolute(tpm_dataframe_gn_tumor_only, "cibersort")
 write.csv(results_cibersort, paste(output_path, "CIBERSORT Cell Deconvolution/cibersort_cellFrac.csv", sep = ""))
-results_cibersort_abs <- deconvolute(tpm_dataframe_gn_tumor_only, "cibersort_abs")
-results_cibersort_abs_tab <- as.data.frame(results_cibersort_abs)
+results_cibersort_abs <- as.data.frame(deconvolute(tpm_dataframe_gn_tumor_only, "cibersort_abs"))
 write.csv(results_cibersort_abs, paste(output_path, "CIBERSORT Cell Deconvolution/cibersort_abs_cellFrac.csv", sep = ""))
+
+# Run a version optimized for microarray data (METABRIC)
+output_path_metabric <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/cBioPortal/METABRIC/Expression"
+results_cibersort <- deconvolute(expression_dataframe_counts, method = "cibersort", arrays = TRUE)
+write.csv(results_cibersort, paste(output_path_metabric, "CIBERSORT Cell Deconvolution/cibersort_cellFrac_metabric.csv", sep = ""))
+results_cibersort_abs <- as.data.frame(deconvolute(expression_dataframe_counts, method = "cibersort_abs", arrays = TRUE))
+write.csv(results_cibersort_abs, paste(output_path_metabric, "CIBERSORT Cell Deconvolution/cibersort_abs_cellFrac_metabric.csv", sep = ""))
+
+
 
 #
 #

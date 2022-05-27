@@ -20,8 +20,9 @@ library("gplots")
 
 # Format of output dataframe: 
 # Rows : Genes (ENSG ID)
-# Columns : TCGA Sample ID (ex TCGA-AR-A10Z-01A, where "AR" is cohort ID, "A10Z" 
-# is patient ID, "01A" is sample ID)
+# Columns : Sample ID 
+    # TCGA ID, ex TCGA-AR-A10Z-01A, where "AR" is cohort ID, "A10Z" is patient ID, "01A" is sample ID)
+    # METABRIC ID, e.g. MB-XXXX or MTS-XXXX
 # Entries : expression value (may be either normalized or raw counts depending on the
 # type of data we are using)
 
@@ -215,6 +216,9 @@ mut_count_matrix <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Projec
 targets_sub3_groupedByTP53Mut <- group_by_mutation_status(targets_sub3, prot_of_interest, mut_count_matrix)
 targets_sub3_groupedByTP53Mut <- distinct(targets_sub3_groupedByTP53Mut)
 
+targets_sub3_groupedByPIK3CAMut <- group_by_mutation_status(targets_sub3, prot_of_interest, mut_count_matrix)
+targets_sub3_groupedByPIK3CAMut <- distinct(targets_sub3_groupedByPIK3CAMut)
+
 ############################################################
 ### USE EDGER FOR COUNT NORMALIZATION (TMM) ###
 ############################################################
@@ -394,7 +398,7 @@ visualize_de_by_mut_status <- function(d, target_group, method, thres, all_genes
     pval_df_sub <- pval_df[pval_df$QValue < thres, ]
     
     # Add gene names
-    pval_df_sub$gene.name <- unlist(lapply(rownames(pval_df_sub), function(ensg)
+    pval_df_sub$gene.name <- unlist(lapply(pval_df_sub$gene, function(ensg)
       paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == ensg, 
                                             'external_gene_name'])), collapse = ";")))
     print(head(pval_df_sub))
@@ -409,7 +413,7 @@ visualize_de_by_mut_status <- function(d, target_group, method, thres, all_genes
 
 
 topHits_tp53 <- visualize_de_by_mut_status(d_tp53, metabolism_gene_list_ensg, "Qvalue", 0.2, all_genes_id_conv)
-# topHits_pik3ca <- visualize_de_by_mut_status(d_pik3ca)
+# topHits_pik3ca <- visualize_de_by_mut_status(d_pik3ca, metabolism_gene_list_ensg, "Qvalue", all_genes_id_conv)
 
 # Or, if we are looking pan-cancer, apply to each item in list
 lapply(d_list, visualize_de_by_mut_status)
@@ -419,8 +423,6 @@ metabolism_gene_list_ensg <- read.table("C:/Users/sarae/Documents/Mona Lab Work/
 metabolism_gene_list <- unlist(lapply(metabolism_gene_list_ensg, function(x) 
   paste(unique(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
                                  'external_gene_name']), collapse = ";")))
-
-topHits_tp53 <- visualize_de_by_mut_status(d_tp53, metabolism_gene_list_ensg)
 
 # By subtype
 d$samples$description <- unlist(lapply(d$samples$description, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))

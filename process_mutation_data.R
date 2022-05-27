@@ -92,8 +92,12 @@ concavity_binding_site_df <- read.csv(paste(path, "Saved Output Data Files/ConCa
 ############################################################
 # GET DNA MUTATION INFORMATION (MAF FILE) 
 ############################################################
+### GET THE MAF FILENAME
 # Upload MAF file of interest (do not merge mutation types to "Mutation")
 maf_filename <- paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/TCGA.BRCA.muse.b8ca5856-9819-459c-87c5-94e91aca4032.DR-10.0.somatic.maf", sep = "")
+# For METABRIC
+# maf_filename <- paste(path, "Input Data Files/BRCA Data/cBioPortal/brca_metabric/data_mutations.txt", sep = "")
+
 # maf_filename <- paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/TCGA.Aggregate.muse.aggregated.somatic.maf", sep = "")
 # maf_file <- import.MAF(maf_filename, sep = "\t", is.TCGA = TRUE, merge.mutation.types = FALSE)
   # This will return the MAF file in TRONCO format; set to.TRONCO to FALSE to import as DF
@@ -101,8 +105,12 @@ maf_filename <- paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/TCGA.BR
   # hypermutators by cancer type
 maf_filenames <- list.files(paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/Individual Pan-Cancer MAF Files/", sep = ""), pattern = ".somatic")
 
+### IMPORT THE MAF FILE USING TRONCO
 maf_file_df_unfilt <- import.MAF(maf_filename, sep = "\t", is.TCGA = TRUE, 
                                  merge.mutation.types = FALSE, to.TRONCO = FALSE) 
+# For METABRIC
+#maf_file_df_unfilt <- import.MAF(maf_filename, sep = "\t", is.TCGA = FALSE, 
+                                 #merge.mutation.types = FALSE, to.TRONCO = FALSE) 
   # Can use "filter.fun" param to filter MAF lines using a homemade function
   # BRCA: Number of mutations (rows): 90969, Number of unique Swissprot IDs: 16504; Number of unique symbols: 17990
   # TCGA (All): Number of mutations (rows): X, Number of unique Swissprot IDs: X; Number of unique symbols: X
@@ -117,13 +125,18 @@ maf_file_dfs_unfilt <- lapply(maf_filenames, function(x) import.MAF(paste(path,
 # NOTE: This assumes that the clinical file has already been processed; make sure that 
 # process_clinical_data.R has been run through properly first!
 clin_filename <- paste(path, "Input Data Files/BRCA Data/clinical_data_subset.csv", sep = "")
+#clin_filename <- paste(path, "Input Data Files/BRCA Data/cBioPortal/brca_metabric/data_clinical_sample_sub.txt", sep = "")
 #clin_filename <- paste(path, "Input Data Files/Pan-Cancer/clinical_data_subset.csv", sep = "")
+
 clinical_df <- read.csv(clin_filename, header = TRUE)
+#clinical_df <- read.table(clin_filename, header = TRUE, sep = ",")
 
 # Filter by case ID
 maf_file_df <- maf_file_df_unfilt[maf_file_df_unfilt$case_id %fin% clinical_df$case_id,]
+#maf_file_df <- maf_file_df_unfilt[maf_file_df_unfilt$Tumor_Sample_Barcode %fin% clinical_df$SAMPLE_ID,]
+# This limits to only 173 unique proteins with mutations across these 854 patients
 
-# For pan-cancer will all MAF files, filter each by case ID
+# For pan-cancer with all MAF files, filter each by case ID
 maf_file_dfs <- lapply(maf_file_dfs_unfilt, function(df) 
   df[df$case_id %fin% clinical_df$case_id,])
 
@@ -138,8 +151,11 @@ hypermut_res <- filter_hypermutators(maf_filename, maf_file_df)
 maf_file_df <- hypermut_res[[1]] 
   # BRCA: The filtered maf file still has 30305 entries, 12097 unique Swissprot, 12968 unique names
   # TCGA: The filtered maf file still has X entries, X unique Swissprot, X unique names
+  # METABRIC: The filtered maf file still has 6058 entries, 173 unique names
 total_mut_count_df <- hypermut_res[[2]]  # The filtered mutation count matrix
+
 write.csv(total_mut_count_df, paste(path, "Saved Output Data Files/BRCA/Mutation/Mutation Count Matrices/total_mut_count_matrix_per_patient.csv", sep = ""))
+#write.csv(total_mut_count_df, paste(path, "Saved Output Data Files/BRCA/cBioPortal/METABRIC/Mutation/Mutation Count Matrices/total_mut_count_matrix_per_patient.csv", sep = ""))
 #write.csv(total_mut_count_df, paste(path, "Saved Output Data Files/Pan-Cancer/Mutation/Mutation Count Matrices/total_mut_count_matrix_per_patient_aggregate.csv", sep = ""))
 
 # If we're using multiple MAF files, filter hypermutators separately on each and then aggregate
@@ -166,7 +182,9 @@ write.csv(total_mut_count_df, paste(path, "Saved Output Data Files/Pan-Cancer/Mu
 ############################################################
 # WRITE TOTAL NUMBER OF MUTATIONS TO CLINICAL FILE
 ############################################################
-clinical_df <- update_clin_with_mut_counts(total_mut_count_df, clinical_df)
+clinical_df <- update_clin_with_mut_counts(total_mut_count_df, clinical_df, is_tcga = TRUE)
+# clinical_df <- update_clin_with_mut_counts(total_mut_count_df, clinical_df, is_tcga = FALSE)
+
 write.csv(clinical_df, clin_filename)  # Update the saved version with total mutation counts
 
 # If already done, read back the file
@@ -174,12 +192,16 @@ clinical_df <- read.csv(clin_filename, header = TRUE)
 
 
 ############################################################
-# FILTER OUT NON-MISSENSE MUTATIONS
+# FILTER OUT NON-MISSENSE/NONSENSE MUTATIONS
 ############################################################
 maf_file_df_missense <- maf_file_df[maf_file_df$Variant_Classification == "Missense_Mutation",]
+#maf_file_df_misAndNon <- maf_file_df[(maf_file_df$Variant_Classification == "Missense_Mutation") | 
+            #(maf_file_df$Variant_Classification == "Nonsense_Mutation"),]
   # BRCA: Narrows to 16689 entries, 8685 unique SWISSPROT IDs, 8954 unique Hugo IDs
   # TCGA (ALL): Narrows to 300796 entries, 17944 unique SWISSPROT IDs, and 18660 unique Hugo IDs
+  # METABRIC: Narrows to 3353 entries, 170 unique Hugo IDs
 write.csv(maf_file_df_missense, paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/maf_file_df_missense.csv", sep = ""))
+#write.csv(maf_file_df_missense, paste(path, "Input Data Files/BRCA Data/cBioPortal/brca_metabric/data_mutations_missense.csv", sep = ""))
 #write.csv(maf_file_df_missense, paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/maf_file_df_missense.csv", sep = ""))
 
 # If already done, read back the file
@@ -205,7 +227,12 @@ proteome <- read.fasta(file = proteome_filename, seqtype = c("AA"), as.string = 
 # intersection of these two files
   # SWISSPROT ID (column 69 in MAF)
 maf_swissprot_ids_missense <- maf_file_df_missense$SWISSPROT
-maf_symbols_missense <-maf_file_df_missense$SYMBOL
+#maf_swissprot_ids_missense <- unlist(lapply(maf_file_df_missense$Hugo_Symbol, function(x) 
+        #paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'uniprot_gn_id'])), collapse = ";")))
+
+maf_symbols_missense <- maf_file_df_missense$SYMBOL
+#maf_symbols_missense <- maf_file_df_missense$Hugo_Symbol
+
 
 #' Takes a proteome and set of protein Swissprot or Hugo IDs from a given MAF file; 
 #' returns a subsetted proteome DF with only overlapping proteins
@@ -213,9 +240,13 @@ maf_symbols_missense <-maf_file_df_missense$SYMBOL
 #' @param maf_file_ids vector of SWISSPROT or HUGO IDs from a given MAF file
 #' @param id_type a string denoting the ID type (either 'swissprot' or 'hugo')
 get_proteome_subset <- function(proteome, maf_file_ids, id_type) {
+  # Split up the maf file ids, if needed
+  maf_file_ids <- unique(unlist(lapply(maf_file_ids, function(x) unlist(strsplit(x, ";", fixed = TRUE)))))
+
   proteome_subset <- c()
   for (i in 1:length(proteome)) {
     entry <- proteome[i]
+    entry_id <- ""
     if (id_type == 'swissprot') {
       entry_id <- unlist(strsplit(attributes(proteome[i])[[1]], "|", fixed = TRUE))[2]
     } else if (id_type == 'hugo') {
@@ -223,7 +254,7 @@ get_proteome_subset <- function(proteome, maf_file_ids, id_type) {
     } else {
       print(paste("Unrecognized ID type:", id_type))
     }
-    if (entry_id %fin% maf_file_ids) {
+    if (entry_id %in% maf_file_ids) {
       proteome_subset <- c(proteome_subset, entry)
     }
   }
@@ -237,6 +268,8 @@ proteome_subset_missense_symb <- get_proteome_subset(proteome, maf_symbols_misse
 
 length(unique(proteome_subset_missense))  # check the number of protein sequences remaining
   # The length of this subset: BRCA - 8675 (11068 for missense + nonsense), TCGA (ALL) - 17899 (18062 for missense + nonsense)
+  # 4242 for BRCA for silent, 16725 for Pan-Cancer for silent
+  # 160 for METABRIC BRCA missense, 162 for METABRIC BRCA missense + nonsense
 
 # Write proteome subset to a FASTA
 write.fasta(proteome_subset_missense, names = names(proteome_subset_missense), as.string = TRUE, 
@@ -256,20 +289,23 @@ proteome_subset_missense <- read.fasta(file = proteome_subset_missense_filename,
 # Keep only proteins that have at least one confident binding domain
 
 # Export the list of remaining proteins back to FASTA format so that it can be uploaded to 
-  # Batch CD-Search , a tool that accepts protein sequences in FASTA format (max 4000 entries/ batch) or to HMMER 
+  # Batch CD-Search, a tool that accepts protein sequences in FASTA format (max 4000 entries/ batch) or to HMMER 
   # Batch CD-Search link: https://www.ncbi.nlm.nih.gov/Structure/bwrpsb/bwrpsb.cgi
   # NOTE: Uniprot's InterPro tool is another option for domain annotation
 
-prep_cdsearch_files(proteome_subset_missense, "missense")   # see batch_cdsearch_helper_functions.R
+prep_cdsearch_files(proteome_subset_missense, "missense", "tcga")   # see batch_cdsearch_helper_functions.R
+#prep_cdsearch_files(proteome_subset_missense, "missense", "metabric")   # see batch_cdsearch_helper_functions.R
 
 
 ############################################################
 # IMPORT RESULTS FROM BATCH CD-SEARCH 
 ############################################################
-domains_missense <- get_cdsearch_res("missense")      # see batch_cdsearch_helper_functions.R
+domains_missense <- get_cdsearch_res("missense", "tcga")      # see batch_cdsearch_helper_functions.R
+#domains_missense <- get_cdsearch_res("missense", "metabric")      # see batch_cdsearch_helper_functions.R
 
 # Write to a file 
 write.csv(domains_missense, paste(path, "Input Data Files/BRCA Data/CD-Search/missense_cdsearch_domains_all.csv", sep = ""))
+# write.csv(domains_missense, paste(path, "Input Data Files/BRCA Data/CD-Search/missense_cdsearch_domains_all_metabric.csv", sep = ""))
 # write.csv(domains_missense, paste(path, "Input Data Files/Pan-Cancer/CD-Search/missense_cdsearch_domains_all.csv", sep = ""))
 
 # If we have already done the above once, simply import the saved domains files
@@ -307,9 +343,10 @@ accessions_numeric <- regmatches(accessions_missense, regexpr("[[:digit:]]+", ac
 intersecting_domain_acc_missense <- intersect(accessions_numeric, binding_domains_ids_noPF)
 length(intersecting_domain_acc_missense)
 
-  # BRCA is 1162 intersecting domains (1250 for missense + nonsense); TCGA (ALL) is 1453 domains (1437 for missense + nonsense)
+  # BRCA is 1162 intersecting domains (1250 for missense + nonsense, 895 for silent); TCGA (ALL) is 1453 domains (1437 for missense + nonsense, 1414 for silent)
   # NUC ACIDS ONLY: BRCA is 218 intersecting domains, TCGA (ALL) is 279
 
+  # METABRIC has 131 intersecting domains for missense, 131 for missense + nonsense
 
 ############################################################
 # I-PROTEIN: SUBSET PROTEOME TO KEEP ONLY PROTEINS WITH EITHER:
@@ -330,7 +367,9 @@ length(intersecting_domain_acc_missense)
 get_iprotein_subset <- function(domains, intersecting_domain_acc, canbind_swissprot_ids, 
                                 concavity_swissprot_ids) {
   # Fix the "Query" column name (was i..Query)
-  colnames(domains)[which(colnames(domains) == "ï»¿Query")] <- "Query"
+  if("ï»¿Query" %in% colnames(domains)) {
+    colnames(domains)[which(colnames(domains) == "ï»¿Query")] <- "Query"
+  }
   
   # Fix the query column to get rid of query number (we don't really need this)
   domains$Query <- as.character(unlist(lapply(domains$Query, function(x) 
@@ -353,7 +392,7 @@ get_iprotein_subset <- function(domains, intersecting_domain_acc, canbind_swissp
     matching_indices_concavity <- which(concavity_swissprot_ids %fin% swissprot_ids)
     domains_concavity_sub <- domains[matching_indices_concavity,]
     
-    # Take the union of these dataframes to include all those that remain using either method
+    # Take the union of these data frames to include all those that remain using either method
     dupl_rows_pt1 <- which(!is.na(match(domains_interacdome_sub$Accession, domains_canbind_sub$Accession)))
     domains_sub_pt1 <- rbind(domains_interacdome_sub, domains_canbind_sub[-dupl_rows_pt1,])
     dupl_rows_pt2 <- !is.na(match(domains_sub_pt1$Accession, domains_concavity_sub$Accession))
@@ -408,16 +447,20 @@ domains_missense_iprotein_sub <- merge_proteome_and_domains(domains_missense_ipr
 ############################################################
 # Examine how many actual unique accessions we have
 length(unique(domains_missense_iprotein_sub$Accession))  
-  # All Ligands: BRCA: 1910 (2092 missense + nonsense); TCGA (ALL): 2767 (2749 missense + nonsense)
+  # All Ligands: BRCA: 1910 (2092 missense + nonsense, 1237 silent); TCGA (ALL): 2767 (2749 missense + nonsense, 2644 silent)
   # Nucleic Acids Only: BRCA: 257; TCGA (ALL): 324
+
+  # METABRIC BRCA: 133 missense (133 missense + nonsense)
 
 # Write this table to a CSV
 write.csv(domains_missense_iprotein_sub, file = paste(path, "Saved Output Data Files/BRCA/Mutation/iprotein_results_missense.csv", sep = ""))
+# write.csv(domains_missense_iprotein_sub, file = paste(path, "Saved Output Data Files/BRCA/cBioPortal/METABRIC/Mutation/iprotein_results_missense.csv", sep = ""))
 # write.csv(domains_missense_iprotein_sub, file = paste(path, "Saved Output Data Files/Pan-Cancer/Mutation/iprotein_results_missense.csv", sep = ""))
 
 # If already done this, read them back from CSV
-domains_missense_iprotein_sub <- read.csv(paste(path, "Saved Output Data Files/BRCA/Mutation/iprotein_results_missense.csv", sep = ""), header = TRUE)
-# domains_missense_iprotein_sub <- read.csv(paste(path, "Saved Output Data Files/Pan-Cancer/Mutation/iprotein_results_missense.csv", sep = ""), header = TRUE)
+domains_missense_iprotein_sub <- read.csv(paste(path, "Saved Output Data Files/BRCA/Mutation/iprotein_results_missense.csv", sep = ""), header = TRUE, check.names = FALSE)
+# domains_missense_iprotein_sub <- read.csv(paste(path, "Saved Output Data Files/BRCA/Mutation/iprotein_results_missense.csv", sep = ""), header = TRUE, check.names = FALSE)
+# domains_missense_iprotein_sub <- read.csv(paste(path, "Saved Output Data Files/Pan-Cancer/Mutation/iprotein_results_missense.csv", sep = ""), header = TRUE, check.names = FALSE)
 
 # Extract the Swissprot IDs and general names for all the remaining queries
 
@@ -444,13 +487,16 @@ swissprot_ids_missense_iprotein <- extract_swissprot_ids(domains_missense_iprote
 protein_ids_missense_iprotein <- extract_protein_names(domains_missense_iprotein_sub)  
 length(protein_ids_missense_iprotein)
 
-# All Ligands: BRCA: 6214 (7808 with missense + nonsense); TCGA (ALL): 11,939 (11,989 with missense + nonsense)
+# All Ligands: BRCA: 6214 (7808 with missense + nonsense, 3040 silent); TCGA (ALL): 11,939 (11,989 with missense + nonsense, 11,348 silent)
 # Nuc. Acids Only: BRCA: 1914; TCGA (ALL): 3,644
 
+# METABRIC BRCA: 121 missense (122 for missense + nonsense)
 
 # Write unique protein IDs to a file
 write.csv(protein_ids_missense_iprotein, file = paste(path, "Saved Output Data Files/BRCA/Mutation/protein_ids_missense_iprotein.csv", sep = ""))
 write.csv(swissprot_ids_missense_iprotein, file = paste(path, "Saved Output Data Files/BRCA/Mutation/swissprot_ids_missense_iprotein.csv", sep = ""))
+#write.csv(protein_ids_missense_iprotein, file = paste(path, "Saved Output Data Files/BRCA/cBioPortal/METABRIC/Mutation/protein_ids_missense_iprotein.csv", sep = ""))
+#write.csv(swissprot_ids_missense_iprotein, file = paste(path, "Saved Output Data Files/BRCA/cBioPortal/METABRIC/Mutation/swissprot_ids_missense_iprotein.csv", sep = ""))
 #write.csv(protein_ids_missense_iprotein, file = paste(path, "Saved Output Data Files/Pan-Cancer/Mutation/protein_ids_missense_iprotein.csv", sep = ""))
 #write.csv(swissprot_ids_missense_iprotein, file = paste(path, "Saved Output Data Files/Pan-Cancer/Mutation/swissprot_ids_missense_iprotein.csv", sep = ""))
 
@@ -463,7 +509,21 @@ swissprot_ids_missense_iprotein <- read.csv(paste(path, "Saved Output Data Files
 
 # Use these IDs to subset the MAF file
 maf_subset_df_missense <- maf_file_df_missense[maf_file_df_missense$SWISSPROT %in% swissprot_ids_missense_iprotein,]
+
+# For METABRIC, have to add the SWISSPROT ID and then do the subsetting (does not work properly with Hugo symbol)
+maf_file_df_missense$SWISSPROT <- unlist(lapply(maf_file_df_missense$Hugo_Symbol, function(x) 
+  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'uniprot_gn_id'])), collapse = ";")))
+rows_to_keep <- unlist(lapply(1:nrow(maf_file_df_missense), function(i) {
+  prot_ids <- unlist(strsplit(maf_file_df_missense$SWISSPROT[i], ";", fixed = TRUE))
+  truth_vect <- unlist(lapply(prot_ids, function(id) ifelse(id %in% swissprot_ids_missense_iprotein, TRUE, FALSE)))
+  if(TRUE %in% truth_vect) {return(i)}
+  else {return(NA)}
+}))
+rows_to_keep <- rows_to_keep[!is.na(rows_to_keep)]
+maf_subset_df_missense <- maf_file_df_missense[rows_to_keep,]
+
 write.csv(maf_subset_df_missense, paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/maf_file_df_missense_iprotein.csv", sep = ""))
+#write.csv(maf_subset_df_missense, paste(path, "Input Data Files/BRCA Data/cBioPortal/brca_metabric/data_mutations_missense_iprotein.csv", sep = ""))
 #write.csv(maf_subset_df_missense, paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/maf_file_df_missense_iprotein.csv", sep = ""))
 
 # If already done, read back the file
@@ -478,39 +538,46 @@ maf_subset_df_missense <- read.csv(paste(path, "Input Data Files/BRCA Data/Somat
 #' given I-Protein-level data frame using the information from the MAF file
 #' @param iprotein_sub an I-Protein level data frame produced from the above
 #' @param maf a MAF file with patient mutational information
-add_patient_ids <- function(iprotein_sub, maf) {
+#' @param dataset either 'tcga', 'metabric', 'icgc' or 'cptac3'
+add_patient_ids <- function(iprotein_sub, maf, dataset) {
   # For each unique protein, get the patients that are mutated in it
-  curr_prot <- ""
-  curr_patients <- ""
-  new_col <- c()
-  for (i in 1:nrow(iprotein_sub)) {
-    prot <- unlist(strsplit(iprotein_sub[i, 'Query'], "|", fixed = TRUE))[2] 
-    #prot <- unlist(iprotein_sub[i, 'Swissprot'])
-    print(prot)
-    if (prot == curr_prot) {
-      new_col <- c(new_col, curr_patients)
-    } else {
-      # Subset MAF to only the given protein
-      maf_sub <- maf[maf$SWISSPROT == prot,]
-      # Get the patient & sample that have this protein mutated
-      patients <- unlist(lapply(maf_sub$Tumor_Sample_Barcode, function(x) 
+  full_prot_set <- unlist(lapply(iprotein_sub$Query, function(x) 
+    unlist(strsplit(x, "|", fixed = TRUE))[2]))
+  unique_proteins <- unique(full_prot_set)
+  
+  patients_mut_per_prot <- lapply(unique_proteins, function(p) {
+    # Subset the MAF to only the given protein
+    maf_sub <- maf[grepl(p, maf$SWISSPROT),]
+    
+    # Get the patient and sample that have this protein mutated
+    unique_patients <- unique(maf_sub$Tumor_Sample_Barcode)
+    
+    # If TCGA, split this ID apart to get just patient and sample XXXX-XX
+    if(dataset == "tcga") {
+      unique_patients <- unlist(lapply(unique_patients, function(x) 
         paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
-      patients_char <- paste(patients, collapse = ";")
-      print(patients_char)
-      new_col <- c(new_col, patients_char)
-      
-      curr_prot <- prot
-      curr_patients <- patients_char
     }
-  }
-  iprotein_sub$Patient <- new_col
+    # Collapse these patients into a semicolon-separated string
+    patient_str <- paste(unique_patients, collapse = ";")
+    print(head(patient_str))
+    return(patient_str)
+  })
+  names(patients_mut_per_prot) <- unique_proteins
+  
+  new_col <- lapply(full_prot_set, function(p) patients_mut_per_prot[[p]])
+  print(head(new_col))
+  iprotein_sub$Patient <- unlist(new_col)
+
   return(iprotein_sub)
 }
 
-domains_missense_iprotein_sub <- add_patient_ids(domains_missense_iprotein_sub, maf_subset_df_missense)
+domains_missense_iprotein_sub <- add_patient_ids(domains_missense_iprotein_sub, maf_subset_df_missense, "tcga")
+#domains_missense_iprotein_sub <- add_patient_ids(domains_missense_iprotein_sub, maf_subset_df_missense, "metabric")
+
 
 write.csv(domains_missense_iprotein_sub, file = paste(path, "Saved Output Data Files/BRCA/Mutation/iprotein_results_missense.csv", sep = ""))
-write.csv(mutation_regprot_df, file = "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Mutation/iprotein_results_missense.csv")
+#write.csv(domains_missense_iprotein_sub, file = paste(path, "Saved Output Data Files/BRCA/cBioPortal/METABRIC/Mutation/iprotein_results_missense.csv", sep = ""))
+#write.csv(domains_missense_iprotein_sub, file = "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Mutation/iprotein_results_missense.csv")
 
 
 ############################################################

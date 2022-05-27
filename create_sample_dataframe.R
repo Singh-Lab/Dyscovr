@@ -1,22 +1,24 @@
 ############################################################
 ### Create Sample Data Frame
-### Written By: Sara Camilli, June 2021
+### Written By: Sara Geraghty, June 2021
 ############################################################
 
 # This file uses a sample data frame, and a variable declaring whether the data 
   # of interest is or is not breast cancer, to create an output "sample data frame" 
   # that will be used in the linear  model. This data frame has the following format:
-    # Columns: Linear model input variables (Library size, tumor purity estimate,
+    # Columns: Linear model input variables (Library size (TCGA only), tumor purity estimate,
     # immune cell infiltration estimates, and PEER factors)
-    # Rows: Patients that have all necessary data types 1...j...L (Unique 4-digit ID)
+    # Rows: Patients that have all necessary data types 1...j...L (Unique ID)
     # Entries: 0 or 1 values
 
 library(TCGAbiolinks)
 
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
+#main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/cBioPortal/METABRIC/"
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
 
 input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
+#input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_metabric/"
 #input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/"
 
 
@@ -27,7 +29,7 @@ is_brca <- TRUE
 ############################################################
 ### IMPORT ALIQUOT AND PATIENT FILES
 ############################################################
-# Aliquot data
+### Aliquot data, for TCGA ###
 aliquot_df <- read.csv(paste(input_path, "aliquot.csv", sep = ""), header = TRUE, check.names = FALSE)
 if(is_brca) {
   aliquot_df <- aliquot_df[grepl("BRCA", aliquot_df$project_id),]
@@ -47,8 +49,14 @@ aliquot_df$patient_id <- unlist(lapply(aliquot_df$sample_submitter_id, function(
   unlist(strsplit(x, "-", fixed = TRUE))[3]}))
 aliquot_df <- aliquot_df[which(aliquot_df$patient_id %in% patients),]
 
+
+### Clinical sample DF, for METABRIC ###
+clin_samp_df <- read.table(paste0(input_path, "data_clinical_sample_sub.txt"), 
+                           header = TRUE, check.names = FALSE, sep = ",", row.names = 1)
+
+
 ############################################################
-### IMPORT EXPRESSION FILES
+### IMPORT EXPRESSION FILES (TCGA ONLY)
 ############################################################
 # Import expression counts data frame, or samples data frame from edgeR normalization
 expression_df <- read.csv(paste(main_path, "Expression/expression_counts_DF.csv", sep = ""), 
@@ -60,11 +68,21 @@ tmm_norm_samples_df <- read.csv(paste(main_path, "Expression/tmm_normalized_expr
 tmm_norm_samples_df <- read.csv(paste(main_path, "Expression/ALL_CT_tmm_normalized_expression_filtByExpr_samples.csv", sep = ""),
                                 header = TRUE, check.names = FALSE)
 
-# Import tumor purity data frame
+
+############################################################
+### IMPORT TUMOR PURITY/ CELLULARITY FILES
+############################################################
+# Import tumor purity data frame for TCGA
 tumor_purity_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/tumor_purity_estimates.csv",
                             header = TRUE, check.names = FALSE)
 # if needed:
 colnames(tumor_purity_df)[1] <- 'Sample.ID'
+
+# Import tumor cellularity for METABRIC, which is found in the patient clinical DF
+tumor_purity_df <- read.table(paste0(input_path, "data_clinical_patient_sub.txt"), header = TRUE, check.names = FALSE,
+                              sep = ",")
+tumor_purity_df <- tumor_purity_df[, c("PATIENT_ID", "CELLULARITY")]
+
 
 ############################################################
 ### IMPORT PEER FILES
@@ -88,6 +106,8 @@ peer_factors_rn <- read.csv(paste(main_path, "PEER/R-N/TiebreakerMean/peer_facto
                               header = TRUE, row.names = 1, check.names = FALSE)
 peer_factors_rn_top10k <- read.csv(paste(main_path, "PEER/R-N/TiebreakerMean/peer_factors (R-N_mean_MedGr10_TO, noCov, noMean, top10k).csv", sep = ""),
                             header = TRUE, row.names = 1, check.names = FALSE)
+
+# TODO: RUN THIS FOR METABRIC
 
 ############################################################
 ### IMPORT IMMUNE CELL INFILTRATION FILES
@@ -127,37 +147,81 @@ CIBERSORT_abs_cols <- c("B cell naive_CIBERSORT-ABS", "B cell memory_CIBERSORT-A
                         "MAST cell activated_CIBERSORT-ABS", "MAST cell resting_CIBERSORT-ABS",
                         "Eosinophil_CIBERSORT-ABS", "Neutrophil_CIBERSORT-ABS")
 
+# For METABRIC, import one of the files we created ourselves
+icd_precomp_est <- read.csv(paste0(main_path, "Expression/CIBERSORT Cell Deconvolution/cibersort_abs_cellFrac_metabric.csv"),
+                                   header = TRUE, check.names = FALSE, row.names = 1)
+#icd_precomp_est <- read.csv(paste0(main_path, "Expression/CIBERSORT Cell Deconvolution/cibersort_cellFrac_metabric.csv"),
+                                   #header = TRUE, check.names = FALSE, row.names = 1)
+#icd_precomp_est <- read.csv(paste0(main_path, "Expression/quanTIseq Cell Deconvolution/quantiseq_cellFrac.csv"),
+                                   #header = TRUE, check.names = FALSE, row.names = 1)
+
+
+############################################################
+### IMPORT MUTATION MATRIX PCs (variation from other mutations)
+############################################################
+pca_results_misAndNon <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Mutation/PCA/pca_inclTP53_results.csv", 
+                                  row.names = 1)
+#pca_binned_results_misAndNon <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Mutation/PCA/pca_inclTP53_binned_results.csv", row.names = 1)
+
+pca_results_misAndNon <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Mutation/PCA/pca_inclTP53_results.csv", 
+                                  row.names = 1)
+#pca_binned_results_misAndNon <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Mutation/PCA/pca_inclTP53_binned_results.csv", row.names = 1)
+
+pca_results_misAndNon_brca_blca_hnsc <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Mutation/PCA/pca_inclTP53_results_BRCA_BLCA_HNSC.csv", 
+                                  row.names = 1)
+#pca_binned_results_misAndNon <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Mutation/PCA/pca_inclTP53_binned_results.csv", row.names = 1)
+
+max_pcs <- 5
+
+# TODO: RUN THIS FOR METABRIC
 
 ############################################################
 ### CALL CREATE SAMPLE DATA FRAME FUNCTION
 ############################################################
 # CIBERSORT abs
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
-                                            icd_precomp_est, CIBERSORT_abs_cols, peer_factors_tmm)
+                                            icd_precomp_est, CIBERSORT_abs_cols, 
+                                            peer_factors_tmm, pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
-                                            icd_precomp_est, CIBERSORT_abs_cols, peer_factors_fpkm)
+                                            icd_precomp_est, CIBERSORT_abs_cols, 
+                                            peer_factors_fpkm, pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
-                                            icd_precomp_est, CIBERSORT_abs_cols, peer_factors_fpkm_top10k)
+                                            icd_precomp_est, CIBERSORT_abs_cols, 
+                                            peer_factors_fpkm_top10k, pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
-                                            icd_precomp_est, CIBERSORT_abs_cols, peer_factors_qn_top10k)
+                                            icd_precomp_est, CIBERSORT_abs_cols, 
+                                            peer_factors_qn_top10k, pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
-                                            icd_precomp_est, CIBERSORT_abs_cols, peer_factors_rn)
+                                            icd_precomp_est, CIBERSORT_abs_cols, 
+                                            peer_factors_rn, pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
-                                            icd_precomp_est, CIBERSORT_abs_cols, peer_factors_rn_top10k)
+                                            icd_precomp_est, CIBERSORT_abs_cols, 
+                                            peer_factors_rn_top10k, pca_results_misAndNon, max_pcs, "tcga")
+
+# For METABRIC
+sample_dataframe <- create_sample_dataframe(clin_samp_df, NA, tumor_purity_df, 
+                                            icd_precomp_est, NA, NA, NA, NA, "metabric")
+
 
 # TIMER
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
-                                            icd_precomp_est, TIMER_cols, peer_factors_tmm)
+                                            icd_precomp_est, TIMER_cols, peer_factors_tmm, 
+                                            pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
-                                            icd_precomp_est, TIMER_cols, peer_factors_fpkm)
+                                            icd_precomp_est, TIMER_cols, peer_factors_fpkm, 
+                                            pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
-                                            icd_precomp_est, TIMER_cols, peer_factors_fpkm_top10k)
+                                            icd_precomp_est, TIMER_cols, peer_factors_fpkm_top10k, 
+                                            pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
-                                            icd_precomp_est, TIMER_cols, peer_factors_qn_top10k)
+                                            icd_precomp_est, TIMER_cols, peer_factors_qn_top10k, 
+                                            pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
-                                            icd_precomp_est, TIMER_cols, peer_factors_rn)
+                                            icd_precomp_est, TIMER_cols, peer_factors_rn, 
+                                            pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
-                                            icd_precomp_est, TIMER_cols, peer_factors_rn_top10k)
+                                            icd_precomp_est, TIMER_cols, peer_factors_rn_top10k, 
+                                            pca_results_misAndNon, max_pcs, "tcga")
 
 write.csv(sample_dataframe, paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_timer_tmm.csv", sep = ""))
 write.csv(sample_dataframe, paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_timer_fpkm.csv", sep = ""))
@@ -187,6 +251,10 @@ write.csv(sample_dataframe, paste(main_path, "Linear Model/Patient and Sample DF
 write.csv(sample_dataframe, paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_cibersort_total_frac_rn.csv", sep = ""))
 write.csv(sample_dataframe, paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_cibersort_total_frac_rn_top10k.csv", sep = ""))
 
+# For METABRIC
+write.csv(sample_dataframe, paste(main_path, "Patient and Sample DFs/sample_dataframe_cibersort_total_frac.csv", sep = ""))
+
+
 
 ############################################################
 ### CREATE SAMPLE DATA FRAME
@@ -194,21 +262,33 @@ write.csv(sample_dataframe, paste(main_path, "Linear Model/Patient and Sample DF
 #' Creates a skeleton "sample data frame" that will contain
 #' all the characteristics of interest for each patient sample. Calls helper 
 #' function to fill patient data frame and then returns it.
-#' @param aliquot_df an aliquot data file from the TCGA for the given patient cohort
+#' @param aliquot_df an aliquot data file from the TCGA for the given patient cohort 
+#' (or, alternatively, a clinical sample data file from METABRIC)
 #' @param expression_df a counts expression data frame, used to add patient library sizes 
 #' @param tumor_purity_df an estimate of tumor purity per sample
-#' @param immune_cell_infl_df an estimate of immune cell infiltration for the TIMER 
-#' tool, per sample
+#' @param immune_cell_infl_df an estimate of immune cell infiltration, per sample
 #' @param ici_columns a vector of strings indicating the column names of the tool of
 #' interest for the immune cell infiltration DF
+#' @param peer_df a data frame with results from running PEER on expression matrix
+#' @param mutation_pc_df a data frame with results from running PCA on the mutation matrix
+#' @param max_pcs the maximum number of PCs to include in the sample file
+#' @param dataset either 'tcga', 'metabric', 'icgc', or 'cptac3' to indicate what column
+#' names to reference/ data types to include
 create_sample_dataframe <- function(aliquot_df, expression_df, tumor_purity_df, 
-                                    immune_cell_infl_df, ici_columns, peer_df) {
+                                    immune_cell_infl_df, ici_columns, peer_df,
+                                    mutation_pc_df, max_pcs, dataset) {
   
   # Create relational data frame to hold patient-dependent inputs to linear model
   # Columns: Linear model input variables 
   # Rows: Samples that have all necessary data types 1...j...L (Unique 4-digit ID)
   sample_characteristics <- c("Tumor_purity_b1", "Tumor_purity_b2", "Tumor_purity_b3")
-  unique_sample_ids <- unique(aliquot_df$sample_submitter_id)
+  unique_sample_ids <- c()
+  if(dataset == 'tcga') {
+    unique_sample_ids <- unique(aliquot_df$sample_submitter_id)
+  } else if (dataset == 'metabric') {
+    unique_sample_ids <- unique(aliquot_df$SAMPLE_ID)
+  } else {print("Only implemented for TCGA and METABRIC.")}
+  
   sample_dataframe <- data.frame(matrix(ncol = length(sample_characteristics), 
                                          nrow = length(unique_sample_ids)))
   colnames(sample_dataframe) <- sample_characteristics
@@ -218,10 +298,12 @@ create_sample_dataframe <- function(aliquot_df, expression_df, tumor_purity_df,
   sample_dataframe <- input_sample_specific_info(sample_dataframe, aliquot_df, 
                                                  expression_df, tumor_purity_df,
                                                  immune_cell_infl_df, ici_columns,
-                                                 peer_df)
+                                                 peer_df, mutation_pc_df, max_pcs,
+                                                 dataset)
   
   # Remove any rows that are entirely NA
-  sample_dataframe <- sample_dataframe[rowSums(is.na(sample_dataframe)) != ncol(sample_dataframe),]
+  sample_dataframe <- sample_dataframe[rowSums(is.na(sample_dataframe)) != 
+                                         ncol(sample_dataframe),]
   
   return(sample_dataframe)
 }
@@ -245,16 +327,23 @@ create_sample_dataframe <- function(aliquot_df, expression_df, tumor_purity_df,
 #' tool, per sample
 #' @param ici_columns a vector of strings indicating the column names of the tool of
 #' interest for the immune cell infiltration DF
+#' @param mutation_pc_df a data frame with results from running PCA on the mutation matrix
+#' @param max_pcs the maximum number of PCs to include in the sample file
+#' @param dataset either 'tcga', 'metabric', 'icgc', or 'cptac3' to indicate what column
+#' names to reference/ data types to include
 input_sample_specific_info <- function(input_df, aliquot_df, expression_df, 
                                        tumor_purity_df, immune_cell_infl_df,
-                                       ici_columns, peer_df) {
+                                       ici_columns, peer_df, mutation_pc_df, 
+                                       max_pcs, dataset) {
   input_dataframe_updated <- input_df
   sample_ids <- rownames(input_df)
   
   # TUMOR PURITY
-  tumor_purity_df_conv <- convert_tumor_purity_to_cpe(rownames(input_dataframe_updated), 
-                                                      tumor_purity_df)
-  tumor_purity_df_conv_bucketed <- bucket_tumor_purity(tumor_purity_df_conv)
+  if(dataset == "tcga") {
+    tumor_purity_df <- convert_tumor_purity_to_cpe(rownames(input_dataframe_updated), 
+                                                        tumor_purity_df)
+  } 
+  tumor_purity_df_conv_bucketed <- bucket_tumor_purity(tumor_purity_df, dataset)
   input_dataframe_updated[,1:3] <- tumor_purity_df_conv_bucketed
   
   
@@ -262,17 +351,20 @@ input_sample_specific_info <- function(input_df, aliquot_df, expression_df,
   # OPTION 1: INCLUDE TOTAL PERCENTAGE OF IMMUNE CELLS AS A COVARIATE (need absolute fractions)
   input_dataframe_updated <- add_total_immune_cell_percentage(input_dataframe_updated, 
                                                               immune_cell_infl_df,
-                                                              ici_columns)
+                                                              ici_columns, dataset)
   
   # OPTION 2: INCLUDE THE FRACTION OF EACH IMMUNE CELL TYPE AS INDIVIDUAL COVARIATES
   #input_dataframe_updated <- add_immune_cell_fractions(input_dataframe_updated, 
-                                                      #immune_cell_infl_df, ici_columns)
+                                                      #immune_cell_infl_df, ici_columns, dataset)
   
   # PEER FACTORS
   input_dataframe_updated <- add_peer(input_dataframe_updated, peer_df)
   
   # LIBRARY SIZES
   input_dataframe_updated <- add_library_sizes(input_dataframe_updated, expression_df)
+  
+  # MUTATION MATRIX PCs
+  input_dataframe_updated <- add_mutation_pcs(input_dataframe_updated, mutation_pc_df, max_pcs)
   
   
   return(input_dataframe_updated)
@@ -325,26 +417,40 @@ convert_tumor_purity_to_cpe <- function(sample_ids, tumor_purity_df) {
 #' medium purity (0.5-0.75), and high purity (0.75-1.0)
 #' @param tumor_purity_df a data frame produced from the
 #' convert_tumor_purity_to_cpe function (row names are sample TCGA IDs,
-#' Tumor.purity is a column of the CPE purity value)
-bucket_tumor_purity <- function(tumor_purity_df) {
+#' Tumor.purity is a column of the CPE purity value) for TCGA, or a 
+#' sample clinical data frame for METABRIC
+#' @param dataset either 'tcga', 'metabric', 'icgc', or 'cptac3' to 
+#' indicate what column names to reference/ data types to include
+bucket_tumor_purity <- function(tumor_purity_df, dataset) {
   
-  # For each sample, get its tumor purity and classify it into a bucket
-  bucketed_rows <- lapply(tumor_purity_df$Tumor.purity, function(tp) {
-    if(is.na(tp)) {return(c(NA,NA,NA))}
-    else {
-      if (tp <= 0.5) {return(c(1,0,0))} 
-      else if ((tp > 0.5) & (tp <= 0.75)) {return(c(0,1,0))} 
-      else if (tp > 0.75) {return(c(0,0,1))} 
-      else {print(paste("Inappropriate purity value:", tp))}
-    }
+  # For each TCGA sample, get its tumor purity and classify it into a bucket
+  tumor_purity_df_bucket <- data.frame()
+  if(dataset == "tcga") {
+    bucketed_rows <- lapply(tumor_purity_df$Tumor.purity, function(tp) {
+      if(is.na(tp)) {return(c(NA,NA,NA))}
+      else {
+        if (tp <= 0.5) {return(c(1,0,0))} 
+        else if ((tp > 0.5) & (tp <= 0.75)) {return(c(0,1,0))} 
+        else if (tp > 0.75) {return(c(0,0,1))} 
+        else {print(paste("Inappropriate purity value:", tp))}
+      }
+    })
     
-  })
+  } else if (dataset == "metabric") {
+    bucketed_rows <- lapply(tumor_purity_df$CELLULARITY, function(x) {
+      if(x == "Low") {return(c(1,0,0))}
+      else if (x == "Moderate") {return(c(0,1,0))}
+      else if (x == "High") {return(c(0,0,1))}
+      else {print(paste("Inappropriate purity value:", x)); return(NA)}
+    })
+    
+  } else {print("Only implemented for TCGA and METABRIC.")}
   
-  # Recombine these rows into a data frame
   tumor_purity_df_bucket <- do.call(rbind, bucketed_rows)
+  rownames(tumor_purity_df_bucket) <- rownames(tumor_purity_df)
   colnames(tumor_purity_df_bucket) <- c('Tumor_purity_b1', 'Tumor_purity_b2',
                                         'Tumor_purity_b3')
-  rownames(tumor_purity_df_bucket) <- rownames(tumor_purity_df)
+
   
   print(tumor_purity_df_bucket)
   
@@ -365,33 +471,48 @@ bucket_tumor_purity <- function(tumor_purity_df) {
 #' @param immune_cell_infl_df a data frame from the TIMER website (see link above)
 #' that has pre-computed immune cell infiltration estimates for the TCGA
 #' @param ici_columns a vector of the columns of CIBERSORT Abs
+#' @param dataset either 'tcga', 'metabric', 'icgc', or 'cptac3' to 
+#' indicate what column names to reference/ data types to include
 add_total_immune_cell_percentage <- function(sample_df, immune_cell_infl_df, 
-                                             ici_columns) {
+                                             ici_columns, dataset) {
+  
   immune_cell_est <- lapply(rownames(sample_df), function(sample) {
     
-    # Remove the final letter to match
-    sample <- substr(sample, 1, nchar(sample)-1)
+    # Remove the final letter to match, if TCGA
+    if (dataset == "tcga") {sample <- substr(sample, 1, nchar(sample)-1)}
     
     # For this sample, get a subset of the IC infiltration data frame with the columns 
     # of interest from the tool of interest
-    if (sample %in% immune_cell_infl_df$cell_type) {
-      ici_df_sub <- immune_cell_infl_df[grepl(sample, immune_cell_infl_df$cell_type),
-                                        colnames(immune_cell_infl_df) %in% ici_columns]
-      print(head(ici_df_sub))
-      
-      # Sum the fraction of all these non-tumor cell types together
-      total_ic_frac <- sum(as.numeric(ici_df_sub), na.rm = TRUE)
-      
-      #return(total_ic_frac)
-      
-      # Return this value, bucketed 
-      if(total_ic_frac <= 0.3) {return(c(1,0,0))}
-      else if ((total_ic_frac > 0.3) & (total_ic_frac <= 0.7)) {return(c(0,1,0))}
-      else if (total_ic_frac > 0.7) {return(c(0,0,1))}
-      else {return(c(NA, NA, NA))}
-      
-    } else {return (c(NA, NA, NA))}
+    ici_df_sub <- c()
+    
+    if(dataset == 'tcga') {
+      if (sample %in% immune_cell_infl_df$cell_type) {
+        ici_df_sub <- immune_cell_infl_df[grepl(sample, immune_cell_infl_df$cell_type),
+                                          colnames(immune_cell_infl_df) %in% ici_columns]
+      } else {return (c(NA, NA, NA))}
+    }
+    else if (dataset == 'metabric') {
+      if (sample %in% colnames(immune_cell_infl_df)) {
+        ici_df_sub <- immune_cell_infl_df[, grepl(sample, colnames(immune_cell_infl_df))]
+      } else {return (c(NA, NA, NA))}
+    }
+    # Sum the fraction of all these non-tumor cell types together
+    print(head(ici_df_sub))
+    total_ic_frac <- sum(as.numeric(ici_df_sub), na.rm = TRUE)
+    
+    #return(total_ic_frac)
+    
+    thresh <- c(0.3, 0.7)
+    if(dataset == "metabric") {thresh <- c(1.1, 1.3)}
+    
+    # Return this value, bucketed 
+    if(total_ic_frac <= thresh[1]) {return(c(1,0,0))}
+    else if ((total_ic_frac > thresh[1]) & (total_ic_frac <= thresh[2])) {return(c(0,1,0))}
+    else if (total_ic_frac > thresh[2]) {return(c(0,0,1))}
+    else {return(c(NA, NA, NA))}
   })
+  
+  
   immune_cell_est_df <- do.call(rbind, immune_cell_est)
   colnames(immune_cell_est_df) <- c("Tot_IC_Frac_b1", "Tot_IC_Frac_b2", "Tot_IC_Frac_b3")
   
@@ -431,7 +552,7 @@ add_immune_cell_fractions <- function(sample_df, immune_cell_infl_df, ici_column
   })
   # Bind all these rows together
   ici_dataframe <- do.call(rbind, immune_cell_est)
-  print(ici_dataframe)
+  #print(ici_dataframe)
   #colnames(ici_dataframe) <- ici_columns
   sample_df <- cbind(sample_df, ici_dataframe)
   
@@ -534,6 +655,42 @@ add_library_sizes <- function(sample_df, samples_norm_df) {
   return(sample_df)
 }
 
+############################################################ 
+#' For each sample, get the first N PCs from performing PCA on the mutation matrix.
+#' Return an input data frame with, for each row (sample), has additional columns
+#' with the associated PCs for that sample.
+#' @param sample_df a sample data frame to add PCs to
+#' @param mutation_pc_df a data frame with results from running PCA on the mutation matrix
+#' @param max_pcs the maximum number of PCs to include in the sample file
+add_mutation_pcs <- function(sample_df, mutation_pc_df, max_pcs) {
+  
+  pc_rows <- lapply(rownames(sample_df), function(sample) {
+    samp <- paste(unlist(strsplit(sample, "-", fixed = TRUE))[3:4], collapse = "-")
+    
+    # For this sample, get & return the first N PCs
+    if(samp %in% rownames(mutation_pc_df)) {
+      mut_pcs <- as.numeric(unlist(mutation_pc_df[rownames(mutation_pc_df) == samp, 
+                                           1:max_pcs]))
+      print(mut_pcs)
+      return(mut_pcs)
+    } else {return(rep(NA, times=max_pcs))}
+  })
+  
+  names(pc_rows) <- rownames(sample_df)
+  print(head(pc_rows))
+  
+  # Bind all these rows together
+  mut_pc_dataframe <- do.call(rbind, pc_rows)[,1:max_pcs]
+  print(head(mut_pc_dataframe))
+  print(dim(mut_pc_dataframe))
+  colnames(mut_pc_dataframe) <- paste("Mut", as.character(colnames(mutation_pc_df)[1:max_pcs]), 
+                                      sep = "_")
+  print(mut_pc_dataframe)
+  
+  sample_df <- cbind(sample_df, mut_pc_dataframe)
+  
+  return(sample_df)
+}
 ############################################################ 
 
 #' Takes a main data frame for all sample characteristics,

@@ -9,7 +9,9 @@
 
 # Format of output data frame: 
   # Rows : Transcription Factors (ENSG ID) OR all genes in genome
-  # Columns : Patient TCGA ID (4-digit) OPT: (-Sample ID (01A is tumor, 11A is normal))
+  # Columns : Patient ID
+      # TCGA ID (4-digit) OPT: (-Sample ID (01A is tumor, 11A is normal))
+      # METABRIC ID (XX-XXXX), all are primary tumor
   # Entries : CNA value (positive represents an amplification event, negative represents deletion event,
     # 0 represents no amplification or deletion) OR the actual CNA value
 
@@ -734,5 +736,6 @@ binary_flanking_cna_status_df <- create_binary_flanking_cna_status_df(flanking_c
 
 # Write to a file
 write.csv(binary_flanking_cna_status_df, paste0(local_path, "CNV/Gene-level Raw/Binary_Neighboring_Driver_CNA_DF_AllGenes_CancerOnly.csv"))
+
 
 

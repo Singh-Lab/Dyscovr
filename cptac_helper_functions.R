@@ -170,25 +170,28 @@ ggplot(cptac_brca_fpkm_data_complete_pik3ca[cptac_brca_fpkm_data_complete_pik3ca
 #' @param goi the Hugo Symbol of a gene of interest
 fix_proteomic_df <- function(proteomic_df, mutation_df, goi) {
   
-  prot_df$gene.name <- rownames(prot_df)
-  prot_df_m <- melt(proteomic_df)
+  proteomic_df$gene.name <- rownames(proteomic_df)
+  proteomic_df_m <- melt(proteomic_df)
   colnames(proteomic_df_m) <- c("Hugo_Symbol", "Patient_ID", "Prot.Quant")
   
-  print(head(prot_df_m))
+  print(head(proteomic_df_m))
   
   # Add mutation status of the GOI
-  status <- unlist(lapply(prot_df_m$Patient_ID, function(id) {
+  status <- unlist(lapply(proteomic_df_m$Patient_ID, function(id) {
     if(id %in% mutation_df$Tumor_Sample_Barcode) {return(1)}
     else {return(0)}
   }))
-  prot_df_m[,4] <- status
+  proteomic_df_m[,4] <- status
   lab <- paste0(goi, "_Mut")
-  colnames(prot_df_m)[4] <- lab
+  colnames(proteomic_df_m)[4] <- lab
   
-  prot_df_m <- na.omit(prot_df_m)
+  proteomic_df_m <- na.omit(proteomic_df_m)
   
-  return(prot_df_m)
+  return(proteomic_df_m)
 }
+
+cptac_brca_proteomic_data_m <- fix_proteomic_df(cptac_brca_proteomic_data,  cptac_brca_tp53_mutation, "TP53")
+cptac_brca_proteomic_data_m <- fix_proteomic_df(cptac_brca_proteomic_data,  cptac_brca_pik3ca_mutation, "PIK3CA")
 
 
 #' For the given target genes, does a Wilcoxon test to see if there
@@ -226,6 +229,9 @@ wilcox_of_targs <- function(cptac_df, goi, label) {
 pvalues <- wilcox_of_targs(cptac_brca_fpkm_data_complete_tp53, "TP53", "FPKM")
 pvalues <- wilcox_of_targs(cptac_brca_proteomic_data_m, "TP53", "Prot.Quant")
 
+pvalues <- wilcox_of_targs(cptac_brca_fpkm_data_complete_pik3ca, "PIK3CA", "FPKM")
+pvalues <- wilcox_of_targs(cptac_brca_proteomic_data_m, "PIK3CA", "Prot.Quant")
+
 
 pvalues$Signif <- unlist(lapply(pvalues$P.value, function(x) ifelse(x < 0.05, 1, 0)))
 pvalues$ChipEat <- unlist(lapply(pvalues$Targets, function(x) ifelse(x %in% tp53_chipeat_targs, 1, 0)))
@@ -234,3 +240,26 @@ pvalues <- as.data.frame(pvalues)
 pvalues <- pvalues[order(pvalues$P.value),]
 
 jac_res <- clujaccard(pvalues$ChipEat, pvalues$Signif, zerobyzero = NA)
+
+
+# Do this for individual subtypes 
+cptac_brca_fpkm_data_complete_tp53_lumA <- cptac_brca_fpkm_data_complete_tp53[cptac_brca_fpkm_data_complete_tp53$Patient_ID %in% 
+                                                                                cptac_lumA_samples,]
+cptac_brca_fpkm_data_complete_tp53_lumB <- cptac_brca_fpkm_data_complete_tp53[cptac_brca_fpkm_data_complete_tp53$Patient_ID %in% 
+                                                                                cptac_lumB_samples,]
+cptac_brca_fpkm_data_complete_tp53_basal <- cptac_brca_fpkm_data_complete_tp53[cptac_brca_fpkm_data_complete_tp53$Patient_ID %in% 
+                                                                                cptac_basal_samples,]
+cptac_brca_fpkm_data_complete_tp53_her2 <- cptac_brca_fpkm_data_complete_tp53[cptac_brca_fpkm_data_complete_tp53$Patient_ID %in% 
+                                                                                cptac_her2_samples,]
+
+cptac_brca_proteomic_data_m_lumA <- cptac_brca_proteomic_data_m[cptac_brca_proteomic_data_m$Patient_ID %in%
+                                                                  cptac_lumA_samples,]
+cptac_brca_proteomic_data_m_lumB <- cptac_brca_proteomic_data_m[cptac_brca_proteomic_data_m$Patient_ID %in%
+                                                                  cptac_lumB_samples,]
+cptac_brca_proteomic_data_m_basal <- cptac_brca_proteomic_data_m[cptac_brca_proteomic_data_m$Patient_ID %in%
+                                                                  cptac_basal_samples,]
+cptac_brca_proteomic_data_m_her2 <- cptac_brca_proteomic_data_m[cptac_brca_proteomic_data_m$Patient_ID %in%
+                                                                  cptac_her2_samples,]
+
+pvalues <- wilcox_of_targs(cptac_brca_fpkm_data_complete_tp53_lumA, "TP53", "FPKM")
+pvalues <- wilcox_of_targs(cptac_brca_proteomic_data_m_lumA, "TP53", "Prot.Quant")

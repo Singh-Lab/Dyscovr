@@ -286,21 +286,28 @@ filter_hypermutators <- function(maf_filename, maf_df) {
 #' 4. Returns the updated clinical DF
 #' @param total_mut_count_tab a mutation-count matrix from maftools that has
 #' been filtered to remove hypermutators
-#' @param clinical_df a clinical DF from the TCGA
-#' @param uuid_barcode_conversion a table that maps between patient 
-#' barcodes and UUIDs
-update_clin_with_mut_counts <- function(total_mut_count_tab, clinical_df) {
+#' @param clinical_df a clinical DF from the TCGA or METABRIC
+#' @param is_tcga a TRUE/FALSE value indicating if these are TCGA IDs
+update_clin_with_mut_counts <- function(total_mut_count_tab, clinical_df, is_tcga) {
   
-  # Get the unique patient UUIDs for our mutation count table
+  # Get the unique patient IDs for our mutation count table
   ids <- rownames(total_mut_count_tab)
-  patient_ids <- unlist(lapply(ids, function(id) 
-    paste(unlist(strsplit(id, split = "-", fixed = TRUE))[1:3], collapse = "-")))
+  total_mut_counts <- c()
   
-  # Subset the clinical data frame to only these IDs
-  clinical_df <- clinical_df[clinical_df$case_submitter_id %fin% patient_ids,]
-
-  total_mut_counts <- unlist(lapply(clinical_df$case_submitter_id, function(case) 
-    total_mut_count_tab[grepl(case, rownames(total_mut_count_tab)), 'Total.Num.Mut']))
+  if(is_tcga) {
+    ids <- unlist(lapply(ids, function(id) 
+      paste(unlist(strsplit(id, split = "-", fixed = TRUE))[1:3], collapse = "-")))
+    # Subset the clinical data frame to only these IDs
+    clinical_df <- clinical_df[clinical_df$case_submitter_id %fin% ids,]
+    total_mut_counts <- unlist(lapply(clinical_df$case_submitter_id, function(case) 
+      total_mut_count_tab[grepl(case, rownames(total_mut_count_tab)), 'Total.Num.Mut']))
+  } 
+  else {
+    clinical_df <- clinical_df[clinical_df$SAMPLE_ID %fin% ids,]
+    total_mut_counts <- unlist(lapply(clinical_df$SAMPLE_ID, function(case) 
+      total_mut_count_tab[grepl(case, rownames(total_mut_count_tab)), 'Total.Num.Mut']))
+    
+  }
 
   # Add vector as a new column 
   clinical_df$Total.Num.Muts <- total_mut_counts
@@ -1158,6 +1165,9 @@ write.csv(output_df, paste0(output_path, "Linear Model/Tumor_Only/tp53_functiona
 
 # Use maftools to examine the proportion of patients that possess top mutations
 maf_filename <- "TCGA.BRCA.muse.b8ca5856-9819-459c-87c5-94e91aca4032.DR-10.0.somatic.maf"
+#maf_filename <- "TCGA.Aggregate.muse.aggregated.somatic.maf"
+
+
 maf <- read.maf(maf = paste0(main_path, maf_filename))  # Read in maf file using maftools
 
 # Use subsetMAF to also create subsetted MAF objects
