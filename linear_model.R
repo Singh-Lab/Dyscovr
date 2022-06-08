@@ -218,7 +218,7 @@ if(args$cancerType == "BRCA") {
   targ_path <- paste(input_file_path, "BRCA/target_lists/", sep = "")
   
   if(args$dataset == "METABRIC") {
-    main_path <- paste(input_file_path, "METABRIC/")
+    main_path <- paste0(input_file_path, "METABRIC/")
   } else {
     if(!tumNormMatched) {
       main_path <- paste(input_file_path, "BRCA/tumor_only/", sep = "")
@@ -379,7 +379,9 @@ patient_df <- fread(paste(main_path, paste("patient/", args$patient_df, sep = ""
 colnames(patient_df)[1] <- "sample_id"
 
 # Restrict the Mut_PC columns to only those given in the argument vector
-patient_df <- restrict_mut_pc_cols(patient_df, args$mut_pc_vect)
+if(args$dataset == "TCGA") {
+  patient_df <- restrict_mut_pc_cols(patient_df, args$mut_pc_vect)
+}
 
 if(debug) {
   print("Patient DF")

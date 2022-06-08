@@ -1,6 +1,6 @@
 ############################################################
 ### Process Gene-Level CNA Data 
-### Written By: Sara Camilli, August 2020
+### Written By: Sara Geraghty, August 2020
 ############################################################
 
 # This file processes the gene-level CNA (Score or Raw Value) data file(s) in order to:
@@ -17,6 +17,7 @@
 
 library(TCGAbiolinks)
 library(data.table)
+library(EnsDb.Hsapiens.v86)
 
 path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
 #path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TCGA Data (ALL)/"
@@ -386,7 +387,7 @@ write.table(bucketed_cna_df, paste(output_path, "Gene-level Raw/CNV_DF_bucketed_
 #' which have positions of the CNAs in addition to the gene
 #' @param expression_df an expression data frame with the TMM-normalized 
 #' expression value for each sample (y-axis) and each gene (x-axis)
-#' @param driver_gene_df a table of known driver gene with their tumor
+#' @param driver_gene_df a table of known driver genes with their tumor
 #' suppressor/ oncogene status
 #' @param sample_sheet a GDC sample sheet to link patient UUID to TCGA ID
 #' @param cna_df a compiled CNA data frame from the previous section
@@ -400,7 +401,7 @@ create_flanking_cna_status_df <- function(path_to_raw_cna_files, expression_df,
   patient_dfs <- lapply(1:length(cna_files), function(i) {
     fn <- cna_files[i]
     print(paste("File", paste(i, paste("of", length(cna_files)))))
-    curr_file <- read.csv(paste0(path_to_raw_cna_files, fn), header = TRUE, 
+    curr_file <- fread(paste0(path_to_raw_cna_files, fn), header = TRUE, 
                           check.names = FALSE, sep = "\t")
     curr_file$gene_id <- unlist(lapply(curr_file$gene_id, function(x)
       unlist(strsplit(x, ".", fixed = TRUE))[1]))
@@ -413,7 +414,7 @@ create_flanking_cna_status_df <- function(path_to_raw_cna_files, expression_df,
     
     outdf <- data.frame("gene_id" = curr_file$gene_id, "gene_name" = curr_file$gene_name,
                         "copy_number" = curr_file$copy_number)
-    outdf$gene_id <- unlist(lapply(outdf$gene_id, function(x) unlist(strsplit(x, ".", fixed = TRUE))[1]))
+    #outdf$gene_id <- unlist(lapply(outdf$gene_id, function(x) unlist(strsplit(x, ".", fixed = TRUE))[1]))
     outdf$sample_id <- rep(sample_id_short, times = nrow(outdf))
     outdf <- outdf[!is.na(outdf$copy_number),]
     print(head(outdf))
@@ -431,10 +432,10 @@ create_flanking_cna_status_df <- function(path_to_raw_cna_files, expression_df,
 #' Helper function that, given the output DF in-progress for a given sample,
 #' along with the driver gene information and an expression DF, returns a 
 #' DF with: the names of each closest flanking driver gene on the same chromosome
-#' with a matching CNA status that has differential expression effects in the population
+#' with a matching, non-normal CNA status that has differential expression effects in the population
 #' @param outdf the outfile for this patient, in progress
 #' @param curr_file the CNA file for this patient
-#' @param driver_gene_df a table of known driver gene with their tumor
+#' @param driver_gene_df a table of known driver genes with their tumor
 #' suppressor/ oncogene status
 #' @param expression_df an expression data frame with the TMM-normalized 
 #' expression value for each sample (y-axis) and each gene (x-axis)
@@ -516,6 +517,7 @@ get_neighbor <- function(curr_file_sub, curr_start, curr_end, curr_cna_stat,
   if(up_or_down == "upstream") {
     neighbor_df <- data.frame("upstr_neighbor" = NA, "upstr_neighbor_start" = NA, 
                               "upstr_neighbor_end" = NA)
+    if(curr_cna_stat == 2) {return(neighbor_df)}
     tryCatch({
       curr_file_sub <- curr_file_sub[(curr_file_sub$start < curr_start) &
                                        (curr_file_sub$end <= curr_end)]
@@ -524,6 +526,7 @@ get_neighbor <- function(curr_file_sub, curr_start, curr_end, curr_cna_stat,
   else if (up_or_down == "downstream") {
     neighbor_df <- data.frame("downstr_neighbor" = NA, "downstr_neighbor_start" = NA, 
                               "downstr_neighbor_end" = NA)
+    if(curr_cna_stat == 2) {return(neighbor_df)}
     tryCatch({
       curr_file_sub <- curr_file_sub[(curr_file_sub$start >= curr_start) &
                                        (curr_file_sub$end > curr_end)]
@@ -654,7 +657,6 @@ get_expr_change <- function(nearest, expression_df, cna_df, amp_or_del) {
 }
 
 
-
 # Import necessary files
 path_to_cna_files <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/CNV_Data/Gene-Level Copy Number Raw/"
 sample_sheet <- read.csv(paste0(path_to_cna_files, "gdc_sample_sheet.2021-02-17.tsv"), header = TRUE, 
@@ -736,6 +738,51 @@ binary_flanking_cna_status_df <- create_binary_flanking_cna_status_df(flanking_c
 
 # Write to a file
 write.csv(binary_flanking_cna_status_df, paste0(local_path, "CNV/Gene-level Raw/Binary_Neighboring_Driver_CNA_DF_AllGenes_CancerOnly.csv"))
+
+
+################################
+
+
+#' As an alternative, creates a data frame containing all the CGC oncogenes and tumor 
+#' suppressors with their chromosome, start and end position, whether they are differently 
+#' expressed between amplified/ deleted patient cohorts within the larger group, and, for 
+#' each patient, their copy number. Then, we can reference this mapping for each gene
+#' of interest in order to obtain if there are matching CGC neighbors that are co-amplified or
+#' deleted.
+#' @param expression_df an expression data frame with the TMM-normalized 
+#' expression value for each sample (y-axis) and each gene (x-axis)
+#' @param driver_gene_df a table of known driver genes with their tumor
+#' suppressor/ oncogene status
+#' @param cna_df a compiled CNA data frame from the previous section
+create_cgc_cna_mapping <- function(expression_df, driver_gene_df, cna_df) {
+  driver_gene_mapping <- data.frame("driver.gene" = driver_gene_df$ensembl_gene_id, 
+                                    "onco.or.ts" = driver_gene_df$cancer_driver_status)
+  driver_gene_mapping$onco.or.ts <- unlist(lapply(driver_gene_mapping$onco.or.ts, function(x) {
+    x_spl <- unlist(strsplit(x, ",", fixed = TRUE))
+    x_spl <- x_spl[x_spl %in% c("O", "T")]  # keep only T or O labels
+  }))
+  
+  # Get the chromosome, start position, and strand for this gene
+  edb <- EnsDb.Hsapiens.v86
+  driver_gene_symbols <- driver_gene_df$primary_gene_name
+  driver_gene_mapping$chrom <- mapIds(edb, keys = driver_gene_symbols, 
+                             keytype = "SYMBOL", column = "SEQNAME")
+  driver_gene_mapping$txStart <- mapIds(edb, keys = driver_gene_symbols, 
+                               keytype = "SYMBOL", column = "TXSEQSTART")
+  driver_gene_mapping$txStrand <- mapIds(edb, keys = driver_gene_symbols, 
+                                keytype = "SYMBOL", column = "SEQSTRAND")
+  driver_gene_mapping <- driver_gene_mapping[!(is.na(driver_gene_mapping$chrom))]
+  
+  # Get the copy number for each of these genes in each patient
+  cna_df_drivers <- cna_df[rownames(cna_df) %in% driver_gene_mapping$driver.gene,]
+  cna_df_drivers$driver.gene <- rownames(cna_df_drivers)
+  rownames(cna_df_drivers) <- 1:nrow(cna_df_drivers)
+  
+  driver_gene_mapping_full <- merge(driver_gene_mapping, cna_df_drivers, by = "driver.gene")
+  
+  return(driver_gene_mapping_full)
+}
+
 
 
 

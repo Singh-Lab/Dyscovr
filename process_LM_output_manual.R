@@ -98,7 +98,7 @@ dev.off()
 visualize_pval_distrib <- function(results_table) {
   pvals <- results_table$p.value[!is.na(results_table$p.value) & 
                                    !is.infinite(results_table$p.value)]
-  hist(pvals, main = "Histogram of p-Values",
+  hist(pvals, main = "",
        xlab = "p-value", ylab = "Frequency", col = "blueviolet")
 }
 
@@ -1268,7 +1268,7 @@ tfcancer_df <- read.csv(paste(tfcancer_path, "BRCA Data/Validation_Files/BRCA_TF
                         header = TRUE, check.names = FALSE)
 
 # Import TP53-specific ChIP-eat targets
-tp53_chipeat_targets <- read.table(paste0(path, "Saved Output Data Files/BRCA/ChIP-eat/tp53_chipeat_targets.txt"), header = FALSE)[,1]
+tp53_chipeat_targets <- read.table(paste0(main_path, "ChIP-eat/tp53_chipeat_targets.txt"), header = FALSE)[,1]
 
 # FOR PAN-CANCER (must combine files)
 #' Creates a TFcancer file that is the combination of all the individual cancer
@@ -1472,7 +1472,9 @@ tp53_chipeat_targs <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Pr
 #' DF should already be subsetted to just this gene); ex. ChIP-eat targets, HumanBase
 #' @param type the type of test, either "fisher's exact" or "k-s"
 compute_statistical_enrichment <- function(master_df, known_targs, type) {
-  if (type == "fisher's exact") {
+  final_res <- NA
+  
+  if ((type == "fisher's exact") | (type == "both")) {
     sig_targets <- unique(master_df[master_df$q.value < 0.1, 'T_k.name'])
     nonsig_targets <- unique(master_df[master_df$q.value > 0.1, 'T_k.name'])
     targets <- unique(master_df$T_k.name)
@@ -1499,9 +1501,9 @@ compute_statistical_enrichment <- function(master_df, known_targs, type) {
     fisher_res <- fisher.test(contigency_table, alternative = "greater")
     print(fisher_res$p.value)
     
-    return(fisher_res)
+    final_res <- fisher_res
   }
-  else if (type == "k-s") {
+  if ((type == "k-s") | (type == "both")) {
     # Create a uniform distribution the same length as the number of genes
     uniform <- 1:length(master_df$T_k.name)
 
@@ -1518,12 +1520,15 @@ compute_statistical_enrichment <- function(master_df, known_targs, type) {
 
     print(ks_res)
     print(ks_res$p.value)
-    return(ks_res)
+    
+    if(type == "both") {final_res <- list(final_res, ks_res)}
+    else {final_res <- ks_res}
   }
-  else {
+  if (!(type %in% c("fisher's exact", "k-s", "both"))) {
     print("Only implemented for 'Fisher's exact' or 'k-s' tests.")
     return(0)
   }
+  return(final_res)
 }
 
 # Call function
@@ -1667,10 +1672,16 @@ tp53_neighbors_dist2_weight5 <- read.table("C:/Users/sarae/Documents/Mona Lab Wo
 pik3ca_neighbors_dist2_weight5 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project FIles/Saved Output Data Files/Pan-Cancer/Network_Data/string_pik3ca_neighbors_dist2_weight5.txt",
                                            header = TRUE)[,'SYMBOL']
 
-tp53_neighbors_conf100 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project FIles/Saved Output Data Files/Pan-Cancer/Network_Data/string_tp53_neighbors_confThres100.txt",
+tp53_neighbors_conf100 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Network_Data/string_tp53_neighbors_confThres100.txt",
                                            header = TRUE)[,'SYMBOL']
-pik3ca_neighbors_conf100 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project FIles/Saved Output Data Files/Pan-Cancer/Network_Data/string_pik3ca_neighbors_confThres100.txt",
+pik3ca_neighbors_conf100 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Network_Data/string_pik3ca_neighbors_confThres100.txt",
                                              header = TRUE)[,'SYMBOL']
+
+tp53_neighbors_conf500 <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/tp53_string_interactions_top500.csv",
+                                     header = TRUE, check.names = FALSE)
+tp53_neighbors_conf500 <- tp53_neighbors_conf500[(tp53_neighbors_conf500$`#node1` == "TP53") | (tp53_neighbors_conf500$node2 == "TP53"),]
+tp53_neighbors_conf500 <- unique(c(tp53_neighbors_conf500$`#node1`, tp53_neighbors_conf500$node2))
+tp53_neighbors_conf500 <- tp53_neighbors_conf500[tp53_neighbors_conf500 != "TP53"]
 
 # Call function
 plot_network_enrichment(allgene_sixMostMut_p53, tp53_string_nw_targs, "TP53", 10)
@@ -1708,7 +1719,7 @@ pik3ca_curated_targs <- c("WNT5A", "TCF7L2", "MSX2", "TNFRSF11B", "SEC14L2", "MS
                           "TFAP2B", "NRIP3", "CYP4Z1", "CYPZ2P", "SLC40A1", "LTF", "LIMCH1")
 
 # Breast DEGs (tumor vs. normal) from Pranavathiyani et al., 2019, Genes and Diseases: https://www.sciencedirect.com/science/article/pii/S2352304218300801?via%3Dihub#ec-research-data
-breast_degs <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Validation_Files/breast_degs_pranavathiyani_2019_genesAndDiseases.csv",
+breast_degs <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Validation_Files/breast_degs_pranavathiyani_2009_genesAndDiseases.csv",
                         header = TRUE, check.names = FALSE)[, 'DEG']
 breast_degs_p53 <- breast_degs[breast_degs != "TP53"]
 breast_degs_pik3ca <- breast_degs[breast_degs != "PIK3CA"]
@@ -1720,6 +1731,16 @@ breast_biomarkers_p53 <- breast_biomarkers[breast_biomarkers != "TP53"]
 breast_biomarkers_pik3ca <- breast_biomarkers[breast_biomarkers != "PIK3CA"]
 
 
+# KEGG Pathways for TP53 and PIK3CA
+tp53_kegg_pathway <- read.table(paste0(nw_path, "KEGG_P53_SIGNALING_PATHWAY.v7.5.1.txt"), sep = "\t", header = TRUE)
+tp53_kegg_pathway_genes <- unlist(strsplit(tp53_kegg_pathway$KEGG_P53_SIGNALING_PATHWAY[19], ",", fixed = TRUE))
+
+pik3ca_kegg_pathway <- read.table(paste0(nw_path, "KEGG_PI3K-AKT_SIGNALING_PATHWAY.v7.5.1.txt"), sep = "\t", header = FALSE)
+pik3ca_kegg_pathway_genes <- unlist(lapply(1:nrow(pik3ca_kegg_pathway), function(r) {
+  row <- pik3ca_kegg_pathway$V1[r]
+  gene <- unlist(strsplit(unlist(strsplit(row, "(RefSeq) ", fixed = TRUE))[2], ", ", fixed = TRUE))[1]
+  return(gene)
+}))
 
 #' Function to plot the enrichment of various target groups among the significant gene hits,
 #' together on one plot, where the enrichment in the given source is denoted by color and line form
@@ -1772,14 +1793,14 @@ plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cu
   # Create inset plot
   p2 <- ggplot(target_sets_fraction_df_m[target_sets_fraction_df_m$Rank %in% 1:cutout_thres,], 
                mapping = aes(x = Rank, y = Frac, color = Source)) + geom_line(aes(linetype=Source)) +
-    geom_point(size = 1) + 
+    #geom_point(size = 1) + 
     scale_x_continuous(limits = c(1,cutout_thres)) +
     theme(legend.position = "none", axis.title.x = element_blank(), axis.title.y = element_blank(),
           panel.grid.minor = element_blank())
 
   p <- ggplot(target_sets_fraction_df_m[target_sets_fraction_df_m$Rank %in% 1:thres,], 
               mapping = aes(x = Rank, y = Frac, color = Source)) + geom_line(aes(linetype=Source), size = 1.25) +
-    geom_point(size = 1) + 
+    #geom_point(size = 1) + 
     ggtitle(paste("Enrichment of Model-Prioritized Target Genes in", paste(goi, "Sourced Targets"))) +
     xlab("Gene Rank") + ylab("Enrichment in Source Gene Set") + 
     scale_x_continuous(limits = c(1,thres)) +
@@ -1805,12 +1826,16 @@ tp53_target_set_list <- list("ChIP-eat" = tp53_chipeat_targets, "Compiled.Cancer
 tp53_target_set_list <- list("Compiled.Cancer" = known_cancer_genes,
                              "STRING" = tp53_string_nw_targs, "HumanBase" = tp53_nw_targs, 
                              "Curated.Fischer.2017" = tp53_curated_targets, 
-                             "Curated.TRRUST" = tp53_trrust_targets, "Curated.TF-Target" = tp53_tfTarg_targets)
+                             "Curated.TRRUST" = tp53_trrust_targets, "Curated.TF-Target" = tf_target_tp53_full)
 
 pik3ca_target_set_list <- list("Compiled.Cancer" = known_cancer_genes,
                                "STRING" = pik3ca_string_nw_targs, "HumanBase" = pik3ca_nw_targs,
                                "Curated.Cizkova.2017" = pik3ca_curated_targs)
 
+# For grant
+tp53_select_target_set_list <- list("Curated.Fischer.2017" = tp53_curated_targets,
+                                    "STRING" = tp53_string_nw_targs, "KEGG.hsa04115" = tp53_kegg_pathway_genes,
+                                    "TRRUST" = tp53_trrust_targets)
 
 # Call function
 plot_combined_enrichment(allgenes_p53, tp53_target_set_list, "TP53", 500, 50)
@@ -1847,6 +1872,57 @@ get_stringdb_enrichment <- function(master_df, qval_thres, background) {
 
 stringdb_enrichment_tp53 <- get_stringdb_enrichment(allgenes_p53_panCts_inclBRCAsubtypes, 0.2, NA)
 stringdb_enrichment_pik3ca <- get_stringdb_enrichment(allgenes_pik3ca_panCts_inclBRCAsubtypes, 0.2, NA)
+
+
+############################################################
+############################################################
+#### CALCULATE PEARSON'S CORRELATION COEFFICIENT (PCC) 
+#### BETWEEN THE SIGNIFICANT HITS FOR DIFFERENT RUNS
+############################################################
+############################################################
+#' Given two sets of top hit genes from two separate master DFs,
+#' computes, prints, and returns the PCC value
+#' @param master_df1 the first master DF
+#' @param master_df2 the second master DF
+#' @param qval_thres a threshold for the q-value, above which values are 
+#' considered significant
+compute_pcc <- function(master_df1, master_df2, qval_thres) {
+  
+  # Subset to only significant hits
+  master_df1_sig <- master_df1[master_df1$q.value < qval_thres, 'T_k.name']
+  master_df2_sig <- master_df2[master_df2$q.value < qval_thres, 'T_k.name']
+  
+  rank_df_master1 <- data.frame("Gene" = master_df1_sig, "Rank.Master1" = 1:length(master_df1_sig))
+  rank_df_master2 <- data.frame("Gene" = master_df2_sig, "Rank.Master2" = 1:length(master_df2_sig))
+  
+  print(head(rank_df_master1))
+  
+  rank_df <- merge(rank_df_master1, rank_df_master2, by = "Gene")
+  
+  print(head(rank_df))
+  
+  pcc <- cor.test(rank_df$Rank.Master1, rank_df$Rank.Master2, method = "pearson", use = "pairwise")
+  print(pcc)
+  return(pcc$p.value)
+  
+  # Get a rank-based representation of each value
+  #unique_targs <- unique(c(master_df1$T_k.name, master_df2$T_k.name))
+  #list1_ranking <- lapply(unique_targs, function(t) which(master_df1$T_k.name == t))
+  #list2_ranking <- lapply(unique_targs, function(t) which(master_df2$T_k.name == t))
+  #names(list1_ranking) <- unique_targs
+  #names(list2_ranking) <- unique_targs
+  
+  #print(head(list1_ranking))
+  #print(head(list2_ranking))
+  
+  #print(head(as.numeric(unlist(list1_ranking, use.names = FALSE))))
+  
+  #pcc <- cor(as.numeric(unlist(list1_ranking, use.names = FALSE)), 
+             #as.numeric(unlist(list2_ranking, use.names = FALSE)), 
+             #method = "pearson")
+  #print(pcc)
+  #return(pcc$p.value)
+}
 
 
 ############################################################
