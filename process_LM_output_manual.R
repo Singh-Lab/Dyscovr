@@ -44,7 +44,11 @@ library(grid)
 library(ggpubr)
 library("STRINGdb")
 library(igraph)
+library(scales)
 library(EnsDb.Hsapiens.v86)
+library("dorothea")
+library(reshape2)
+library(ggsci)
 
 # Path to output files
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
@@ -736,7 +740,7 @@ compute_and_print_spearman <- function(results_table, ri_1, ri_2) {
     print(paste("Beta correlation of", paste(betas_spearman_stat, paste(", p-value of", betas_spearman_pval))))
     
     # Create a plot to visualize the correlations
-    plot(grp1_Betas, grp2_Betas, pch = 19, col = "lightblue", #main = "Betas Spearman Correlation",
+    plot(grp1_Betas, grp2_Betas, pch = 19, col = alpha("lightblue", 0.4), #main = "Betas Spearman Correlation",
          xlab = paste(ri_1, "Betas"), ylab = paste(ri_2, "Betas"))
     abline(lm(grp2_Betas ~ grp1_Betas), col = "red", lwd = 3)
     text(labels = paste("Correlation:", paste(round(betas_spearman_stat, 6), 
@@ -796,13 +800,18 @@ compute_and_print_spearman_multDF <- function(results_table1, results_table2, ri
     print(paste("Beta correlation of", paste(betas_spearman_stat, paste(", p-value of", betas_spearman_pval))))
     
     # Create a plot to visualize the correlations
-    plot(grp1_Betas, grp2_Betas, pch = 19, col = "lightblue", #main = "Betas Spearman Correlation",
-         xlab = paste(ri_1, "Betas"), ylab = paste(ri_2, "Betas"))
+    # "firebrick", "dodgerblue3"
+    plot(grp1_Betas, grp2_Betas, pch = 19, col = alpha("lightblue", 0.4), #main = "Betas Spearman Correlation",
+         xlab = "", ylab = "", bty="n")
     abline(lm(grp2_Betas ~ grp1_Betas), col = "red", lwd = 3)
     text(labels = paste("Correlation:", paste(round(betas_spearman_stat, 6), 
                                               paste(", p-value:", round(betas_spearman_pval, 6)))), 
          x = max(grp1_Betas, na.rm = TRUE)-sd(grp1_Betas, na.rm = TRUE)*3, 
-         y = max(grp2_Betas, na.rm = TRUE)-sd(grp2_Betas, na.rm = TRUE), col = "black")
+         y = max(grp2_Betas, na.rm = TRUE)-sd(grp2_Betas, na.rm = TRUE), 
+         col = "black", font=2)
+    mtext(side=1, line=3, paste(ri_1, "Betas"), font=2, cex=1.2)
+    mtext(side=2, line=3, paste(ri_2, "Betas"), font=2, cex=1.2)
+    
     
     
   } else {print("Error. Provided regprots are not in the given master DF.")}
@@ -864,7 +873,7 @@ compute_and_print_spearman_subpops <- function(results_table_subpop1, results_ta
     print(paste("T-statistic correlation of", paste(spearman_stat, paste(", p-value of", spearman_pval))))
     
     # Create a plot to visualize the correlations
-    plot(subpop1_tstats, subpop2_tstats, pch = 19, col = "lightblue", #main = "Betas Spearman Correlation",
+    plot(subpop1_tstats, subpop2_tstats, pch = 19, col = alpha("lightblue", 0.4), #main = "Betas Spearman Correlation",
          xlab = paste(subpop1, paste(ri, "T-statistics")), ylab = paste(subpop2, paste(ri, "T-statistics")))
     abline(lm(subpop1_tstats ~ subpop2_tstats), col = "red", lwd = 3)
     text(labels = paste("Correlation:", paste(round(spearman_stat, 6), 
@@ -922,12 +931,14 @@ compute_and_print_spearman_subpops(lumA_allgenes_mut, lumB_allgenes_mut, ri,
 ############################################################
 #' Visualize our results on pathways using the Pathview package
 #' Link to vignette: https://pathview.r-forge.r-project.org/pathview.pdf
-#' 
+#' @param master_df_corrected output master DF with target gene names and q-values
+#' @param pathway_id the Pathview pathway ID ("0XXXX")
+#' @param label a label for visualization
 visualize_pathway <- function(master_df_corrected, pathway_id, label) {
   gene_data <- master_df_corrected$estimate
   names(gene_data) <- master_df_corrected$T_k.name
   
-  # Run using pathview
+  # Run using Pathview
   pv.out <- pathview(gene.data = gene_data, pathway.id = pathway_id,
                      species = "hsa", out.suffix = label, kegg.native = T,
                      gene.idtype = "SYMBOL")
@@ -1661,15 +1672,24 @@ plot_network_enrichment(lumA_allgenes_mut_p53, tp53_nw_targs, "TP53", 10)
 
 
 # Import STRING network targets (top 100)
-tp53_string_nw_targs <- read.table(paste0(nw_path, "TP53_interactors_string_top100.txt"),
+tp53_string_nw_targs <- read.table(paste0(nw_path, "STRING/TP53_interactors_string_top100.txt"),
                              header = FALSE)[,1]
-pik3ca_string_nw_targs <- read.table(paste0(nw_path, "PIK3CA_interactors_string_top100.txt"),
+pik3ca_string_nw_targs <- read.table(paste0(nw_path, "STRING/PIK3CA_interactors_string_top100.txt"),
                                    header = FALSE)[,1]
+
+tp53_string_nw_targs_top500 <- read.table(paste0(nw_path, "STRING/tp53_string_interactions_top500.csv"),
+                                   header = TRUE, sep = ",")
+tp53_string_nw_targs_top500 <- unique(c(tp53_string_nw_targs_top500$node1, tp53_string_nw_targs_top500$node2))
+tp53_string_nw_targs_top500 <- tp53_string_nw_targs_top500[tp53_string_nw_targs_top500 != "TP53"]
+pik3ca_string_nw_targs_top500 <- read.table(paste0(nw_path, "STRING/pik3ca_string_interactions_top500.csv"),
+                                            header = FALSE, sep = ",")
+pik3ca_string_nw_targs_top500 <- unique(c(pik3ca_string_nw_targs_top500$V1, pik3ca_string_nw_targs_top500$V2))
+pik3ca_string_nw_targs_top500 <- pik3ca_string_nw_targs_top500[pik3ca_string_nw_targs_top500 != "PIK3CA"]
 
 # Other STRING target lists
 tp53_neighbors_dist2_weight5 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project FIles/Saved Output Data Files/Pan-Cancer/Network_Data/string_tp53_neighbors_dist2_weight5.txt",
                                            header = TRUE)[,'SYMBOL']
-pik3ca_neighbors_dist2_weight5 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project FIles/Saved Output Data Files/Pan-Cancer/Network_Data/string_pik3ca_neighbors_dist2_weight5.txt",
+pik3ca_neighbors_dist2_weight5 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Network_Data/string_pik3ca_neighbors_dist2_weight5.txt",
                                            header = TRUE)[,'SYMBOL']
 
 tp53_neighbors_conf100 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Network_Data/string_tp53_neighbors_confThres100.txt",
@@ -1677,11 +1697,19 @@ tp53_neighbors_conf100 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Mai
 pik3ca_neighbors_conf100 <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Network_Data/string_pik3ca_neighbors_confThres100.txt",
                                              header = TRUE)[,'SYMBOL']
 
-tp53_neighbors_conf500 <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/tp53_string_interactions_top500.csv",
+tp53_neighbors_conf500 <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Network_Data/string_tp53_neighbors_confThres500.csv",
                                      header = TRUE, check.names = FALSE)
-tp53_neighbors_conf500 <- tp53_neighbors_conf500[(tp53_neighbors_conf500$`#node1` == "TP53") | (tp53_neighbors_conf500$node2 == "TP53"),]
 tp53_neighbors_conf500 <- unique(c(tp53_neighbors_conf500$`#node1`, tp53_neighbors_conf500$node2))
 tp53_neighbors_conf500 <- tp53_neighbors_conf500[tp53_neighbors_conf500 != "TP53"]
+
+pik3ca_neighbors_conf500 <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Network_Data/string_pik3ca_neighbors_confThres500.csv",
+                                   header = TRUE, check.names = FALSE)
+pik3ca_neighbors_conf500 <- unique(c(pik3ca_neighbors_conf500$`#node1`, pik3ca_neighbors_conf500$node2))
+pik3ca_neighbors_conf500 <- pik3ca_neighbors_conf500[pik3ca_neighbors_conf500 != "PIK3CA"]
+
+
+tp53_neighbors_top500 <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/STRING/tp53_string_interactions_top500.csv",
+                                  header = TRUE, check.names = FALSE)
 
 # Call function
 plot_network_enrichment(allgene_sixMostMut_p53, tp53_string_nw_targs, "TP53", 10)
@@ -1705,14 +1733,19 @@ trrust_df_tp53 <- trrust_df[(trrust_df[,1] == "TP53") | (trrust_df[,2] == "TP53"
 tp53_trrust_targets <- unique(c(trrust_df_tp53$V1, trrust_df_tp53$V2))
 tp53_trrust_targets <- tp53_trrust_targets[tp53_trrust_targets != "TP53"]  # 195 targets
 
+# Or, look just at cases where TP53 is upstream (activation or repression)
+trrust_df_tp53_upstr <- trrust_df[trrust_df[,1] == "TP53",]
+tp53_trrust_targets_upstr <- unique(trrust_df_tp53$V2)
+tp53_trrust_targets_upstr <- tp53_trrust_targets_upstr[tp53_trrust_targets_upstr != "TP53"]  # 163 targets
+
+
+
 tf_target_df <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Validation_Files/TF-Target-information.txt",
                            header = TRUE, check.names = FALSE, sep = "\t")
 tf_target_df_breast <- tf_target_df[grepl("breast", tf_target_df$tissue),]
-tf_target_df_tp53 <- tf_target_df[grepl("P53", tf_target_df$TF),]
-tf_target_df_tp53_full <- tf_target_df[grepl("P53", tf_target_df$TF) | grepl("P53", tf_target_df$target),]
+tf_target_df_tp53 <- tf_target_df_breast[grepl("P53", tf_target_df_breast$TF),]
 tf_target_tp53 <- tf_target_df_tp53$target
-tf_target_tp53_full <- c(unique(tf_target_df_tp53_full$TF, tf_target_df_tp53_full$target))
-tf_target_tp53_full <- tf_target_tp53_full[tf_target_tp53_full != "TP53"]
+tf_target_tp53  <- tf_target_tp53[tf_target_tp53 != "TP53"]
   
 # Target genes from Cizkova et al., 2010: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3012715/
 pik3ca_curated_targs <- c("WNT5A", "TCF7L2", "MSX2", "TNFRSF11B", "SEC14L2", "MSX2", 
@@ -1732,15 +1765,99 @@ breast_biomarkers_pik3ca <- breast_biomarkers[breast_biomarkers != "PIK3CA"]
 
 
 # KEGG Pathways for TP53 and PIK3CA
-tp53_kegg_pathway <- read.table(paste0(nw_path, "KEGG_P53_SIGNALING_PATHWAY.v7.5.1.txt"), sep = "\t", header = TRUE)
+tp53_kegg_pathway <- read.table(paste0(nw_path, "KEGG/KEGG_P53_SIGNALING_PATHWAY.v7.5.1.txt"), sep = "\t", header = TRUE)
 tp53_kegg_pathway_genes <- unlist(strsplit(tp53_kegg_pathway$KEGG_P53_SIGNALING_PATHWAY[19], ",", fixed = TRUE))
 
-pik3ca_kegg_pathway <- read.table(paste0(nw_path, "KEGG_PI3K-AKT_SIGNALING_PATHWAY.v7.5.1.txt"), sep = "\t", header = FALSE)
+pik3ca_kegg_pathway <- read.table(paste0(nw_path, "KEGG/KEGG_PI3K-AKT_SIGNALING_PATHWAY.v7.5.1.txt"), sep = "\t", header = FALSE)
 pik3ca_kegg_pathway_genes <- unlist(lapply(1:nrow(pik3ca_kegg_pathway), function(r) {
   row <- pik3ca_kegg_pathway$V1[r]
   gene <- unlist(strsplit(unlist(strsplit(row, "(RefSeq) ", fixed = TRUE))[2], ", ", fixed = TRUE))[1]
   return(gene)
 }))
+pik3ca_upstr_genes <- c("EGF", "GRB2", "SOS1", "SOS2", "HRAS", "TLR2", "TLR4", "IRS1", "RAF1", "MEK", "ERK", "RAC1", 
+                        "SYK", "CD19", "JAK1", "JAK2", "JAK3", "ITGA1", "ITGA2", "ITGA2B", "ITGA3", "ITGA4", "ITGA5",
+                        "ITGA6", "ITGA7", "ITGA8", "ITGA9", "ITGA10", "ITGA11", "ITGAV", "ITGAB1", "ITGB3", "ITGB4", 
+                        "ITGB5", "ITGB6", "ITGB7", "ITGB8", "FAK", "MAGI1", "MAGI2", "PTEN", "KRAS", "THEM4", "PDPK1", 
+                        "NRAS", "HSP90AA1", "HSP90AB1", "HSP90B1", "IGH", "PIK3AP1", "MTCP1", "TCL1A", "TCL1B", "PHLPP2",
+                        "PHLPP1", "CRTC2", "CDC37", "GNB5", "GNB1", "GNB2", "GNB3", "GNG3", "GNG4", "GNG5", "GNG7", "GNG10",
+                        "GNG11", "GNGT1", "GNGT2", "GNG13", "GNG2", "GNG12", "GNGB4", "GNG8", "LPAR6", "CHRM1", "CHRM2", 
+                        "LPAR1", "F2R", "LPAR3", "LPAR4", "LPAR5", "LPAR2", "PTK2", "LAMC3", "CHAD", "COL1A1", "COL1A2",
+                        "COL2A1", "COL4A1", "COL4A2", "COL4A3", "COL4A4", "COL4A5", "COL4A6", "COL6A1", "COL6A2", "COL6A3",
+                        "COL9A1", "COL9A2", "COL9A3", "COMP", "COL6A6", "LAMB4", "FN1", "COL6A5", "LAMA1", "TNC", "IBSP",
+                        "LAMA2", "LAMA3", "LAMA4", "LAMA5", "LAMB1", "LAMB2", "LAMB3", "LAMC1", "LAMC2", "RELN", "TNN",
+                        "SPP1", "THBS1", "THBS1", "THBS3", "TNR", "TNXB", "VTN", "VWF", "CSF3", "CSH1", "CSH2", "EPO",
+                        "GH1", "GH2", "IFNA1", "IFNA2", "IFNA4", "IFNA5", "IFNA6", "IFNA7", "IFNA8", "IFNA10", "IFNA13",
+                        "IFNA14", "IFNA16", "IFNA17", "IFNA21", "IFNB1", "IL2", "IL3", "IL4", "IL6", "IL7", "OSM", "PRL",
+                        "CSF1", "EFNA1", "EFNA2", "EFNA3", "EFNA4", "EFNA5", "EREG", "FGF1", "FGF2", "FGF3", "FGF4", "FGF5",
+                        "FGF6", "FGF7", "FGF8", "FGF9", "FGF10", "VEGFD", "FLT3LG", "FGF20", "FGF21", "FGF22", "ANGPT1", 
+                        "ANGPT2", "HGF", "IGF1", "IGF2", "INS", "AREG", "KITLG", "NGF", "NTF3", "NTF4", "ANGPT4", "PDGFA",
+                        "PDGFB", "PGF", "PDGFC", "BDNF", "TGFA", "VEGFA", "VEGFB", "VEGFC", "PDGFD", "FGF23", "FGF18",
+                        "FGF17", "FGF16", "FGF19", "CSF1R", "EGFR", "EPHA2", "ERBB2", "ERBB3", "ERBB4", "FGFR1", "FGFR3",
+                        "FGFR2", "FGFR4", "FLT1", "FLT3", "FLT4", "IGF1R", "INSR", "KDR", "KIT", "MET", "NGFR", "NTRK1",
+                        "NTRK2", "PDGFRA", "PDGFRB", "TEK")
+
+pik3ca_kegg_pathway_genes_upstr <- pik3ca_kegg_pathway_genes[!(pik3ca_kegg_pathway_genes %fin% pik3ca_upstr_genes)] # limits to a set of 120 genes
+
+pik3ca_kegg_pathway_genes_downstrDNA <- c("PCK1", "PCK2", "G6PC1", "G6PC2", "G6PC3", "CCND1", "CDK2", "CDK4", "CDK6", 
+                                          "CDKN1B", "RBL2", "FASLG", "BCL2L11", "BCL2L1", "BCL2", "MCL1", "MYB", "TP53", 
+                                          "AKT", "PDK1")  # 20 genes
+
+# Reactome pathways
+pi3k_akt_signaling_reactome_pw <- read.csv(paste0(nw_path, "Reactome/PI3K-AKT Signaling in Cancer_R-HSA-2219528.csv"), 
+                                           header = TRUE, check.names = FALSE)
+pi3k_akt_signaling_reactome_pw_gns <- unlist(lapply(pi3k_akt_signaling_reactome_pw$MoleculeName, function(x) 
+  unlist(strsplit(x, " ", fixed = TRUE))[2]))
+pi3k_akt_signaling_reactome_pw_gns <- unique(pi3k_akt_signaling_reactome_pw_gns[pi3k_akt_signaling_reactome_pw_gns != "PIK3CA"])
+
+pi3k_constitutative_signal_reactome_pw <- read.csv(paste0(nw_path, "Reactome/Constituative Signaling by Aberrant PI3K in Cancer_R-HSA-2219530.csv"), 
+                                           header = TRUE, check.names = FALSE)
+pi3k_constitutative_signal_reactome_pw_gns <- unlist(lapply(pi3k_constitutative_signal_reactome_pw$MoleculeName, function(x) 
+  unlist(strsplit(x, " ", fixed = TRUE))[2]))
+pi3k_constitutative_signal_reactome_pw_gns <- unique(pi3k_constitutative_signal_reactome_pw_gns[pi3k_constitutative_signal_reactome_pw_gns != "PIK3CA"])
+
+wnt_signaling_reactome_pw <- read.csv(paste0(nw_path, "Reactome/Wnt Signaling_R-HSA-195721.csv"), 
+                                      header = TRUE, check.names = FALSE)
+wnt_signaling_reactome_pw_gns <- unlist(lapply(wnt_signaling_reactome_pw$MoleculeName, function(x) 
+  unlist(strsplit(x, " ", fixed = TRUE))[2]))
+wnt_signaling_reactome_pw_gns <- unique(wnt_signaling_reactome_pw_gns[wnt_signaling_reactome_pw_gns != "PIK3CA"])
+
+
+mtorc_signaling_reactome_pw <- read.csv(paste0(nw_path, "Reactome/mTORC Signaling_R-HSA-165159.csv"), 
+                                      header = TRUE, check.names = FALSE)
+mtorc_signaling_reactome_pw_gns <- unlist(lapply(mtorc_signaling_reactome_pw$MoleculeName, function(x) 
+  unlist(strsplit(x, " ", fixed = TRUE))[2]))
+mtorc_signaling_reactome_pw_gns <- unique(mtorc_signaling_reactome_pw_gns[mtorc_signaling_reactome_pw_gns != "PIK3CA"])
+
+
+# Additional TP53 pathway targets
+# PIK3CA's TF targets are primarily NFKB, CREB, and FOXO
+nfkb_trrust_targets <- unique(trrust_df[trrust_df[,1] == "NFKB1", 'V2'])
+nfkb_trrust_targets <- nfkb_trrust_targets[nfkb_trrust_targets != "NFKB1"]  # 301 targets
+foxo_trrust_targets <- unique(trrust_df[trrust_df[,1] == "FOXO1", 'V2'])
+foxo_trrust_targets <- foxo_trrust_targets[foxo_trrust_targets != "FOXO1"]  # 24 targets
+pik3ca_downstream_targets <- unique(c(nfkb_trrust_targets, foxo_trrust_targets))
+
+# PIK3CA Human Protein Atlas Co-Expression Cluster
+pik3ca_humanProtAtlas_cluster <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Validation_Files/pik3ca_humanProtAtlas_expr_cluster.csv", 
+                                          header = TRUE, check.names = FALSE)[, 'Gene']
+
+# DoRothEA inferred TF activities
+# https://bioconductor.org/packages/release/data/experiment/vignettes/dorothea/inst/doc/dorothea.html
+
+dorothea_net <- dorothea::dorothea_hs
+tp53_dorothea_targets <- unlist(dorothea_net[dorothea_net$tf == "TP53", 'target'])
+
+nfkb_dorothea_targets <- unlist(dorothea_net[grepl("NFKB", dorothea_net$tf), 'target'])
+foxo_dorothea_targets <- unlist(dorothea_net[grepl("FOXO", dorothea_net$tf), 'target'])
+creb_dorothea_targets <- unlist(dorothea_net[grepl("CREB", dorothea_net$tf), 'target'])
+
+
+# SF3B1 eCLIP targets
+sf3b1_eclip_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/POSTAR3_CLIPdb_SF3B1_targets.csv", 
+                                header = TRUE, check.names = FALSE)
+sf3b1_eclip_targets_numBindSites_gr100 <- sf3b1_eclip_targets[sf3b1_eclip_targets$`Binding site records` > 100, 'Target gene symbol']
+sf3b1_eclip_targets_numBindSites_gr125 <- sf3b1_eclip_targets[sf3b1_eclip_targets$`Binding site records` > 125, 'Target gene symbol']
+
 
 #' Function to plot the enrichment of various target groups among the significant gene hits,
 #' together on one plot, where the enrichment in the given source is denoted by color and line form
@@ -1751,61 +1868,83 @@ pik3ca_kegg_pathway_genes <- unlist(lapply(1:nrow(pik3ca_kegg_pathway), function
 #' @param thres a threshold for the number of hit genes we show in the full plot; in NA then we plot
 #' enrichment across all gene targets
 #' @param cutout_thres a threshold for the inset/cutout enrichment plot ('zoomed' in on)
-plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cutout_thres) {
-  
-  # Extract the target hits
-  target_hits <- unlist(master_df$T_k.name)
-  print(length(target_hits))
+#' @param silent_df OPT: an additional, corresponding DF with silent mutation results
+plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cutout_thres, silent_df) {
   
   # For each source, create a 0 and 1 vector for each  target hit to indicate if it 
   # is a a hit in that source
   target_set_vector_list <- lapply(target_sets_list, function(source) {
-    vect <- unlist(lapply(target_hits, function(x) {
+    vect <- unlist(lapply(1:nrow(master_df), function(i) {
+      x <- master_df[i, 'T_k.name']
       return(ifelse(x %fin% source, 1, 0))
     }))
     return(vect)
   })
-  names(target_set_vector_list) <- names(target_sets_list)
+
+  target_set_vector_list_silent <- NA
+  if(!is.na(silent_df)) {
+    names(target_set_vector_list) <- paste0("MN.", names(target_sets_list))
+    silent_df$T_k.name <- as.factor(silent_df$T_k.name)
+    target_set_vector_list_silent <- lapply(target_sets_list, function(source) {
+      vect <- unlist(lapply(1:nrow(silent_df), function(i) {
+        x <- silent_df[i, 'T_k.name']
+        return(ifelse(x %fin% source, 1, 0))
+      }))
+      return(vect)
+    })
+    names(target_set_vector_list_silent) <- paste0("S.", names(target_sets_list))
+  } else {
+    names(target_set_vector_list) <- names(target_sets_list)
+  }
   
-  # Get the fraction of genes at or above the given rank, for each set
-  target_set_fraction_list <- lapply(target_set_vector_list, function(vect) {
-    frac_nw_vect <- c()
-    count_of_nw_genes <- 0
-    for (i in 1:length(target_hits)) {
-      val_of_curr_tg <- vect[i]
-      count_of_nw_genes <- count_of_nw_genes + val_of_curr_tg
-      frac <- count_of_nw_genes / i
-      frac_nw_vect <- c(frac_nw_vect, frac)
-    }
-    return(frac_nw_vect)
-  })
-  names(target_set_fraction_list) <- names(target_sets_list)
-  target_sets_fraction_df <- as.data.frame(target_set_fraction_list)
-  target_sets_fraction_df$Rank <- 1:length(target_hits)
-  print(head(target_sets_fraction_df))
+  #print(target_set_vector_list)
+  #print(target_set_vector_list_silent)
   
-  # Melt data frame for plotting, using Rank as the ID variable
-  target_sets_fraction_df_m <- melt(target_sets_fraction_df, "Rank")
+  # Use helper function to get fraction of genes at given rank
+  target_set_fraction_df <- get_frac_of_genes_at_rank(target_set_vector_list, master_df)
+  target_set_fraction_df_silent <- NA
+  if(!is.na(silent_df)) {
+    target_set_fraction_df_silent <- get_frac_of_genes_at_rank(target_set_vector_list_silent,
+                                                               silent_df)
+    target_set_fraction_df <- merge(target_set_fraction_df, target_set_fraction_df_silent, by = "Rank")
+  }
+  
+
+  target_sets_fraction_df_m <- melt(target_set_fraction_df, "Rank")
   colnames(target_sets_fraction_df_m) <- c("Rank", "Source", "Frac")
+  target_sets_fraction_df_m$Mutation.Type <- unlist(lapply(target_sets_fraction_df_m$Source, function(x) {
+    val <- "Missense.Nonsense"
+    if(grepl("S.", x, fixed = TRUE)) {val <- "Silent"}
+    return(val)
+  }))
+
   print(head(target_sets_fraction_df_m))
   print(unique(target_sets_fraction_df_m$Source))
   
   # Create inset plot
   p2 <- ggplot(target_sets_fraction_df_m[target_sets_fraction_df_m$Rank %in% 1:cutout_thres,], 
-               mapping = aes(x = Rank, y = Frac, color = Source)) + geom_line(aes(linetype=Source)) +
+               mapping = aes(x = Rank, y = Frac, color = Source)) + geom_line(aes(linetype=Mutation.Type, alpha = Source), size = 1.25) +
     #geom_point(size = 1) + 
-    scale_x_continuous(limits = c(1,cutout_thres)) +
+    scale_x_continuous(limits = c(1,cutout_thres)) + 
+    #scale_color_nejm() + 
+    scale_alpha_manual(values=c(0.9,0.9,0.4,0.4)) +
+    scale_color_manual(values = c("firebrick", "dodgerblue3", "firebrick", "dodgerblue3")) + 
     theme(legend.position = "none", axis.title.x = element_blank(), axis.title.y = element_blank(),
           panel.grid.minor = element_blank())
 
   p <- ggplot(target_sets_fraction_df_m[target_sets_fraction_df_m$Rank %in% 1:thres,], 
-              mapping = aes(x = Rank, y = Frac, color = Source)) + geom_line(aes(linetype=Source), size = 1.25) +
+              mapping = aes(x = Rank, y = Frac, color = Source)) + geom_line(aes(linetype=Mutation.Type, alpha = Source), size = 1.25) +
     #geom_point(size = 1) + 
-    ggtitle(paste("Enrichment of Model-Prioritized Target Genes in", paste(goi, "Sourced Targets"))) +
-    xlab("Gene Rank") + ylab("Enrichment in Source Gene Set") + 
+    ggtitle(paste("Fraction of Model-Prioritized Target Genes in", paste(goi, "Sourced Targets"))) +
+    xlab("Gene Rank") + ylab("Fraction of Top Hit Genes in Source Gene Set") + 
     scale_x_continuous(limits = c(1,thres)) +
-    theme(axis.text.x =  element_text(size = 12), axis.text.y =  element_text(size = 12),
-          axis.title = element_text(size = 13, face = "bold"), panel.grid.major = element_blank(), 
+    #scale_color_nejm() + 
+    scale_alpha_manual(values=c(0.9,0.9,0.4,0.4)) +
+    scale_color_manual(values = c("firebrick", "dodgerblue3", "firebrick", "dodgerblue3"), 
+                       labels = names(target_sets_list)) + 
+    #scale_fill_continuous(name = "Gene.List", labels = ) +
+    theme(axis.text.x =  element_text(size = 14, face = "bold"), axis.text.y =  element_text(size = 14, face = "bold"),
+          axis.title = element_text(size = 16, face = "bold"), panel.grid.major = element_blank(), 
           panel.grid.minor = element_blank(), panel.border = element_blank()) + theme_minimal() +
     annotation_custom(ggplotGrob(p2), xmin =(thres-round(thres/1.5)), xmax = thres, ymin = 0.30, ymax = 1.0) +
     geom_rect(data=target_sets_fraction_df_m[1:cutout_thres,], 
@@ -1817,6 +1956,31 @@ plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cu
   #print(p, vp = vp)
     
   return(p)
+}
+
+
+#' Get the fraction of genes at or above the given rank, for each set
+#' @param target_set_vector_list a named list of each source with hit/not binary vector
+#' @param master_df master df with ordered top hits
+get_frac_of_genes_at_rank <- function(target_set_vector_list, master_df) {
+  target_set_fraction_list <- lapply(target_set_vector_list, function(vect) {
+    frac_nw_vect <- c()
+    count_of_nw_genes <- 0
+    for (i in 1:nrow(master_df)) {
+      val_of_curr_tg <- vect[i]
+      count_of_nw_genes <- count_of_nw_genes + val_of_curr_tg
+      frac <- count_of_nw_genes / i
+      frac_nw_vect <- c(frac_nw_vect, frac)
+    }
+    return(frac_nw_vect)
+  })
+  
+  names(target_set_fraction_list) <- names(target_set_vector_list)
+  target_sets_fraction_df <- as.data.frame(target_set_fraction_list)
+  
+  target_sets_fraction_df$Rank <- 1:nrow(master_df)
+  
+  return(target_sets_fraction_df)
 }
 
 # Create a list of all the gene sets we want to look for enrichment in
@@ -1836,12 +2000,157 @@ pik3ca_target_set_list <- list("Compiled.Cancer" = known_cancer_genes,
 tp53_select_target_set_list <- list("Curated.Fischer.2017" = tp53_curated_targets,
                                     "STRING" = tp53_string_nw_targs, "KEGG.hsa04115" = tp53_kegg_pathway_genes,
                                     "TRRUST" = tp53_trrust_targets)
+tp53_select_target_set_list <- list("Curated.Fischer.2017" = tp53_curated_targets,
+                                    "DoRothEA" = tp53_dorothea_targets)
+tp53_select_target_set_list_cna <- list("STRING" = tp53_string_nw_targs,
+                                    "TRRUST" = tp53_trrust_targets_upstr)
+pik3ca_select_target_set_list <- list("STRING" = pik3ca_string_nw_targs_top500, "KEGG.hsa04151" = pik3ca_kegg_pathway_genes)
 
 # Call function
-plot_combined_enrichment(allgenes_p53, tp53_target_set_list, "TP53", 500, 50)
-plot_combined_enrichment(allgenes_pik3ca, pik3ca_target_set_list, "PIK3CA", 500, 50)
+plot_combined_enrichment(allgenes_p53, tp53_target_set_list, "TP53", 500, 50, NA)
+plot_combined_enrichment(allgenes_pik3ca, pik3ca_target_set_list, "PIK3CA", 500, 50, NA)
 
 
+
+#' Function to plot the enrichment of a target gene set among the significant gene hits from multiple R_is,
+#' together on one plot, where the enrichment of targets from the given GOI is denoted by color and line form
+#' @param list_of_master_dfs a named list of master DF produced from run_linear_model(), each of which
+#' has gene names and q-values. Names are the name of the GOI for that master DF
+#' @param target_gene_set a vector of targets of interest
+#' @param thres a threshold for the number of hit genes we show in the full plot; in NA then we plot
+#' enrichment across all gene targets
+#' @param cutout_thres a threshold for the inset/cutout enrichment plot ('zoomed' in on)
+#' @param name_of_target_set a name for the target set of genes for labeling graph
+plot_combined_enrichment_mult_genes <- function(list_of_master_dfs, target_gene_set, 
+                                                thres, cutout_thres, name_of_target_set) {
+  
+  # For each GOI, create a 0 and 1 vector for each  target hit to indicate if it 
+  # is a a hit in the given source
+  goi_vector_list <- lapply(list_of_master_dfs, function(goi_master) {
+    vect <- unlist(lapply(1:nrow(goi_master), function(i) {
+      x <- goi_master[i, 'T_k.name']
+      return(ifelse(x %fin% target_gene_set, 1, 0))
+    }))
+    return(vect)
+  })
+  
+  #' Get the fraction of genes at or above the given rank, for each GOI
+  goi_fraction_list <- lapply(1:length(goi_vector_list), function(list_index) {
+    goi_vector <- goi_vector_list[[list_index]]
+    frac_vect <- c()
+    count_of_match_genes <- 0
+    for (i in 1:length(goi_vector)) {
+      val_of_curr_tg <- goi_vector[i]
+      count_of_match_genes <- count_of_match_genes + val_of_curr_tg
+      frac <- count_of_match_genes / i
+      frac_vect <- c(frac_vect, frac)
+    }
+    frac_vect_df <- as.data.frame(frac_vect)
+    colnames(frac_vect_df) <- names(list_of_master_dfs)[list_index]
+    frac_vect_df$Rank <- 1:length(goi_vector)
+    return(frac_vect_df)
+  })
+  min_df_nrow <- min(unlist(lapply(goi_fraction_list, function(x) return(as.numeric(nrow(x))))))
+  goi_fraction_list <- lapply(goi_fraction_list, function(df) return(df[1:min_df_nrow,]))
+  print(head(goi_fraction_list))
+  goi_fraction_df <- Reduce(function(df1, df2) merge(df1, df2, by = "Rank", all = FALSE), goi_fraction_list)
+  #goi_fraction_df <- merge(goi_fraction_list, by = "Rank")
+  print(head(goi_fraction_df))
+  
+  goi_fraction_df_m <- melt(goi_fraction_df, "Rank")
+  colnames(goi_fraction_df_m) <- c("Rank", "GOI", "Frac")
+  print(head(goi_fraction_df_m))
+  print(unique(goi_fraction_df_m$GOI))
+  
+  # Create inset plot
+  p2 <- ggplot(goi_fraction_df_m[goi_fraction_df_m$Rank %in% 1:cutout_thres,], 
+               mapping = aes(x = Rank, y = Frac, color = GOI)) + geom_line(aes(linetype=GOI), size = 1.25) +
+    #geom_point(size = 1) + 
+    scale_color_nejm() + 
+    scale_x_continuous(limits = c(1,cutout_thres)) +
+    theme(legend.position = "none", axis.title.x = element_blank(), axis.title.y = element_blank(),
+          panel.grid.minor = element_blank())
+  
+  p <- ggplot(goi_fraction_df_m[goi_fraction_df_m$Rank %in% 1:thres,], 
+              mapping = aes(x = Rank, y = Frac, color = GOI)) + geom_line(aes(linetype=GOI), size = 1.25) +
+    #geom_point(size = 1) + 
+    scale_color_nejm() + 
+    ggtitle(paste("Fraction of Model-Prioritized Target Genes in", name_of_target_set)) +
+    xlab("Gene Rank") + ylab("Fraction of Top Hit Genes in Source Gene Set") + 
+    scale_x_continuous(limits = c(1,thres)) +
+    theme(axis.text.x =  element_text(size = 12), axis.text.y =  element_text(size = 12),
+          axis.title = element_text(size = 13, face = "bold"), panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), panel.border = element_blank()) + theme_minimal() +
+    annotation_custom(ggplotGrob(p2), xmin =(thres-round(thres/1.5)), xmax = thres, ymin = 0.30, ymax = 1.0) +
+    geom_rect(data=goi_fraction_df_m[1:cutout_thres,], 
+              aes(xmin = 1, xmax = cutout_thres, ymin = 0, ymax = 1, fill = "gray"),
+              color = NA, fill = alpha("gray", .01))
+
+  return(p)
+
+}
+
+list_of_master_dfs <- list("TP53" = allgenes_p53_tcga, "PIK3CA" = allgenes_pik3ca_tcga, 
+                           "TTN" = allgenes_ttn_tcga)
+plot_combined_enrichment_mult_genes(list_of_master_dfs, breast_biomarkers, 500, 50, "Breast Biomarkers")
+
+
+
+#' Create barplot with the number of missense/nonsense and silent significant hits 
+#' for drivers and non-drivers
+#' @param list_of_master_dfs a list of master DFs, with the names of the list corresponding
+#' to the names of the regulatory proteins of interest
+#' @param q_thres a q-value threshold for significance
+#' @param list_of_silent_dfs OPT: a corresponding list of silent DFs to include in the chart
+create_num_sig_hits_barplot <- function(list_of_master_dfs, q_thres, list_of_silent_dfs) {
+  # Get the number of significant hits for each master DF
+  sig_hits_df <- data.frame("Gene" = names(list_of_master_dfs), 
+                            "Num.Signif.Hits.q" = rep(0, times = length(list_of_master_dfs)))
+  colnames(sig_hits_df)[2] <- paste0(colnames(sig_hits_df)[2], q_thres)
+  sig_hits_df[,2] <- unlist(lapply(list_of_master_dfs, function(df) {
+    return(nrow(df[df$q.value < q_thres,]))
+  }))
+  
+  print(head(sig_hits_df))
+  
+  if(!is.na(list_of_silent_dfs)) {
+    sig_hits_df_silent <- data.frame("Gene" = names(list_of_silent_dfs), 
+                                    "Num.Signif.Hits.q" = rep(0, times = length(list_of_silent_dfs)))
+    colnames(sig_hits_df_silent)[2] <- paste0(colnames(sig_hits_df_silent)[2], q_thres)
+    sig_hits_df_silent[,2] <- unlist(lapply(list_of_silent_dfs, function(df) {
+      return(nrow(df[df$q.value < q_thres,]))
+    }))
+    sig_hits_df$Mutation.Type <- "Silent"
+    
+    sig_hits_df <- rbind(sig_hits_df, sig_hits_df_silent)
+    
+    
+    p <- ggplot(sig_hits_df, aes(fill = Mutation.Type, x = reorder(Gene, -Num.Signif.Hits.q0.2, mean), 
+                                 y = Num.Signif.Hits.q0.2)) + 
+      geom_bar(position = "dodge", stat = "identity") + theme_minimal() + scale_color_nejm() +
+      xlab("\nGene") + ylab(paste0("\n", paste0("Num. Signif. Hits, q < ", q_thres))) +
+      theme(axis.text = element_text(face="bold", size = 12), 
+            axis.title=element_text(size=14,face="bold"))
+    
+  } else {
+    p <- ggplot(sig_hits_df, aes(fill = Gene, y = Num.Signif.Hits.q0.2, 
+                                 x = reorder(Gene, -Num.Signif.Hits.q0.2, mean))) + 
+      geom_bar(position = "dodge", stat = "identity", show.legend = FALSE) + 
+      theme_minimal() + scale_color_nejm() +
+      xlab("\nGene") + ylab(paste0("\n", paste0("Num. Signif. Hits, q < ", q_thres))) +
+      theme(axis.text = element_text(face="bold", size = 12), 
+            axis.title=element_text(size=14, face="bold"))
+  }
+  
+  return(p)
+}
+
+list_of_master_dfs <- list("TP53" = allgenes_p53, "PIK3CA" = allgenes_pik3ca,
+                           "TTN" = allgenes_ttn, "FOXA1" = allgenes_foxa1, 
+                           "SF3B1" = allgenes_sf3b1, "USH2A" = allgenes_ush2a)
+# "GATA3" = allgenes_gata3, "KMT2C" = allgenes_kmt2c
+
+create_num_sig_hits_barplot(list_of_master_dfs, 0.2, NA)
 
 #' Function to get the enrichment using the STRINGdB package, which has functions 
 #' to calculate enrichment in alternative sets (such as PubMed, etc.)
@@ -1872,6 +2181,7 @@ get_stringdb_enrichment <- function(master_df, qval_thres, background) {
 
 stringdb_enrichment_tp53 <- get_stringdb_enrichment(allgenes_p53_panCts_inclBRCAsubtypes, 0.2, NA)
 stringdb_enrichment_pik3ca <- get_stringdb_enrichment(allgenes_pik3ca_panCts_inclBRCAsubtypes, 0.2, NA)
+
 
 
 ############################################################
@@ -1924,6 +2234,75 @@ compute_pcc <- function(master_df1, master_df2, qval_thres) {
   #return(pcc$p.value)
 }
 
+#' Given a set of STRING/ HumanBase confidence values and p-values values from the model,
+#' calculate a spearman correlation between the confidence values and 1-(p.value)
+#' @param master_df the master DF
+#' @param nw_table a string/humanbase table for the gene with targets and confidence values 0-1
+#' @param goi the name of the regulatory gene-of-interest
+compute_network_spearman <- function(master_df, nw_table, goi) {
+  
+  # Convert the p-values to 1-p.value
+  conv_pvals <- data.frame("gene.name" = master_df$T_k.name, "conv.pval" = 1 - (master_df$p.value))
+  nw_table <- nw_table[nw_table$node1 == goi,]
+  string_confvals <- data.frame("gene.name" = nw_table$node2, 
+                                "conf" = nw_table$combined_score)
+  comb_df <- merge(conv_pvals, string_confvals, by = "gene.name", all = FALSE)
+  print(dim(comb_df))
+  
+  spearman <- cor.test(comb_df$conv.pval, comb_df$conf, method = "spearman", use = "pairwise")
+  print(spearman)
+  return(spearman$p.value)
+  
+}
+
+compute_network_spearman(allgenes_p53_tcga, tp53_neighbors_conf500, "TP53")
+
+
+#' Create a Spearman barplot that, when given two corresponding lists of master DFs
+#' (named according to the R_i), computes the Spearman correlation of the Beta values.
+#' Plots a barplot of the Beta values.
+#' @param source1_master_list a list of master DFs from a certain source 1
+#' @param source2_master_list a list of master DFs (for the same genes) from a certain
+#' source 2. Two source lists should be the same length.
+create_spearman_barplot <- function(source1_master_list, source2_master_list) {
+  
+  spearman_correlations <- lapply(1:length(source1_master_list), function(i) {
+    df1 <- source1_master_list[[i]]
+    df2 <- source2_master_list[[i]]
+
+    df_merged <- merge(df1, df2, by = "T_k.name", all = FALSE)
+
+    betas_df1 <- df_merged$estimate.x
+    betas_df2 <- df_merged$estimate.y
+    
+    spearman <- tidy(cor.test(betas_df1, betas_df2, method = "spearman", use = "pairwise"))
+
+    return(spearman)
+  })
+  spearman_cor_vals <- as.numeric(unlist(lapply(spearman_correlations, function(x) x$estimate)))
+  spearman_correlations_df <- data.frame("Gene" = names(source1_master_list), 
+                                            "Spearman" = spearman_cor_vals)
+  print("P-Values")
+  print(unlist(lapply(spearman_correlations, function(x) as.numeric(x$p.value))))
+  print("Correlations")
+  print(as.numeric(unlist(lapply(spearman_correlations, function(x) x$estimate))))
+  
+  p <- ggplot(spearman_correlations_df, aes(x = reorder(Gene, -Spearman, mean), 
+                                            y = Spearman, fill = Gene)) + 
+    geom_bar(stat = "identity", show.legend = FALSE) + scale_color_nejm() + 
+    theme_minimal() + xlab("\nGene") + ylab("Spearman Correlation\n") +
+    theme(axis.text = element_text(face="bold", size = 12), 
+          axis.title=element_text(size=14,face="bold"))
+  
+  return(p)
+}
+
+source1_master_list <- list("TP53" = allgenes_p53_incl2GenoPCs, "PIK3CA" = allgenes_pik3ca_incl2GenoPCs,
+                            "KMT2C" = allgenes_kmt2c, "GATA3" = allgenes_gata3)
+source2_master_list <- list("TP53" = allgenes_p53_metabric, "PIK3CA" = allgenes_pik3ca_metabric,
+                            "KMT2C" = allgenes_kmt2c_metabric, "GATA3" = allgenes_gata3_metabric)
+
+create_spearman_barplot(source1_master_list, source2_master_list)
 
 ############################################################
 #### ANNOTATE WHETHER TF REGULATION PREDICTIONS ALIGN WITH
