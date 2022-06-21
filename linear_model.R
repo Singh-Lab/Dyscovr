@@ -821,17 +821,27 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
   #print(paste("REGPROTi ENSG:", regprot_i_ensg))
   
   # Optionally, add mutation, amplification status covariates for PIK3CA if regprot is TP53
-  # and vice versa (HACKY- need to fix)
+  # and vice versa 
+  # Also, optionally add all of these covariates for genes that are not PIK3CA or TP53
   cna_df_pik3ca <- NA
   cna_df_tp53 <- NA
-  if((regprot_i_ensg == "ENSG00000141510") & incl_nextMutDriver) {
-    cna_df_pik3ca <- filter_cna_by_ensg(cna_df, "ENSG00000121879")
-    mutation_regprot_df_pik3ca <- mutation_regprot_df[Swissprot %like% "P42336"]
+  if(incl_nextMutDriver) {
+    if(regprot_i_ensg == "ENSG00000141510") {
+      cna_df_pik3ca <- filter_cna_by_ensg(cna_df, "ENSG00000121879")
+      mutation_regprot_df_pik3ca <- mutation_regprot_df[Swissprot %like% "P42336"]
+    }
+    else if(regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) {
+      cna_df_tp53 <- filter_cna_by_ensg(cna_df, "ENSG00000141510")
+      mutation_regprot_df_tp53 <- mutation_regprot_df[Swissprot %like% "P04637"]
+    }
+    else {
+      cna_df_pik3ca <- filter_cna_by_ensg(cna_df, "ENSG00000121879")
+      mutation_regprot_df_pik3ca <- mutation_regprot_df[Swissprot %like% "P42336"]
+      cna_df_tp53 <- filter_cna_by_ensg(cna_df, "ENSG00000141510")
+      mutation_regprot_df_tp53 <- mutation_regprot_df[Swissprot %like% "P04637"]
+    }
   }
-  if((regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) & incl_nextMutDriver) {
-    cna_df_tp53 <- filter_cna_by_ensg(cna_df, "ENSG00000141510")
-    mutation_regprot_df_tp53 <- mutation_regprot_df[Swissprot %like% "P04637"]
-  }
+
   
   # If tumor-normal matched, limit to just cancer samples (we'll ID the matched normal in each run)
   if(tumNormMatched) {
@@ -876,33 +886,73 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
       fnc_stat <- log2(fnc_stat + 1)
     }
     
-    altern_cna_stat <- NA
-    altern_mut_stat <- NA
-    altern_comb_stat <- NA
+    altern_stats <- list(NA,NA,NA,NA,NA,NA)
+    
+    #' Helper function that will get stats for TP53 or PIK3CA if we are adding them
+    #' as covariates as well 
+    get_altern_stats <- function(regprot_i_ensg, cna_df_sub, cna_df_altern, bucket_type,
+                                 mutation_regprot_df, sample, dataset, mut_stat) {
+      
+      altern_cna_stat <- get_cna_stat(cna_df_altern, sample, bucket_type, dataset)
+      mutation_regprot_df_sub <- mutation_regprot_df[Patient %like% sample]
+      if(mutation_regprot_df_sub[, .N] > 0) {
+        altern_mut_stat <- 1
+      } else {altern_mut_stat <- 0}
+      if ((mut_stat == 1) & (altern_mut_stat == 1)) {
+        altern_comb_stat <- 1
+      } else {altern_comb_stat <- 0}
+      
+      name <- ""
+      if(regprot_i_ensg == "ENSG00000141510") {name <- "PIK3CA."}
+      if(regprot_i_ensg == "ENSG00000121879") {name <- "TP53."}
+      list_to_ret <- list(altern_cna_stat, altern_mut_stat, altern_comb_stat)
+      names(list_to_ret) <- c(paste0(name, "altern_cna_stat"), paste0(name, "altern_mut_stat"),
+                              paste0(name, "altern_comb_stat"))
+      return(list_to_ret)
+    }
+    
     if (incl_nextMutDriver) {
       if(regprot_i_ensg == "ENSG00000141510") {
-        altern_cna_stat <- get_cna_stat(cna_df_pik3ca, sample, "bucket_justAmp", dataset)
-        # Switch TP53's CNA stat to just_Del
-        cna_stat <- get_cna_stat(cna_df_sub, sample, "bucket_justDel", dataset)
-        mutation_regprot_df_pik3ca_sub <- mutation_regprot_df_pik3ca[Patient %like% sample]
-        if(mutation_regprot_df_pik3ca_sub[, .N] > 0) {
-          altern_mut_stat <- 1
-        } else {altern_mut_stat <- 0}
-        if ((mut_stat == 1) & (altern_mut_stat == 1)) {
-          altern_comb_stat <- 1
-        } else {altern_comb_stat <- 0}
+        cna_b <- cna_bucketing
+        if(grepl("just", cna_bucketing)) {cna_b <- "bucket_justAmp"}
+        altern_stats <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_pik3ca,
+                                         cna_b, mutation_regprot_df_pik3ca,
+                                         sample, dataset, mut_stat)
+        #altern_stats <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_pik3ca,
+                                         #"bucket_justAmp", mutation_regprot_df_pik3ca,
+                                         #sample, dataset, mut_stat)
       }
-      if(regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) {
-        altern_cna_stat <- get_cna_stat(cna_df_tp53, sample, "bucket_justDel", dataset)
-        # Switch PIK3CA's CNA stat to just_Amp
-        cna_stat <- get_cna_stat(cna_df_sub, sample, "bucket_justAmp", dataset)
-        mutation_regprot_df_tp53_sub <- mutation_regprot_df_tp53[Patient %like% sample]
-        if(mutation_regprot_df_tp53_sub[, .N] > 0) {
-          altern_mut_stat <- 1
-        } else {altern_mut_stat <- 0}
-        if ((mut_stat == 1) & (altern_mut_stat == 1)) {
-          altern_comb_stat <- 1
-        } else {altern_comb_stat <- 0}
+      else if(regprot_i_ensg  == "ENSG00000121879") {
+        cna_b <- cna_bucketing
+        if(grepl("just", cna_bucketing)) {cna_b <- "bucket_justDel"}
+        altern_stats <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_tp53,
+                                         cna_b, mutation_regprot_df_tp53,
+                                         sample, dataset, mut_stat)
+        #altern_stats <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_tp53,
+                                         #"bucket_justDel", mutation_regprot_df_tp53,
+                                         #sample, dataset, mut_stat)
+      }
+      else {
+        cna_b_tp53 <- cna_bucketing
+        cna_b_pik3ca <- cna_bucketing
+        if(grepl("just", cna_bucketing)) {
+          cna_b_pik3ca <- "bucket_justAmp"
+          cna_b_tp53 <- "bucket_justDel"
+        }
+        
+        altern_stats_tp53 <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_tp53,
+                                         cna_b_tp53, mutation_regprot_df_tp53,
+                                         sample, dataset, mut_stat)
+        altern_stats_pik3ca <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_pik3ca,
+                                         cna_b_pik3ca, mutation_regprot_df_pik3ca,
+                                         sample, dataset, mut_stat)
+        #altern_stats_tp53 <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_tp53,
+                                         #"bucket_justDel", mutation_regprot_df_tp53,
+                                         #sample, dataset, mut_stat)
+        #altern_stats_pik3ca <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_pik3ca,
+                                         #"bucket_justAmp", mutation_regprot_df_pik3ca,
+                                         #sample, dataset, mut_stat)
+        altern_stats <- c(altern_stats_tp53, altern_stats_pik3ca)
       }
     }
     
@@ -911,12 +961,8 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
       print(paste("CNA stat:", cna_stat))
       print(paste("Mut stat:", mut_stat))
       if(useNumFunctCopies) {print(paste("FNC stat:", fnc_stat))}
-      if((regprot_i_ensg %in% c("ENSG00000141510", "ENSG00000121879", "ENSG00000155657")) 
-         & incl_nextMutDriver) {
-        print(altern_cna_stat)
-        print(altern_mut_stat)
-        print(altern_comb_stat)
-      }
+      print("Altern driver stats:")
+      print(altern_stats)
     }
     
     outdf <- data.table()
@@ -929,16 +975,19 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
                                          "MethStat_i_b2" = meth_stat[2], 
                                          "MethStat_i_b3" = meth_stat[3]))
       }
-      if((regprot_i_ensg == "ENSG00000141510") & incl_nextMutDriver) {
-        outdf[, 'PIK3CA_MutStat_i'] <- altern_mut_stat
-        outdf[, 'PIK3CA_AmplStat_i'] <- altern_cna_stat
-        outdf[, 'PIK3CAP53_MutStat_i'] <- altern_comb_stat
-      } 
-      if ((regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) & incl_nextMutDriver) {
-        outdf[, 'TP53_MutStat_i'] <- altern_mut_stat
-        outdf[, 'TP53_DelStat_i'] <- altern_cna_stat
-        outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_comb_stat
+      if(incl_nextMutDriver) {
+        if(!(regprot_i_ensg == "ENSG00000121879")) {
+          outdf[, 'TP53_MutStat_i'] <- altern_stats[['TP53.altern_mut_stat']]
+          outdf[, 'TP53_DelStat_i'] <- altern_stats[['TP53.altern_cna_stat']]
+          outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_stats[['TP53.altern_comb_stat']]
+        } 
+        if (!(regprot_i_ensg == "ENSG00000141510")) {
+          outdf[, 'PIK3CA_MutStat_i'] <- altern_stats[['PIK3CA.altern_mut_stat']]
+          outdf[, 'PIK3CA_AmplStat_i'] <- altern_stats[['PIK3CA.altern_cna_stat']]
+          outdf[, 'PIK3CAP53_MutStat_i'] <- altern_stats[['PIK3CA.altern_comb_stat']]
+        }
       }
+      
     } else {
       if(!meth_bucketing) {
         if ((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing))) {
@@ -947,16 +996,19 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
           outdf <- data.table("MutStat_i" = mut_stat, "CNAStat_i_b1" = cna_stat[1], "CNAStat_i_b2" = cna_stat[2],
                               "CNAStat_i_b3" = cna_stat[3], "MethStat_i" = meth_stat)
         }
-        if((regprot_i_ensg == "ENSG00000141510") & incl_nextMutDriver) {
-          outdf[, 'PIK3CA_MutStat_i'] <- altern_mut_stat
-          outdf[, 'PIK3CA_AmplStat_i'] <- altern_cna_stat
-          outdf[, 'PIK3CAP53_MutStat_i'] <- altern_comb_stat
-        }      
-        if ((regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) & incl_nextMutDriver) {
-          outdf[, 'TP53_MutStat_i'] <- altern_mut_stat
-          outdf[, 'TP53_DelStat_i'] <- altern_cna_stat
-          outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_comb_stat
+        if(incl_nextMutDriver) {
+          if(!(regprot_i_ensg == "ENSG00000121879")) {
+            outdf[, 'TP53_MutStat_i'] <- altern_stats[['TP53.altern_mut_stat']]
+            outdf[, 'TP53_DelStat_i'] <- altern_stats[['TP53.altern_cna_stat']]
+            outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_stats[['TP53.altern_comb_stat']]
+          } 
+          if (!(regprot_i_ensg == "ENSG00000141510")) {
+            outdf[, 'PIK3CA_MutStat_i'] <- altern_stats[['PIK3CA.altern_mut_stat']]
+            outdf[, 'PIK3CA_AmplStat_i'] <- altern_stats[['PIK3CA.altern_cna_stat']]
+            outdf[, 'PIK3CAP53_MutStat_i'] <- altern_stats[['PIK3CA.altern_comb_stat']]
+          }
         }
+
       } else {
         if ((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing))) {
           outdf <- data.table("MutStat_i" = mut_stat, "CNAStat_i" = cna_stat, "MethStat_i_b1" = meth_stat[1],
@@ -967,15 +1019,17 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
                               "MethStat_i_b3" = meth_stat[3])
         }
       }
-      if((regprot_i_ensg == "ENSG00000141510") & incl_nextMutDriver) {
-        outdf[, 'PIK3CA_MutStat_i'] <- altern_mut_stat
-        outdf[, 'PIK3CA_AmplStat_i'] <- altern_cna_stat
-        outdf[, 'PIK3CAP53_MutStat_i'] <- altern_comb_stat
-      }    
-      if ((regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) & incl_nextMutDriver) {
-        outdf[, 'TP53_MutStat_i'] <- altern_mut_stat
-        outdf[, 'TP53_DelStat_i'] <- altern_cna_stat
-        outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_comb_stat
+      if(incl_nextMutDriver) {
+        if(!(regprot_i_ensg == "ENSG00000121879")) {
+          outdf[, 'TP53_MutStat_i'] <- altern_stats[['TP53.altern_mut_stat']]
+          outdf[, 'TP53_DelStat_i'] <- altern_stats[['TP53.altern_cna_stat']]
+          outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_stats[['TP53.altern_comb_stat']]
+        } 
+        if (!(regprot_i_ensg == "ENSG00000141510")) {
+          outdf[, 'PIK3CA_MutStat_i'] <- altern_stats[['PIK3CA.altern_mut_stat']]
+          outdf[, 'PIK3CA_AmplStat_i'] <- altern_stats[['PIK3CA.altern_cna_stat']]
+          outdf[, 'PIK3CAP53_MutStat_i'] <- altern_stats[['PIK3CA.altern_comb_stat']]
+        }
       }
     }
     return(outdf)
