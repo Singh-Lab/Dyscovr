@@ -125,15 +125,15 @@ get_cna_stat <- function(cna_df, sample, cna_bucketing, dataset) {
       } else {
         if(dataset == "TCGA") {
           # Include partial deletions
-          #if(cna_stat < 2) {cna_stat <- 1}
+          if(cna_stat < 2) {cna_stat <- 1}
           # Include only full deletions
-          if(cna_stat == 0) {cna_stat <- 1}
+          #if(cna_stat == 0) {cna_stat <- 1}
           else {cna_stat <- 0}
         } else if (dataset == "METABRIC") {
           # Include partial deletions
-          #if(cna_stat < 0) {cna_stat <- 1}
+          if(cna_stat < 0) {cna_stat <- 1}
           # Include only full deletions
-          if(cna_stat == -2) {cna_stat <- 1}
+          #if(cna_stat == -2) {cna_stat <- 1}
           else {cna_stat <- 0}
         } else {print("Currently only implemented for TCGA and METABRIC."); return(NA)}
       }
