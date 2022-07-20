@@ -873,10 +873,12 @@ write.csv(expression_dataframe_counts_minMed10_perCt, paste0(output_path, "expre
 #' Rank or quantile normalize the expression data frame and return a rank-normalized version
 #' (ranked on a per-gene basis)
 #' Function taken from https://bioinformatics.stackexchange.com/questions/6863/how-to-quantile-normalization-on-rna-seq-counts
+#' A useful paper on types of quantile normalization for gene expression data: https://www.nature.com/articles/s41598-020-72664-6#:~:text=The%20quantile%20normalization%20(QN)%20procedure,rank%20with%20this%20average%20value.
 #' @param df a raw count expression data frame
 quantile_normalize <- function(df){
-  df_rank <- apply(df, MARGIN = 2, function(y) rank(y, ties.method="random"))
-  df_sorted <- as.data.frame(apply(df, MARGIN = 2, sort))
+  df_rank <- apply(df, MARGIN = 2, function(y) rank(y, ties.method="average"))
+  df_sorted <- as.data.frame(apply(df, MARGIN = 2, function(x) {
+    sort(x, na.last = NA)}))
   df_mean <- apply(df_sorted, MARGIN = 1, mean)
   
   index_to_mean <- function(my_index, my_mean){
@@ -932,6 +934,40 @@ duplicate_info_list <- apply(expression_dataframe_counts, MARGIN = 2, function(y
 })
 duplicate_info <- rbindlist(duplicate_info_list)
 
+
+############################################################
+############################################################
+### Z-SCORE NORMALIZATION: RPKM VALUES ###
+############################################################
+############################################################
+#' Perform a z-score normalization of the given expression DF
+#' Steps: if RPKM values, subtract the overall average gene 
+#' abundance from the RPKM-normalized expression for each gene, 
+#' and divide that result by the standard deviation (SD) of 
+#' all of the measured counts across all samples.
+#' @param expression_df a gene by sample expression DF with 
+#' RPKM count values
+zscore_normalize <- function(expression_df) {
+  exp_rowMeans <- rowMeans(expression_df)
+  exp_rowSds <- rowSds(expression_df)
+  
+  new_cols <- lapply(1:ncol(expression_df), function(i) {
+    zscores <- unlist(lapply(1:nrow(expression_df), function(j) {
+      gene_rpkm <- expression_df[i, j]
+      gene_mean <- exp_rowMeans[j]
+      gene_sd <- exp_rowSds[j]
+      
+      zscore <- (gene_rpkm - gene_mean) / gene_sd
+      return(zscore)
+    }))
+    return(zscores)
+  })
+  new_df <- do.call(cbind, new_cols)
+  colnames(new_df) <- colnames(expression_df)
+  rownames(new_df) <- rownames(expression_df)
+  
+  return(new_df)
+}
 
 
 ############################################################

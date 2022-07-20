@@ -140,9 +140,13 @@ parser$add_argument("--num_pcs", default = 2, type = "integer",
 parser$add_argument("--mut_pc_vect", default = "0", type = "character",
                     help = "either '0' for no mutational vectors, or a vector of PCs to include, e.g. 1,3,4. Default is 0.")
 
-# Add a flag for running collinearity diagnostics; can be useful but adds to runtime.
+# Add a flag for running collinearity diagnostics/ including residuals; can be useful but adds to runtime.
 parser$add_argument("--collinearity_diagn", default = "FALSE", type = "character",
                     help = "A TRUE/ FALSE value indicating whether or not we want detailed collinearity diagnostics. Can be useful but adds to runtime; not suggested for large runs. Default is FALSE.")
+parser$add_argument("--inclResiduals", default = "FALSE", type = "character",
+                    help = "A TRUE/FALSE value indicating whether we want to include residuals in the output DF. Default is FALSE.")
+
+
 # Add a flag for adding a regularization method
 parser$add_argument("--regularization", default = "None", type = "character",
                     help = "The name of the regularization method being used. Currently only implemented for L1 and L2. Default is None.")
@@ -204,6 +208,7 @@ removeCis <- str2bool(args$removeCis)
 removeMetastatic <- str2bool(args$removeMetastatic)
 useNumFunctCopies <- str2bool(args$useNumFunctCopies)
 incl_nextMutDriver <- str2bool(args$incl_nextMutDriver)
+inclResiduals <- str2bool(args$inclResiduals)
 
 
 ############################################################
@@ -290,6 +295,11 @@ if(debug) {
 # Determine what type of expression this is from the filename
 is_rank_or_quant_norm <- FALSE
 if(grepl("rank", args$expression_df) | grepl("quantile", args$expression_df)) {is_rank_or_quant_norm <- TRUE}
+
+# Determine whether or not we will need to log-transform the data, or whether this
+# has already been done in some way (e.g. by an inverse normal transformation or z-score normalization)
+log_expression <- TRUE
+if(grepl("transform", args$expression_df) | grepl("zscore", args$expression_df)) {log_expression <- FALSE}
 
 
 ############################################################
@@ -520,6 +530,9 @@ if(useNumFunctCopies) {
 #' @param is_rank_or_quant_norm a TRUE/FALSE value indicating whether this is rank-
 #' or quantile-normalized data (i.e. whether we need to include library size as an
 #' offset)
+#' @param log_expression a TRUE/FALSE value indicating whether we need to take the
+#' log2(exp + 1), or whether expression has already been transformed to a normal
+#' distribution in some way
 #' @param analysis_type a string label that reads either "eQTL" or "meQTL" to 
 #' determine what kind of model we should run
 #' @param tumNormMatched a TRUE/FALSE value indicating whether or not the analysis is 
@@ -557,15 +570,17 @@ if(useNumFunctCopies) {
 #' TP53 or PIK3CA in BRCA, whether or not we include mutation/ CNA/ mutation interaction
 #' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3', to denote what columns
 #' we are referencing/ specific data types we are using
+#' @param inclResiduals a TRUE/FALSE value indicating whether or not we want to include 
+#' residuals in our output DF, to evaluate model fit
 run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df, 
                              mutation_df_targ, mutation_df_regprot, methylation_df, 
                              methylation_df_meQTL, cna_df, expression_df, num_funct_copies_df,
-                             neighboring_cna_df, is_rank_or_quant_norm, analysis_type, 
+                             neighboring_cna_df, is_rank_or_quant_norm, log_expression, analysis_type, 
                              tumNormMatched, randomize, cna_bucketing, meth_bucketing, 
                              useNumFunctCopies, num_PEER, num_pcs, 
                              debug, collinearity_diagn, outpath, outfn, regularization, 
                              covs_to_incl, removeCis, all_genes_id_conv, incl_nextMutDriver,
-                             dataset) {
+                             dataset, inclResiduals) {
   
   # We need to get a mini-table for every r_i, t_k combo that we rbind into a master table of results
   results_df_list <- lapply(1:protein_ids_df[, .N], function(i) {
@@ -632,6 +647,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                                            mutation_targ_df = mutation_df_targ,
                                            methylation_df = methylation_df_targ, 
                                            cna_df = cna_df, expression_df = expression_df, 
+                                           log_expression = log_expression,
                                            cna_bucketing = cna_bucketing,
                                            meth_bucketing = meth_bucketing, 
                                            analysis_type = analysis_type,
@@ -674,18 +690,33 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
             print(paste("Formula:", formula))
           }
           
-          lm_fit <- tryCatch(
-            {
-              speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
-              #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
-                                #data = lm_input_table)
-            }, error = function(cond) {
-              message("There was a problem with this linear model run:")
-              message(cond)
-              print(formula)
-              print(head(lm_input_table))
-              return(NA)
-            })
+          if(inclResiduals) {
+            lm_fit <- tryCatch(
+              {
+                speedglm::speedlm(formula = formula, data = lm_input_table, fitted = TRUE)  # Do not include library size as offset
+                #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
+                #data = lm_input_table)
+              }, error = function(cond) {
+                message("There was a problem with this linear model run:")
+                message(cond)
+                print(formula)
+                print(head(lm_input_table))
+                return(NA)
+              })
+          } else {
+            lm_fit <- tryCatch(
+              {
+                speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
+                #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
+                #data = lm_input_table)
+              }, error = function(cond) {
+                message("There was a problem with this linear model run:")
+                message(cond)
+                print(formula)
+                print(head(lm_input_table))
+                return(NA)
+              })
+          }
           
         } else if (regularization == "L2" | regularization == "ridge" | 
                    regularization == "L1" | regularization == "lasso") {
@@ -699,6 +730,9 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
         
         # Tidy the output
         summary_table <- tidy(lm_fit)
+        if(inclResiduals) {
+          summary_table$Residual <- lm_input_table$ExpStat_k - predict(lm_fit)
+        }
         
         # Restrict the output table to just particular columns, if desired
         #summary_table <- lm_fit[lm_fit$term == "MutStat_i" | lm_fit$term == "CNAStat_i",]
@@ -1071,6 +1105,8 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
 #' @param methylation_df the methylation DF
 #' @param cna_df the copy number alteration DF
 #' @param expression_df the gene expression DF
+#' @param log_expression a TRUE/ FALSE value indicating whether we take the log2(exp + 1),
+#' or simply the expression value given in the DF
 #' @param cna_bucketing a string indicating if/how we are bucketing CNA values. Possible
 #' values are "bucketInclAmp", "bucketExclAmp", and "rawCNA"
 #' @param meth_bucketing a TRUE/FALSE value indicating whether or not we are bucketing
@@ -1084,7 +1120,7 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
 #' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3', to denote what columns
 #' we are referencing/ specific data types we are using
 fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
-                             methylation_df, cna_df, expression_df, cna_bucketing,
+                             methylation_df, cna_df, expression_df, log_expression, cna_bucketing,
                              meth_bucketing, analysis_type, tumNormMatched, debug, dataset) {
   
   if(debug) {
@@ -1130,7 +1166,8 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
           if(length(meth_stat) > 3) {meth_stat <- meth_stat[1:3]}
         }
         # What is the expression of this target in this sample in cancer?
-        exp_stat <- unlist(get_exp_stat(expression_df, sample, tumNormMatched, dataset))
+        exp_stat <- unlist(get_exp_stat(expression_df, sample, tumNormMatched, 
+                                        dataset, log_expression))
         
         if(debug) {
           print(paste("exp_stat:", exp_stat))
@@ -1416,6 +1453,7 @@ if(is.na(patient_cancer_mapping)) {
                                 cna_df = cna_df,
                                 expression_df = expression_df, 
                                 is_rank_or_quant_norm = is_rank_or_quant_norm,
+                                log_expression = log_expression,
                                 analysis_type = args$QTLtype,
                                 tumNormMatched = tumNormMatched,
                                 randomize = randomize,
@@ -1433,7 +1471,8 @@ if(is.na(patient_cancer_mapping)) {
                                 useNumFunctCopies = useNumFunctCopies,
                                 num_funct_copies_df = num_funct_copies_DF,
                                 incl_nextMutDriver = incl_nextMutDriver,
-                                dataset = args$dataset)
+                                dataset = args$dataset,
+                                inclResiduals = inclResiduals)
   
 # Case 2: If we're running on multiple cancer types separately
 } else if (!(is.na(patient_cancer_mapping))) {
@@ -1489,6 +1528,7 @@ if(is.na(patient_cancer_mapping)) {
                                   cna_df = cna_df_sub,
                                   expression_df = expression_df_sub, 
                                   is_rank_or_quant_norm = is_rank_or_quant_norm,
+                                  log_expression = log_expression,
                                   analysis_type = args$QTLtype,
                                   tumNormMatched = tumNormMatched,
                                   randomize = randomize,
@@ -1506,7 +1546,8 @@ if(is.na(patient_cancer_mapping)) {
                                   useNumFunctCopies = useNumFunctCopies,
                                   num_funct_copies_df = num_funct_copies_DF,
                                   incl_nextMutDriver = incl_nextMutDriver,
-                                  dataset = args$dataset)
+                                  dataset = args$dataset,
+                                  inclResiduals = inclResiduals)
     
     return(master_df)
   })

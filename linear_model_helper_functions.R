@@ -238,11 +238,14 @@ get_meth_stat <- function(methylation_df, sample, meth_bucketing, tumNormMatched
 #' @param tumNormMatched a TRUE/FALSE value indicating whether or not the analysis is 
 #' tumor-normal matched
 #' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3'
-get_exp_stat <- function(expression_df, sample, tumNormMatched, dataset) {
+#' @param log_expression a TRUE/FALSE value indicating whether or not we need to take 
+#' the log2(exp + 1), or whether the expression values have already been transformed
+#' to a normal distribution
+get_exp_stat <- function(expression_df, sample, tumNormMatched, dataset, log_expression) {
   if(!tumNormMatched) {
     exp_stat <- as.numeric(unlist(expression_df[, grepl(sample, colnames(expression_df)), 
                                                 with = FALSE]))
-    if(dataset == "TCGA") {
+    if((dataset == "TCGA") & log_expression) {
       # Add a pseudocount so we don't take the log of 0 (1 is typically used for logged values)
       exp_stat <- log2(exp_stat + 1)
     }
