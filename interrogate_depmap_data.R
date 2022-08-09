@@ -276,8 +276,10 @@ signif_hits_crispr_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main P
                                 header = TRUE, check.names = FALSE)
 signif_hits_rnai_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/RNAi_(Achilles+DRIVE+Marcotte,_DEMETER2)_subsetted.csv",
                                   header = TRUE, check.names = FALSE)
-signif_hits_expression_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Expression_21Q4_Public_subsetted.csv",
-                                        header = TRUE, check.names = FALSE)
+#signif_hits_expression_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Expression_21Q4_Public_subsetted.csv",
+                                        #header = TRUE, check.names = FALSE)
+# For all genes
+signif_hits_expression_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Expression_22Q1_Public.csv", header = TRUE, check.names = FALSE)
 
 # Get the mutations for TP53 & PIK3CA among these cell lines
 tp53_pik3ca_mutations <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Mutation_21Q4_Public_P53_PIK3CA.csv",

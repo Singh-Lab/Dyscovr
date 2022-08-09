@@ -37,9 +37,17 @@ clinical_df_ntnm <- read.csv(paste(input_path, "clinical_wMutCounts.csv", sep = 
 clinical_df_ntnm <- read.csv(paste(input_path, "clinical_data_subset_w_MN_MutCounts.csv", sep = ""), 
                              header = TRUE, check.names = FALSE)
 
+# For nonsynonymous
+clinical_df_ntnm <- read.csv(paste(input_path, "clinical_data_subset_w_Nonsyn_MutCounts.csv", sep = ""), 
+                             header = TRUE, check.names = FALSE)
+
 ### METABRIC ###
 clinical_df <- read.table(paste0(input_path, "data_clinical_patient_sub.txt"), 
-                          header = TRUE, check.names = FALSE, sep = ",")
+                          header = TRUE, check.names = FALSE)
+# Add TMB data
+sample_df <- read.table(paste0(input_path, "data_clinical_sample_sub.txt"), 
+                        header = TRUE, check.names = FALSE, sep = ",")
+clinical_df <- merge(clinical_df, sample_df[,c('PATIENT_ID', "TMB_NONSYNONYMOUS")], by = 'PATIENT_ID')
 
 
 ############################################################
@@ -100,26 +108,33 @@ pc_smartpca_output_ntnm <- read.table(paste(main_path, "smartpca/Non-Tumor-Norma
 
 
 ############################################################
+# IMPORT CNA DRIVER GENE NEIGHBOR DF
+############################################################
+### TCGA ###
+cna_neighbor_df <- fread(paste0(main_path, "CNV/cna_neighbor_df_full.csv"))
+
+
+############################################################
 # CREATE SAMPLE DATA FRAME FOR LM
 ############################################################
 ### TCGA ###
-brca_patient_df_tnm <- create_patient_dataframe(clinical_df_tnm, is_brca, 
-                                                  brca_subtype, is_pc, NA, brca_smartpca_output_tnm,
+brca_patient_df_tnm <- create_patient_dataframe(clinical_df_tnm, is_brca, brca_subtype, 
+                                                is_pc, NA, brca_smartpca_output_tnm, cna_neighbor_df,
                                                 FALSE, 'tcga')
-brca_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
-                                                  brca_subtype, is_pc, NA, brca_smartpca_output_ntnm,
-                                                 FALSE, 'tcga')
-pc_patient_df_tnm <- create_patient_dataframe(clinical_df_tnm, is_brca, 
-                                                pc_subtype, is_pc, NA, pc_smartpca_output_tnm,
-                                              FALSE, 'tcga')
-pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
-                                                 pc_subtype, is_pc, NA, pc_smartpca_output_ntnm,
-                                               FALSE, 'tcga')
+brca_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, brca_subtype, 
+                                                 is_pc, NA, brca_smartpca_output_ntnm,
+                                                 cna_neighbor_df, FALSE, 'tcga')
+pc_patient_df_tnm <- create_patient_dataframe(clinical_df_tnm, is_brca, pc_subtype, 
+                                              is_pc, NA, pc_smartpca_output_tnm,
+                                              cna_neighbor_df, FALSE, 'tcga')
+pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, pc_subtype, 
+                                               is_pc, NA, pc_smartpca_output_ntnm,
+                                               cna_neighbor_df, FALSE, 'tcga')
 
 # Alternatively, get BRCA subtypes in a pan-cancer DF
 pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
                                                pc_subtype, is_pc, list("BRCA" = brca_subtype), 
-                                               pc_smartpca_output_ntnm, FALSE, 'tcga')
+                                               pc_smartpca_output_ntnm, cna_neighbor_df, FALSE, 'tcga')
 
 # Get subtypes for multiple cancer types
 blca_subtype <- TCGAquery_subtype(tumor = "BLCA")
@@ -130,7 +145,7 @@ colnames(blca_subtype)[which(colnames(blca_subtype) == "Histologic subtype")] <-
 additional_subtype_info_list <- list("BRCA" = brca_subtype, "BLCA" = blca_subtype, "HNSC" = hnsc_subtype)
 pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
                                                pc_subtype, is_pc, additional_subtype_info_list, 
-                                               pc_smartpca_output_ntnm, FALSE, 'tcga')
+                                               pc_smartpca_output_ntnm, cna_neighbor_df, FALSE, 'tcga')
 
 
 # Write this to a CSV
@@ -208,7 +223,7 @@ create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc,
   # Input all the patient-specific information 
   patient_dataframe <- input_patient_specific_info(patient_dataframe, clinical_df, 
                                                    is_brca, subtype_file, is_pc,
-                                                   additional_subtype_info, smartpca_output, 
+                                                   additional_subtype_info, smartpca_output,
                                                    age_bucketing, dataset)
   
   return(patient_dataframe)
@@ -312,14 +327,24 @@ input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_
   input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated,
                                                          cancer_type_bin_df)
   # TOTAL NUM MUTATIONS
-  tot_num_mut_df <- convert_tot_num_mut_to_bins(clinical_df$Total.Num.Muts, dataset)
+  if(dataset == 'tcga') {
+    tot_num_mut_df <- convert_tot_num_mut_to_bins(clinical_df$Total.Num.Muts, dataset)
+  } else if (dataset == 'metabric') {
+    tot_num_mut_df <- convert_tot_num_mut_to_bins(log2(clinical_df$TMB_NONSYNONYMOUS +1), dataset)
+  }
   input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
                                                          tot_num_mut_df)
   # SMARTPCA PCs
   smartpca_output <- reorg_smartpca_output(smartpca_output)
   smartpca_output <- pad_nas(smartpca_output, rownames(input_dataframe_updated))
+  smartpca_output_bucketed <- bucket_smartpca_output(smartpca_output)
   input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated,
                                                          smartpca_output)
+  
+  # CNA NEIGHBORING DRIVERS
+  cna_neighbor_df_binned <- convert_cna_neighbors_to_bins(cna_neighbor_df)
+  input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated,
+                                                         cna_neighbor_df_binned)
 
   return(input_dataframe_updated)
 }
@@ -717,7 +742,11 @@ convert_tot_num_mut_to_bins <- function(total_num_muts, dataset) {
   
   # For each item in the vector, determine which bin the mutation number goes in and add it
   thresh <- c(30, 60)
-  if (dataset == "metabric") {thresh <- c(4, 8)}
+  if (dataset == "metabric") {
+    #thresh <- c(4, 8)
+    # If using log2(TMB+1), the thresholds are different
+    thresh <- c(2.5, 3.5)
+  }
   for (i in 1:length(total_num_muts)) {
     tnm <- total_num_muts[i]
     
@@ -787,7 +816,7 @@ reorg_smartpca_output <- function(smartpca_output) {
 
 #' Takes a smartpca output data frame (rows are patient IDs and columns are
 #' PCs) creates false entries with "NA" values for missing patients
-#' @param smartpca_output a file with output values for the top 10 PCs for each 
+#' @param smartpca_output a file with output values for the top 2 PCs for each 
 #' sample, created from running smartpca
 #' @param patient_ids all the patient IDs in the patient DF
 pad_nas <- function(smartpca_output, patient_ids) {
@@ -807,6 +836,21 @@ pad_nas <- function(smartpca_output, patient_ids) {
   })
   new_df <- rbindlist(new_rows)
   smartpca_output <- rbind(smartpca_output, new_df)
+  
+  return(smartpca_output)
+}
+
+############################################################ 
+
+#' Takes a smartpca output data frame (rows are patient IDs and columns are
+#' PCs) groups them into a given number of buckets 
+#' @param smartpca_output a file with output values for the top 2 PCs for each 
+#' sample, created from running smartpca
+#' @param num_buckets a number of buckets to use
+bucket_smartpca_output <- function(smartpca_output, num_buckets) {
+  
+  # Given the number of buckets we want, find the breakpoints
+  breakpoints <- max(smartpca_output)
   
   return(smartpca_output)
 }

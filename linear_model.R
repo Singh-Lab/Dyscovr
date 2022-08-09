@@ -299,7 +299,8 @@ if(grepl("rank", args$expression_df) | grepl("quantile", args$expression_df)) {i
 # Determine whether or not we will need to log-transform the data, or whether this
 # has already been done in some way (e.g. by an inverse normal transformation or z-score normalization)
 log_expression <- TRUE
-if(grepl("transform", args$expression_df) | grepl("zscore", args$expression_df)) {log_expression <- FALSE}
+if(grepl("transform", args$expression_df) | grepl("zscore", args$expression_df) | 
+   grepl("sklearn", args$expression_df)) {log_expression <- FALSE}
 
 
 ############################################################
@@ -689,34 +690,18 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
           if(debug) {
             print(paste("Formula:", formula))
           }
-          
-          if(inclResiduals) {
-            lm_fit <- tryCatch(
-              {
-                speedglm::speedlm(formula = formula, data = lm_input_table, fitted = TRUE)  # Do not include library size as offset
-                #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
-                #data = lm_input_table)
-              }, error = function(cond) {
-                message("There was a problem with this linear model run:")
-                message(cond)
-                print(formula)
-                print(head(lm_input_table))
-                return(NA)
-              })
-          } else {
-            lm_fit <- tryCatch(
-              {
-                speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
-                #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
-                #data = lm_input_table)
-              }, error = function(cond) {
-                message("There was a problem with this linear model run:")
-                message(cond)
-                print(formula)
-                print(head(lm_input_table))
-                return(NA)
-              })
-          }
+          lm_fit <- tryCatch(
+            {
+              speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
+              #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
+              #data = lm_input_table)
+            }, error = function(cond) {
+              message("There was a problem with this linear model run:")
+              message(cond)
+              print(formula)
+              print(head(lm_input_table))
+              return(NA)
+            })
           
         } else if (regularization == "L2" | regularization == "ridge" | 
                    regularization == "L1" | regularization == "lasso") {
@@ -730,8 +715,14 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
         
         # Tidy the output
         summary_table <- tidy(lm_fit)
+        print(dim(summary_table))
         if(inclResiduals) {
-          summary_table$Residual <- lm_input_table$ExpStat_k - predict(lm_fit)
+          print(length(lm_input_table$ExpStat_k))
+          print(as.numeric(unlist(predict.speedlm(lm_fit, newdata = lm_input_table))))
+          print(head(lm_input_table$ExpStat_k))
+          residuals <- as.numeric(lm_input_table$ExpStat_k) - 
+            as.numeric(unlist(predict.speedlm(lm_fit, newdata = lm_input_table)))
+          summary_table$Residual <- paste(residuals, collapse = ";")
         }
         
         # Restrict the output table to just particular columns, if desired

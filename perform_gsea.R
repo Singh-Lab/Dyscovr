@@ -37,7 +37,6 @@ all_genes_id_conv <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project 
 #' @param n the number of up/downregulated terms to plot
 #' @param sort_by either "estimate" or "p.value" to indicate whether we want to 
 #' sort our top hits by Beta estimate or p-value when performing GSEA
-#' @param all_genes_id_conv a gene ID conversion data frame from BioMart
 #' @param output_path a local path to save the GSEA figures to
 perform_gsea <- function(results_table, n, sort_by, output_path) {
   
@@ -65,7 +64,7 @@ perform_gsea <- function(results_table, n, sort_by, output_path) {
         pval <- res_table_sub$p.value[i]
         estimate <- res_table_sub$estimate[i]
         est_sign <- ifelse(estimate > 0, 1, -1)
-        return(-log(pval) * est_sign)
+        return((-log(pval)) * est_sign)
       }))
       res_table_sub <- res_table_sub[order(res_table_sub$negLogPval, decreasing = TRUE),]
     }
@@ -132,8 +131,8 @@ perform_gsea <- function(results_table, n, sort_by, output_path) {
   return(res_tab)
 }
 
-enriched_terms <- perform_gsea(master_df_mut_corrected, n = 5, "estimate", output_path)
-enriched_terms <- perform_gsea(master_df_cna_corrected, n = 5, "estimate", output_path)
+enriched_terms <- perform_gsea(master_df_mut_corrected, n = 5, "p.value", output_path)
+enriched_terms <- perform_gsea(master_df_cna_corrected, n = 5, "p.value", output_path)
 
 
 enriched_terms <- enriched_terms@result

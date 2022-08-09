@@ -121,7 +121,7 @@ methylation_df_bucketed_M$Gene_Symbol <- methylation_df_M$Gene_Symbol # If neede
 # (see "limit_to_tumor_normal_matched.R")
 
 # If Swissprot IDs are not already added:
-#mutation_targ_df$swissprot <- unlist(lapply(rownames(mutation_targ_df), function(x) 
+#mutation_targ_df$Swissprot <- unlist(lapply(rownames(mutation_targ_df), function(x) 
 # paste(unique(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'uniprot_gn_id']), collapse = ";")))
 
 ### NON-TUMOR-NORMAL MATCHED ###
@@ -133,6 +133,25 @@ colnames(mutation_targ_df)[1] <- 'Gene_Symbol'
 colnames(mutation_targ_df)[2:ncol(mutation_targ_df)] <- unlist(lapply(colnames(mutation_targ_df)[2:ncol(mutation_targ_df)], function(x) 
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-"))) # Fix the sample IDs
 
+# Add the additional un-included genes (those with no mutations in any patient)
+allgene_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/allgene_targets.csv",
+                            header = TRUE, check.names = FALSE, row.names = 1)
+all_gene_names <- unlist(lapply(allgene_targets$ensg, function(x) 
+  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == x,'external_gene_name'])), collapse = ";")))
+all_gene_names <- unique(all_gene_names)
+unincluded_genes <- setdiff(all_gene_names, mutation_targ_df$Gene_Symbol)
+unincluded_gene_df <- data.frame(matrix(nrow = length(unincluded_genes), ncol = ncol(mutation_targ_df)))
+unincluded_gene_df[is.na(unincluded_gene_df)] <- 0
+colnames(unincluded_gene_df) <- colnames(mutation_targ_df)
+unincluded_gene_df$Gene_Symbol <- unincluded_genes
+
+mutation_targ_df <- rbind(mutation_targ_df, unincluded_gene_df)
+
+# If Swissprot IDs are not already added:
+#mutation_targ_df$Swissprot <- unlist(lapply(mutation_targ_df$Gene_Symbol, function(x) 
+# paste(unique(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'uniprot_gn_id']), collapse = ";")))
+
+
 
 ############################################################
 # IMPORT REGULATORY PROTEIN MUTATION FILES
@@ -143,6 +162,8 @@ colnames(mutation_targ_df)[2:ncol(mutation_targ_df)] <- unlist(lapply(colnames(m
 
 
 ### NON-TUMOR-NORMAL MATCHED ###
+mutation_regprot_df <- fread(paste(main_path, "Mutation/iprotein_results_nonsynonymous.csv", sep = ""),
+                             header = TRUE)   # I-Protein, all ligands
 mutation_regprot_df <- fread(paste(main_path, "Mutation/iprotein_results_missense_nonsense.csv", sep = ""),
                                 header = TRUE)   # I-Protein, all ligands
 mutation_regprot_df <- fread(paste(main_path, "Mutation/iprotein_results_missense_nucacids.csv", sep = ""),
@@ -442,6 +463,7 @@ subset_by_intersecting_ids <- function(intersecting_patients, df, colNames) {
     just_patients <- unlist(lapply(colnames(df)[2:ncol(df)], function(x)
       unlist(strsplit(x, "-", fixed = TRUE))[1]))
     cols_to_keep <- as.numeric(c(1,(which(just_patients %fin% intersecting_patients)+1)))
+    print(length(cols_to_keep))
     df <- as.data.frame(df)
     df_adj <- df[, cols_to_keep]
     
@@ -539,6 +561,7 @@ write.csv(patient_sample_df_sub, paste(main_path, "Linear Model/Tumor_Only/Patie
 
 #OPT:
 write.table(intersecting_patients, paste(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt", sep = ""))
+intersecting_patients <- read.table(paste(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt", sep = ""))[,1]
 
 ############################################################
 ############################################################
@@ -591,6 +614,72 @@ recombine_into_df_and_write(ibindingpos_prots, ibindingpos_prots_ensg, "ibinding
 recombine_into_df_and_write(ibindingpos_prots_nucacids, ibindingpos_prots_nucacids_ensg, "ibindingpos_nucacids", prot_path)
 
 
+
+#' Make regulatory input data frame using a mutational threshold (e.g. >=5%), with an option
+#' to limit to known driver genes
+#' @param regprot_df a regulatory mutation data frame for a given specificity/ mutation type
+#' @param mut_freq_thres a mutation frequency threshold (e.g. 5%) for which to include the 
+#' given gene
+#' @param patient_ids a set of unique patient/ sample IDs for the given cohort
+#' @param driver_df if not NA, use known driver DF to limit to only proteins with known drivers
+#' @param all_genes_id_conv a gene ID conversion file from bioMart
+create_regulatory_prot_input_df <- function(regprot_df, mut_freq_thres, patient_ids, 
+                                            driver_df, all_genes_id_conv) {
+  
+  # Calculate the minimum number of mutated samples needed to keep a given gene
+  mut_count_thres <- mut_freq_thres * length(patient_ids)
+  print(mut_count_thres)
+  
+  # Subset the regprot data frame using this
+  regprot_df_rows <- lapply(1:nrow(regprot_df), function(i) {
+    patients <- unlist(strsplit(as.character(unlist(regprot_df[i, 'Patient'])), ";", fixed = TRUE))
+    # Limit to just patients in the intersecting set
+    patients_justID <- unlist(lapply(patients, function(x) unlist(strsplit(x, "-", fixed = TRUE))[1]))
+    patients <- patients[which(patients_justID %in% patient_ids)]
+    if (length(patients) > mut_count_thres) {return(regprot_df[i,])}
+    else {return(NA)}
+  })
+  regprot_df_rows <- regprot_df_rows[!is.na(regprot_df_rows)]
+  
+  # Extract the ENSG and Swissprot IDs
+  uniprot_ids <- unique(unlist(lapply(regprot_df_rows, function(x) x$Swissprot)))
+  ensg_ids <- unlist(lapply(uniprot_ids, function(x) 
+    paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == x, 
+                                   'ensembl_gene_id']), collapse = ";")))
+  
+  output_df <- data.frame("swissprot_ids" = uniprot_ids, "ensg_ids" = ensg_ids)
+  
+  # If driver_df is not NA, then we want to limit to only driver genes
+  if(!is.na(driver_df)) {
+    output_df <- output_df[which(ensg_ids %fin% driver_df$ensembl_gene_id),]
+  }
+  
+  return(output_df)
+}
+
+# Call function
+regprot_input_df_all_5perc <- create_regulatory_prot_input_df(mutation_regprot_df, 0.05, 
+                                                              intersecting_patients, NA,
+                                                              all_genes_id_conv)
+regprot_input_df_driver_5perc <- create_regulatory_prot_input_df(mutation_regprot_df, 0.05, 
+                                                              intersecting_patients, driver_gene_df,
+                                                              all_genes_id_conv)
+
+# Limit just to particular subtypes
+patient_set_lumA <- intersect(read.table(paste0(main_path, "Patient Subsets/Luminal.A_patient_ids.txt"), header = TRUE)[,1], intersecting_patients)
+patient_set_lumB <- intersect(read.table(paste0(main_path, "Patient Subsets/Luminal.B_patient_ids.txt"), header = TRUE)[,1], intersecting_patients)
+patient_set_basal <- intersect(read.table(paste0(main_path, "Patient Subsets/Basal_patient_ids.txt"), header = TRUE)[,1], intersecting_patients)
+patient_set_her2 <- intersect(read.table(paste0(main_path, "Patient Subsets/HER2_patient_ids.txt"), header = TRUE)[,1], intersecting_patients)
+
+
+regprot_input_df_all_5perc_missense_lumA <- create_regulatory_prot_input_df(mutation_regprot_df_missense, 0.05, 
+                                                                            patient_set_lumA, NA,
+                                                                            all_genes_id_conv)
+
+# Write to files
+write.csv(regprot_input_df_all_5perc, paste0(prot_path, "Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_drivers_missense.csv"))
+
+
 ############################################################
 ############################################################
 # 5. MAKE TESTER TARGETS DATAFRAME FOR GIVEN REG. PROTEIN
@@ -602,7 +691,7 @@ sample_protein_name <- "P53"
 
 
 ### OPTION 1: CURATED TARGETS ###
-# Use the I-Protein curated targets dataframe, since it is the most comprehensive
+# Use the I-Protein curated targets data frame, since it is the most comprehensive
 curated_targets_df <- fread(paste(main_path, "Curated TF Data/iprotein_curated_targets_df_full.csv", sep = ""), 
                                header = TRUE)
 sample_targets <- curated_targets_df[,colnames(curated_targets_df) == sample_protein_name] 

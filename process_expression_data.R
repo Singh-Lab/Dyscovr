@@ -13,6 +13,7 @@ library(gdata)
 library(matrixStats)
 library(data.table)
 library("gplots")
+library(preprocessCore)
 
 # This file processes the various expression data files for each patient to:
 # Combine the files across various patients into a single data frame that we can 
@@ -391,16 +392,17 @@ visualize_de_by_mut_status <- function(d, target_group, method, thres, all_genes
     print(length(pval_df$Pvalue))
     print(hist(pval_df$Pvalue))
     print(as.numeric(pval_df$Pvalue))
-    return(pval_df)
-    qobj <- qvalue(as.numeric(pval_df$PValue))
-    pval_df$QValue <- qobj$qvalues
+    qobj <- qvalue(as.numeric(pval_df$Pvalue))
+    pval_df$Qvalue <- qobj$qvalues
     
-    pval_df_sub <- pval_df[pval_df$QValue < thres, ]
+    pval_df_sub <- pval_df[pval_df$Qvalue < thres, ]
     
     # Add gene names
-    pval_df_sub$gene.name <- unlist(lapply(pval_df_sub$gene, function(ensg)
-      paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == ensg, 
-                                            'external_gene_name'])), collapse = ";")))
+    pval_df_sub$gene.name <- unlist(lapply(pval_df_sub$gene, function(ensg) {
+      return(paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == ensg, 
+                                     'external_gene_name'])), collapse = ";"))
+    }))
+      
     print(head(pval_df_sub))
     return(pval_df_sub)
   }
@@ -715,10 +717,6 @@ expression_dataframe_fpkm <- expression_dataframe_fpkm[,which(unlist(lapply(expr
 expression_dataframe_counts <- expression_dataframe_counts[grepl("ENSG", rownames(expression_dataframe_counts)),]
 expression_dataframe_fpkm <- expression_dataframe_fpkm[grepl("ENSG", rownames(expression_dataframe_fpkm)),]
 
-# OPT: use edgeR to filter out any genes that are lowly expressed
-counts_matrix <- as.matrix(expression_dataframe_counts)
-keep <- filterByExpr(counts_matrix, group = )
-counts_matrix <- counts_matrix[keep,]
 
 expression_dataframe_counts <- as.data.frame(counts_matrix)
 
@@ -773,7 +771,7 @@ write.csv(expression_dataframe_filt, paste0(output_path, "ALL_tmm_normalized_exp
 
 ############################################################
 ############################################################
-### FILTER BY MEAN/MEDIAN EXPRESSION: COUNTS ONLY ###
+### FILTER BY MEAN/MEDIAN EXPRESSION ###
 ############################################################
 ############################################################
 
@@ -869,32 +867,55 @@ write.csv(expression_dataframe_counts_minMed10_perCt, paste0(output_path, "expre
 ### QUNATILE- OR RANK-NORMALIZE EXPRESSION: COUNTS ONLY ###
 ############################################################
 ############################################################
-# OPT: COUNTS DATA ONLY, Rank or quantile normalize the expression data frame
-#' Rank or quantile normalize the expression data frame and return a rank-normalized version
+#' Quantile normalize the expression data frame and return a normalized version
 #' (ranked on a per-gene basis)
 #' Function taken from https://bioinformatics.stackexchange.com/questions/6863/how-to-quantile-normalization-on-rna-seq-counts
 #' A useful paper on types of quantile normalization for gene expression data: https://www.nature.com/articles/s41598-020-72664-6#:~:text=The%20quantile%20normalization%20(QN)%20procedure,rank%20with%20this%20average%20value.
 #' @param df a raw count expression data frame
 quantile_normalize <- function(df){
-  df_rank <- apply(df, MARGIN = 2, function(y) rank(y, ties.method="average"))
-  df_sorted <- as.data.frame(apply(df, MARGIN = 2, function(x) {
-    sort(x, na.last = NA)}))
-  df_mean <- apply(df_sorted, MARGIN = 1, mean)
+  df_rank <- apply(df, MARGIN = 2, function(y) rank(y, ties.method="average", 
+                                                    na.last = NA))
+  df_sorted <- as.data.frame(apply(df, MARGIN = 2, sort))
+  row_means <- rowMeans(df_sorted)
   
-  index_to_mean <- function(my_index, my_mean){
-    return(my_mean[my_index])
+  index_to_mean <- function(my_index, my_means){
+    return(my_means[my_index])
   }
   
   df_final <- as.data.frame(apply(df_rank, MARGIN = 2, function(y) {
-    index_to_mean(y, my_mean = df_mean)
+    index_to_mean(y, my_means = row_means)
   }))
   rownames(df_final) <- rownames(df)
   return(df_final)
 }
 
+#' Quantile normalize the expression data frame and return a rank-normalized version
+#' (ranked on a per-gene basis)
+#' Function uses the "preprocessCore" package's normalize.quantiles function
+#' @param df a raw count expression data frame
+quantile_normalize_2 <- function(df) {
+  df_norm <- as.data.frame(normalize.quantiles(as.matrix(df), keep.names = TRUE))
+  #colnames(df_norm) <- colnames(df)
+  #rownames(df_norm) <- rownames(df)
+  sapply(df_norm, function(x) quantile(x, probs = seq(0, 1, 1/4)))
+  
+  return(df_norm)
+}
+
+#' Apply an inverse normal transformation per gene such that, for each gene, its
+#' expression across samples are matched to the quantiles of a standard normal 
+#' distribution. Apply to quantile-normalized DF.
+#' @param df a quantile-normalized expression DF
+inverse_normal_transform <- function(df) {
+  new_df <- apply(df, MARGIN = 2, function(x) qnorm((rank(x,na.last=NA)-0.5)/sum(!is.na(x))))
+  return(new_df)
+}
+
 #expression_df_quantile_norm <- quantile_normalize(expression_dataframe_counts)
 expression_df_quantile_norm <- quantile_normalize(expression_dataframe_counts_minMedX)
 expression_df_quantile_norm <- quantile_normalize(expression_dataframe_counts_minAvgX)
+expression_df_edgeRfilt_quantile_norm <- quantile_normalize(d$counts)
+expression_df_fpkm_filt_quantile_norm <- quantile_normalize(expression_dataframe_fpkm_filt)
 
 # Write to DF
 write.csv(expression_df_quantile_norm, paste(output_path, "expression_quantile_norm_DF.csv", sep = ""))
@@ -937,23 +958,23 @@ duplicate_info <- rbindlist(duplicate_info_list)
 
 ############################################################
 ############################################################
-### Z-SCORE NORMALIZATION: RPKM VALUES ###
+### Z-SCORE NORMALIZATION: RPKM/ FPKM VALUES ###
 ############################################################
 ############################################################
 #' Perform a z-score normalization of the given expression DF
-#' Steps: if RPKM values, subtract the overall average gene 
+#' Steps: if FPKM values, subtract the overall average gene 
 #' abundance from the RPKM-normalized expression for each gene, 
 #' and divide that result by the standard deviation (SD) of 
 #' all of the measured counts across all samples.
 #' @param expression_df a gene by sample expression DF with 
 #' RPKM count values
 zscore_normalize <- function(expression_df) {
-  exp_rowMeans <- rowMeans(expression_df)
-  exp_rowSds <- rowSds(expression_df)
+  exp_rowMeans <- rowMeans(as.matrix(expression_df))
+  exp_rowSds <- rowSds(as.matrix(expression_df))
   
   new_cols <- lapply(1:ncol(expression_df), function(i) {
     zscores <- unlist(lapply(1:nrow(expression_df), function(j) {
-      gene_rpkm <- expression_df[i, j]
+      gene_rpkm <- expression_df[j, i]
       gene_mean <- exp_rowMeans[j]
       gene_sd <- exp_rowSds[j]
       
@@ -968,6 +989,9 @@ zscore_normalize <- function(expression_df) {
   
   return(new_df)
 }
+
+
+expression_df_edgeRfilt_zscore_norm <- zscore_normalize(d$counts)
 
 
 ############################################################

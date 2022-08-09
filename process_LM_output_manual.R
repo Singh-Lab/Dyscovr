@@ -111,6 +111,15 @@ qqplot_pvals <- function(results_table) {
   qqline(results_table$p.value, col = "steelblue", lwd = 2)
 }
 
+#' Function plots a Q-Q plot to visualize the distribution of standard error valeus
+#' and assess whether they come from a uniform distribution
+#' @param results_table a master DF produced from run_linear_model()
+qqplot_stderror <- function(results_table) {
+  qqnorm(results_table$std.error, pch = 1, frame = FALSE)
+  qqline(results_table$std.error, col = "steelblue", lwd = 2)
+}
+
+
 # Call this function
 #qqplot_pvals(master_df)
 
@@ -652,7 +661,7 @@ terms_counts_df <- data.frame('term' = terms, 'freq' = terms_counts)
 pie(terms_counts_df$freq, labels = terms_counts_df$term, main = paste("Most Significant Covariates (Top", paste(x, "from All Tests)")))
 
 
-# Get the proportions of all the tests with p-value <0.05
+# Get the proportions of all the tests with q-value <0.05
 master_df_sig <- master_df[master_df$p.value < 0.05,]
 terms <- unique(master_df_sig$term)
 terms_counts <- unlist(lapply(terms, function(x) nrow(master_df_sig[master_df_sig$term == x,])))

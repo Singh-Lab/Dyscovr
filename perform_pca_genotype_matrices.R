@@ -69,7 +69,8 @@ genotype_matrix_list <- lapply(genotype_matrices_fns, function(fn) {
   return(gn_matrix_gds)
 })
 
-#TODO: do I have to merge the VCF files before or after I convert to GDS?
+# OPTION 3: GENOTYPE SNP ARRAY FILES
+genotype_matrices_fns <- list.files(paste0(main_path, "SNP6_files/"), pattern = ".txt")
 
 
 ############################################################
@@ -614,3 +615,288 @@ my_comparisons <- list(c("white", "black or african american"), c("asian", "blac
                         c("black or african american", "not reported"))
 ggboxplot(pcs_new, x = "race", y = "V3", palette = "jco", ylab = "PC2") + 
   stat_compare_means(comparisons = my_comparisons) #+ stat_compare_means(label.y = 50)
+
+
+
+############################################################
+### ALTERNATIVE: MANUALLY CREATE FILES FOR EIGENSTRAT's
+### smartpca FUNCTION USING SNP6 GENOTYPE ARRAY FILES
+############################################################
+
+# Information about the input file formats: https://reich.hms.harvard.edu/software/InputFileFormats
+
+# Three necessary file types: 
+  # 1. Genotype file (1 line per SNP, each with one character per individual, no spaces)
+    # 0 means no copies of reference allele, 1 means one copy of ref. allele, 
+    # 2 means two copies, 9 is missing data
+    # SNPS MUST MATCH THOSE FROM THE SNP FILE, IN SAME ORDER
+  # 2. SNP file (1 SNP per line, with four columns)
+    # SNP_ID (ex. rs0000)
+    # Chromosome_Num (use 23 for X chromosome)
+    # Genetic_Position (Morgans or centiMorgans; can use 0 for everything for smartpca)
+    # Physical_Position (bases)
+    # Previous letter
+    # New letter
+  # 3. Indiv. file (1 line per individual, with three columns)
+    # Sample_ID (ex. SAMPLE0, any type of ID will do)
+    # Gender (M (male), F (female), or U (unknown))
+    # Status (Case, Control, or Ignore; can also use your own labels or not put anything)
+
+# Currently using MAF file, which captures mutations -- do I want to use VCF files 
+# for normal patients instead to capture normal variation?
+
+# Define outpath
+outpath <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Eigensoft Files/"
+#outpath <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Eigensoft Files/"
+
+
+############################################################
+#' Create compiled genotype data frame across patients, using the SNP6 genotype files
+#' produced using the birdseed tool
+#' @param path_to_genotype_files a path to the directory with SNP6 genotype files for
+#' all patients
+create_compiled_genotype_df <- function(path_to_genotype_files) {
+  genotype_files <- list.files(path_to_genotype_files, pattern = "birdseed.data.txt")
+  
+  new_tables <- lapply(1:length(genotype_files), function(f) {
+    fn <- genotype_files[i]
+    
+  })
+}
+
+
+############################################################
+#' Given a path to SNP6 genotype files and corresponding clinical file from the TCGA, creates a 
+#' ".indiv" file with the above format to be used in Eigensoft's smartpca function.
+#' @param path_to_genotype_files a path to the directory with SNP6 genotype files for
+#' all patients
+#' @param clinical_file an input clinical file from the TCGA that corresponds to
+#' the same patient set 
+#' @param ct_name the name of the cancer type in question, is "allCancers" if 
+#' looking pan-cancer
+create_indiv_file <- function(path_to_genotype_files, clinical_file, ct_name) {
+  
+  # Get the duplicated patient IDs
+  unique_tcga_tumor_barcodes <- unique(maf$Tumor_Sample_Barcode)
+  patient_ids_from_tsbs <- unlist(lapply(unique_tcga_tumor_barcodes, function(x) 
+    unlist(strsplit(x, "-", fixed = TRUE))[3]))
+  indices_of_duplicates <- which(duplicated(patient_ids_from_tsbs))
+  ids_of_duplicates <- unique(patient_ids_from_tsbs[indices_of_duplicates])
+  
+  # Get the gender information and ID for each sample
+  new_row_list <- lapply(1:nrow(maf), function(i) {
+    # Get sample ID
+    full_id <- maf[i, 'Tumor_Sample_Barcode']
+    samp_id <- paste(unlist(strsplit(full_id, "-", fixed = TRUE))[1:3], 
+                     collapse = "-")
+    patient_id <- unlist(strsplit(samp_id, "-", fixed = TRUE))[3]
+    
+    # Get the gender corresponding to this ID
+    gender <- unique(unlist(clinical_file[clinical_file$case_submitter_id == samp_id, 'gender']))
+    
+    # Handle duplicate patient cases
+    if (patient_id %fin% ids_of_duplicates) {
+      # When it comes to this patient, is this the first, second, third, etc. time we're 
+      # encountering one of their samples?
+      all_patient_samp_ids <- unique(maf$Tumor_Sample_Barcode[grepl(patient_id, maf$Tumor_Sample_Barcode)])
+      which_samp <- which(full_id == all_patient_samp_ids)
+      if(!which_samp == 1) {samp_id <- paste(samp_id, which_samp, sep = "-")}
+    }
+    
+    print(samp_id)
+    print(gender)
+    print(ct_name)
+    
+    # Create a new row and return
+    new_row <- data.frame(samp_id, gender, ct_name)
+    
+    return(new_row)
+  })
+  print(head(new_row_list))
+  
+  # Bind into a table for easier writing
+  tab <- rbindlist(new_row_list)
+  
+  # Remove duplicated entries
+  tab <- distinct(tab)
+  
+  return(tab)
+}
+
+############################################################
+
+#' Given a MAF file, creates a ".gen" file of the format given above to be used
+#' in Eigensoft's smartpca function
+#' @param maf an input maf file, either pan-cancer or for a particular cancer type
+create_genotype_file <- function(maf, snp_tab) {
+  
+  # Get all unique samples 
+  samples <- unique(maf$Tumor_Sample_Barcode)
+  
+  # For each of the SNPs in the SNP file, get the genotypes of that SNP for 
+  # every sample
+  genotype_rows <- lapply(snp_tab$bp_position, function(bp) {
+    # Subset the maf file to SNPs at this position
+    maf_sub <- maf[maf$Start_Position == bp,]
+    
+    # For each patient, if they are not in the DF, give them a 2, if they are,
+    # determine if they have 1 or 0 copies of the reference allele
+    genotype <- unlist(lapply(samples, function(samp) {
+      if (samp %fin% maf_sub$Tumor_Sample_Barcode) {
+        samp_row <- maf_sub[maf_sub$Tumor_Sample_Barcode == samp,]
+        if(samp_row$Tumor_Seq_Allele1 == samp_row$Reference_Allele) {
+          if(samp_row$Tumor_Seq_Allele2 == samp_row$Reference_Allele) {return(2)}
+          else {return(1)}
+        } else {
+          if (samp_row$Tumor_Seq_Allele2 == samp_row$Reference_Allele) {return(1)}
+          else{return(0)}
+        }
+      } else {return(2)}
+    }))
+    
+    # Make the genotype into a string to return
+    genotype_str <- paste(genotype, collapse = "")
+    
+    return(genotype_str)
+  })
+  
+  # Recombine this list of genotype strings per SNP into a data frame
+  #genotype_tab <- do.call(rbind, genotype_rows)
+  
+  return(genotype_rows)
+}
+
+
+############################################################
+
+#' Given a MAF file, creates a ".snp" file of the format given above to be used
+#' in Eigensoft's smartpca function
+#' @param maf an input maf file, either pan-cancer or for a particular cancer type
+create_snp_file <- function(maf) {
+  
+  new_row_list <- lapply(1:nrow(maf), function(i) {
+    
+    # Get the information from the "vcf_region" column, if it exists
+    # In the format: chrx:XXXXXXXX:rsYYYYYYYYY:C:T"
+    if ('vcf_region' %in% colnames(maf)) {
+      vcf_info <- maf[i, 'vcf_region']
+      vcf_info_spl <- unlist(strsplit(vcf_info, ":", fixed = TRUE))
+      
+      # Extract individual necessary components
+      chrom_num <- unlist(strsplit(vcf_info_spl[1], "r", fixed = TRUE))[2]
+      bp_position <- vcf_info_spl[2]
+      rsID <- vcf_info_spl[3]
+      prior_base <- vcf_info_spl[4]
+      new_base <- vcf_info_spl[5]
+      
+    } else {
+      # Remove mitochondrial SNPs
+      if (!((maf[i, 'Chromosome'] == "") | (maf[i, 'Chromosome'] == "M"))) {
+        chrom_num <- unlist(strsplit(maf[i, 'Chromosome'], "r", fixed = TRUE))[2]
+        bp_position <- maf[i, 'Start_Position']
+        rsID <- maf[i, 'dbSNP_RS']
+        # Replace unknown SNPs with a generic name so that we can retain them
+        prior_base <- maf[i, 'Reference_Allele']
+        new_base <- maf[i, 'Allele']
+      }
+    }
+    
+    if(rsID == "novel" | rsID == "" | rsID == ".") {
+      rsID <- paste("rs", bp_position, sep = "")
+    }   # is this necessary? Or should we eliminate them entirely?
+    
+    # Return as a list
+    new_row <- data.frame(rsID, chrom_num, 0, bp_position, prior_base, new_base)
+    
+    return(new_row)
+  })
+  print(head(new_row_list))
+  
+  # Bind into a table for easier writing
+  tab <- rbindlist(new_row_list)
+  
+  # Remove any duplicate SNPs found in multiple patients
+  tab <- tab[!duplicated(tab)]
+  
+  
+  return(tab)
+}
+
+
+
+#' Runs the above three functions to generate and write the necessary files for 
+#' eigensoft's smartpca function
+#' @param maf_f a mutation (.maf) file for the given cohort
+#' @param ct_name a string with the name of the cancer type, or "allCancers" if 
+#' we are looking at pan-cancer
+#' @param clinical_file an associated clinical file from the TCGA
+#' @param outpath a path to the location to write the eigensoft files to
+get_eigensoft_files <- function(maf_f, ct_name, clinical_file, outpath) {
+  
+  # Create all three file types for this cancer type, & write each to a file at the outpath given
+  snp_tab <- create_snp_file(maf_f)
+  fwrite(snp_tab, paste(outpath, paste(ct_name, "_snp_file.snp", sep = ""), sep = ""), sep = " ")
+  
+  indiv_tab <- create_indiv_file(maf_f, clinical_file, ct_name)
+  fwrite(indiv_tab, paste(outpath, paste(ct_name, "_indiv_file.indiv", sep = ""), sep = ""), sep = " ")
+  
+  genotype_tab <- create_genotype_file(maf_f, snp_tab)
+  fwrite(genotype_tab, paste(outpath, paste(ct_name, "_genotype_file.eigenstratgeno", sep = ""), sep = ""), sep = "\n")
+  
+}
+
+
+# BRCA
+brca_matrix_fn <- paste(main_path, "MAF_files/TCGA.BRCA.muse.cd0d1636-ae95-4141-94b3-8218eb3b8b25.DR-10.0.protected.maf", sep = "")
+brca_matrix <- import.MAF(brca_matrix_fn, sep = "\t", is.TCGA = TRUE, 
+                          merge.mutation.types = FALSE, to.TRONCO = FALSE) 
+
+# P-C
+genotype_matrices_fns <- list.files(paste(main_path, "MAF_files/", sep = ""), pattern = ".muse")
+genotype_matrix_list <- lapply(genotype_matrices_fns, function(fn) {
+  full_fn <- paste(main_path, paste("MAF_files/", fn, sep = ""), sep = "")
+  gn_matrix <- import.MAF(full_fn, sep = "\t", is.TCGA = TRUE, 
+                          merge.mutation.types = FALSE, to.TRONCO = FALSE) 
+  return(gn_matrix)
+})
+
+# For P-C, merge all the MAF files into one
+genotype_matrix_pc <- do.call(rbind, genotype_matrix_list)
+
+
+# Get the clinical files of interest
+# TUMOR-NORMAL MATCHED
+brca_clinical_df <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/clinical_data_subset.csv",
+                          header = TRUE)
+# NON-TUMOR-NORMAL MATCHED
+brca_clinical_df <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/clinical.csv",
+                          header = TRUE)
+
+
+pc_clinical_df <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TCGA Data (ALL)/clinical_data_subset.csv",
+                        header = TRUE)
+
+
+# Limit the MAF files to only include patients in the clinical DFs
+brca_matrix$tcga_id <- unlist(lapply(brca_matrix$Tumor_Sample_Barcode, function(x) 
+  paste(unlist(strsplit(x, "-", fixed = TRUE))[1:3], collapse = "-")))
+#brca_matrix_sub <- brca_matrix[brca_matrix$tcga_id %fin% unique(brca_clinical_df$tcga_barcode),]
+brca_matrix_sub <- brca_matrix[brca_matrix$tcga_id %fin% unique(brca_clinical_df$case_submitter_id),]
+
+genotype_matrix_pc$tcga_id <- unlist(lapply(genotype_matrix_pc$Tumor_Sample_Barcode, function(x) 
+  paste(unlist(strsplit(x, "-", fixed = TRUE))[1:3], collapse = "-")))
+genotype_matrix_pc_sub <- genotype_matrix_pc[genotype_matrix_pc$tcga_id %fin% unique(pc_clinical_df$tcga_barcode),]
+
+
+# Call this function
+
+# BRCA
+get_eigensoft_files(brca_matrix_sub, "BRCA", brca_clinical_df, outpath)
+
+# Pan-Cancer
+get_eigensoft_files(genotype_matrix_pc_sub, "allCancers", pc_clinical_df, outpath, TRUE)
+
+
+
+
+

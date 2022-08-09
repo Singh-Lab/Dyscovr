@@ -1,6 +1,6 @@
 ############################################################
 ### Process Gene-Level CNA Data 
-### Written By: Sara Geraghty, August 2020
+### Written By: Sara Camilli, August 2020
 ############################################################
 
 # This file processes the gene-level CNA (Score or Raw Value) data file(s) in order to:
@@ -17,13 +17,18 @@
 
 library(TCGAbiolinks)
 library(data.table)
-library(EnsDb.Hsapiens.v86)
+library(Rfast)
+library(parallel)
 
 path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
 #path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TCGA Data (ALL)/"
 
 output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/CNV/"
 #output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/CNV/"
+
+
+# Generalized ID conversion table from BiomaRt
+all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/all_genes_id_conv.csv", header = TRUE)
 
 
 ############################################################
@@ -377,6 +382,87 @@ write.table(bucketed_cna_df, paste(output_path, "Gene-level Raw/CNV_DF_bucketed_
 ### CREATE A DATA FRAME WITH THE AMPLIFICATION/ DELETION 
 ### STATUS OF NEIGHBORING TUMOR DRIVER GENES
 ############################################################
+#' For every human gene, get the two most proximal cancer driver genes on the same
+#' chromosome (return a table with rownames as the human genes, column one as the most
+#' left-flanking cancer-driver gene, and column two as the most right-flanking cancer 
+#' driver gene)
+#' @param all_genes_id_conv a bioMart file with positional info for all genes of interest
+#' @param expression_df an expression DF with all genes of interest
+#' @param driver_gene_df a DF with driver gene information
+create_proximal_driver_table <- function(all_genes_id_conv, expression_df, driver_gene_df, check_for_expr) {
+  genes <- rownames(expression_df)
+  
+  neighbor_dfs <- lapply(1:length(genes), function(i) {
+    g <- genes[i]
+    print(paste("Gene", paste(i, paste("/", length(genes)))))
+    
+    all_genes_id_conv_sub <- all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == g, ]
+    
+    g_start <- all_genes_id_conv_sub$start_position
+    g_end <- all_genes_id_conv_sub$end_position
+    g_chrom <- all_genes_id_conv_sub$chromosome_name
+    g_strand <- all_genes_id_conv_sub$strand
+
+    all_genes_id_conv_chrom <- all_genes_id_conv[(all_genes_id_conv$chromosome_name == g_chrom) & 
+                                                   (all_genes_id_conv$strand == g_strand),]
+    upstr_neighbors <- all_genes_id_conv_chrom[all_genes_id_conv_chrom$end_position <= g_end, ]
+    downstr_neighbors <- all_genes_id_conv_chrom[all_genes_id_conv_chrom$start_position >= g_start,]
+    
+    #' Helper function that gets the closest neighboring up- or downstream
+    #' driver gene to the given gene
+    #' @param neighbors a table with only the neighbors of the given target
+    #' gene in a particular direction
+    #' @param driver_gene_df a driver gene DF
+    #' @param direction "up" or "down" to indicate the direction of search
+    get_neighbor <- function(neighbors, driver_gene_df, direction) {
+      
+      if(nrow(neighbors) == 0) {return(NA)}
+      
+      if(direction == "up") {neighbors <- neighbors[order(neighbors$start_position, decreasing = TRUE),]}
+      else {neighbors <- neighbors[order(neighbors$end_position, decreasing = FALSE),]}
+      
+      # Get the nearest driving neighbor
+      for(i in 1:nrow(neighbors)) {
+        nearest_neighbor <- as.character(neighbors[i, 'ensembl_gene_id'])
+        if(nearest_neighbor %fin% driver_gene_df$ensembl_gene_id) {
+          return(nearest_neighbor)
+        }
+      }
+      return(NA)
+    }
+    
+    upstr_neighbor <- get_neighbor(upstr_neighbors, driver_gene_df, "up")
+    downstr_neighbor <-  get_neighbor(downstr_neighbors, driver_gene_df, "down")
+    
+    neighbor_df <- data.frame("Upstream_Neighbor" = upstr_neighbor, 
+                              "Downstream_Neighbor" = downstr_neighbor)
+    rownames(neighbor_df) <- g
+    return(neighbor_df)
+  })
+  
+  full_neighbor_df <- do.call(rbind, neighbor_dfs)
+  full_neighbor_df <- na.omit(full_neighbor_df)
+  return(full_neighbor_df)
+}
+
+
+
+#dummy_cna_file <- read.csv(paste0(path_to_cna_files, "TCGA-BRCA.0c86eab9-cfc8-4a03-823b-4331c43d2038.gene_level_copy_number.tsv"),
+                          # header = TRUE, check.names = FALSE, row.names = 1, sep = "\t")
+
+all_genes_id_conv_sub <- as.data.table(all_genes_id_conv[,c("ensembl_gene_id", "chromosome_name", 
+                                                            "start_position", "end_position", "strand")])
+all_genes_id_conv_sub <- distinct(all_genes_id_conv_sub)
+all_genes_id_conv_sub <- all_genes_id_conv_sub[all_genes_id_conv_sub$ensembl_gene_id %fin% rownames(expression_df),]
+
+proximal_driver_gene_table <- create_proximal_driver_table(all_genes_id_conv_sub, expression_df, driver_gene_df)
+
+proximal_driver_gene_table <- fread(paste0(output_path, "upstream_downstream_driver_neighbors.csv"), 
+                                       header = TRUE, check.names = FALSE)
+colnames(proximal_driver_gene_table)[1] <- "Gene_ID"
+
+
+
 #' Using the ASCAT2 CNA files, along with an expression file and 
 #' a table of known oncogenes/ tumor suppressors, creates a new table that,
 #' for all genes and samples, gives the CNA
@@ -387,40 +473,45 @@ write.table(bucketed_cna_df, paste(output_path, "Gene-level Raw/CNV_DF_bucketed_
 #' which have positions of the CNAs in addition to the gene
 #' @param expression_df an expression data frame with the TMM-normalized 
 #' expression value for each sample (y-axis) and each gene (x-axis)
-#' @param driver_gene_df a table of known driver genes with their tumor
-#' suppressor/ oncogene status
+#' @param proximal_driver_gene_df a data frame from the create_proximal_driver_table
+#' function (neighboring upstream and downstream drivers)
 #' @param sample_sheet a GDC sample sheet to link patient UUID to TCGA ID
 #' @param cna_df a compiled CNA data frame from the previous section
 create_flanking_cna_status_df <- function(path_to_raw_cna_files, expression_df, 
-                                          driver_gene_df, sample_sheet, cna_df) {
+                                          proximal_driver_gene_df, sample_sheet, cna_df) {
   # Get the names of the CNA files for each patient
   cna_files <- list.files(path_to_raw_cna_files, pattern = ".gene_level_copy_number")
+  outpath <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/CNV/Patient-Specific Flanking Driver CNA DFs/"
+  
   
   # For each of these files, import the DF and extract the necessary info
   # to create a mini-DF for each patient
-  patient_dfs <- lapply(1:length(cna_files), function(i) {
+  patient_dfs <- mclapply(1:length(cna_files), function(i) {
     fn <- cna_files[i]
-    print(paste("File", paste(i, paste("of", length(cna_files)))))
-    curr_file <- fread(paste0(path_to_raw_cna_files, fn), header = TRUE, 
-                          check.names = FALSE, sep = "\t")
-    curr_file$gene_id <- unlist(lapply(curr_file$gene_id, function(x)
+    curr_file <- fread(paste0(path_to_raw_cna_files, fn), header = TRUE, sep = "\t")
+    curr_file$gene_id <- unlist(lapply(as.character(curr_file$gene_id), function(x)
       unlist(strsplit(x, ".", fixed = TRUE))[1]))
-    curr_file <- curr_file[curr_file$gene_id %fin% rownames(expression_df),]
-    
-    sample_id <- unlist(strsplit(sample_sheet[sample_sheet$`File Name` == fn, 'Sample ID'], 
+    curr_file <- curr_file[curr_file$gene_id %fin% expression_df$Gene_ID,]
+    curr_file <- na.omit(curr_file)
+
+    sample_id <- unlist(strsplit(as.character(sample_sheet[sample_sheet$`File Name` == fn, 'Sample ID']), 
                                  ",", fixed = TRUE))[1]
-    sample_id_short <- paste(unlist(strsplit(sample_id, "-", fixed = TRUE))[3:4], collapse = "-")
+    sample_id_short <- unlist(strsplit(sample_id, "-", fixed = TRUE))[3]
     print(sample_id_short)
     
     outdf <- data.frame("gene_id" = curr_file$gene_id, "gene_name" = curr_file$gene_name,
                         "copy_number" = curr_file$copy_number)
-    #outdf$gene_id <- unlist(lapply(outdf$gene_id, function(x) unlist(strsplit(x, ".", fixed = TRUE))[1]))
+    outdf$gene_id <- unlist(lapply(curr_file$gene_id, function(x) 
+      unlist(strsplit(x, ".", fixed = TRUE))[1]))
     outdf$sample_id <- rep(sample_id_short, times = nrow(outdf))
     outdf <- outdf[!is.na(outdf$copy_number),]
+    
+    outdf <- merge(outdf, get_flanking_gene_cnas(outdf, curr_file, proximal_driver_gene_df, 
+                                                 expression_df, cna_df), by = c("gene_id", "copy_number"))
+    
     print(head(outdf))
-
-    outdf <- merge(outdf, get_flanking_gene_cnas(outdf, curr_file, driver_gene_df, 
-                                                 expression_df, cna_df), by = "gene_name")
+    
+    fwrite(outdf, paste0(outpath, paste0(sample_id_short, "_flanking_driver_df.csv")))
     return(outdf)
   })
   
@@ -428,61 +519,117 @@ create_flanking_cna_status_df <- function(path_to_raw_cna_files, expression_df,
   return(full_df)
 }
 
-
 #' Helper function that, given the output DF in-progress for a given sample,
 #' along with the driver gene information and an expression DF, returns a 
 #' DF with: the names of each closest flanking driver gene on the same chromosome
-#' with a matching, non-normal CNA status that has differential expression effects in the population
+#' with a matching CNA status that has differential expression effects in the population
 #' @param outdf the outfile for this patient, in progress
 #' @param curr_file the CNA file for this patient
-#' @param driver_gene_df a table of known driver genes with their tumor
-#' suppressor/ oncogene status
+#' @param proximal_driver_gene_df a data frame from the create_proximal_driver_table
+#' function (neighboring upstream and downstream drivers)
 #' @param expression_df an expression data frame with the TMM-normalized 
 #' expression value for each sample (y-axis) and each gene (x-axis)
 #' @param cna_df a compiled CNA data frame from the previous section
-get_flanking_gene_cnas <- function(outdf, curr_file, driver_gene_df, 
+get_flanking_gene_cnas <- function(outdf, curr_file, proximal_driver_gene_df, 
                                    expression_df, cna_df) {
-  # Loop through each gene in the outdf
-  gene_level_dfs <- lapply(1:nrow(outdf), function(i) {
-    curr_gene <- outdf$gene_name[i]
-    curr_cna_stat <- outdf$copy_number[i]
-    print(paste(curr_gene, curr_cna_stat))
-    
-    # Get the two most flanking genes on the same chr
-    curr_chrom <- curr_file[curr_file$gene_name == curr_gene, 'chromosome']
-    curr_start <- curr_file[curr_file$gene_name == curr_gene, 'start']
-    curr_end <- curr_file[curr_file$gene_name == curr_gene, 'end']
-    
-    # Limit the possibilities to those genes on the same chromosome, that are
-    # not the current gene
-    curr_file_sub <- curr_file[(curr_file$chromosome == curr_chrom) &
-                               (curr_file$gene_name != curr_gene) &
-                                 (!is.na(curr_file$copy_number)),]
-    
-    gene_df <- data.frame("gene_name" = curr_gene, "CN" = curr_cna_stat, 
-                    "gene_start" = curr_start, "gene_end" = curr_end)
-    print("gene DF")
-    print(gene_df)
-    print(nrow(gene_df))
-
-    # Use helper function to get the upstream and downstream neighbors
-    if(!is.na(curr_cna_stat)) {
-      upstr_neighbor <- get_neighbor(curr_file_sub, curr_start, curr_end, curr_cna_stat, 
-                                     driver_gene_df, cna_df, expression_df, "upstream")
-      print("Upstr Neighbor")
-      print(upstr_neighbor)
-      print("Downstr Neighbor")
-      downstr_neighbor <- get_neighbor(curr_file_sub, curr_start, curr_end, curr_cna_stat,
-                                       driver_gene_df, cna_df, expression_df, "downstream")
-      print(downstr_neighbor)
-      gene_df <- cbind(gene_df, upstr_neighbor)
-      gene_df <- cbind(gene_df, downstr_neighbor)
-    }
-    print("gene DF new")
-    print(head(gene_df))
-    return(gene_df)
-  })
   
+  outdf <- outdf[outdf$gene_id %fin% proximal_driver_gene_df$Gene_ID,]
+  
+  median_chrom_copy_number_dict <- sapply(unique(curr_file$chromosome), FUN = function(c) {
+    median <- Rfast::med(curr_file[curr_file$chromosome == c, 'copy_number'][[1]])
+    if(median < 2) {median <- ceiling(median)}
+    if(median > 2) {median <- floor(median)}
+    return(median)
+  }, simplify = FALSE, USE.NAMES = TRUE)
+
+  # Loop through each gene in the outdf
+  gene_level_dfs <- mclapply(1:nrow(outdf), function(i) {
+    curr_id <- outdf$gene_id[i]
+    curr_cna_stat <- outdf$copy_number[i]
+
+    #print(paste("gene", paste(i, paste("/", nrow(outdf)))))
+    
+    # Get the copy number information for this gene in this sample
+    gene_df <- curr_file[curr_file$gene_id == curr_id, c('gene_id', 'chromosome', 'start', 'end')]
+    gene_df$copy_number <- curr_cna_stat
+    
+    # For the current chromosome, get the median copy number (so we know what 
+    # "normal" is and can judge if there was an amplification or deletion event)
+    median_chrom_copy_number <- NA
+    if(!is.na(gene_df$chromosome)) {
+      median_chrom_copy_number <- median_chrom_copy_number_dict[[gene_df$chromosome]]
+    }
+    
+    #print("gene DF")
+    #print(gene_df)
+    #print(nrow(gene_df))
+    
+    # Use helper function to get the upstream and downstream neighbors, if there is 
+    # an amplification or deletion affecting this gene
+    if((!is.na(curr_cna_stat)) & (median_chrom_copy_number != curr_cna_stat)) {
+      
+      proximal_driver_gene_df_sub <- proximal_driver_gene_df[proximal_driver_gene_df$Gene_ID == curr_id, ]
+      upstr_neighbor <- as.character(proximal_driver_gene_df_sub[,'Upstream_Neighbor'])
+      downstr_neighbor <- as.character(proximal_driver_gene_df_sub[,'Downstream_Neighbor'])
+      if(length(upstr_neighbor) == 0) {upstr_neighbor <- NA}
+      if(length(downstr_neighbor) == 0) {downstr_neighbor <- NA}
+      
+      # Get the copy numbers of these neighbors
+      upstr_copy_number <- NA
+      downstr_copy_number <- NA
+
+      # Get the copy number status of the neighbors
+      exp_diff_res <- FALSE
+      if(!is.na(upstr_neighbor)) {
+        upstr_copy_number <- as.integer(curr_file[curr_file$gene_id == upstr_neighbor, 
+                                                  'copy_number'][[1]])
+        if(length(upstr_copy_number) == 0) {upstr_copy_number <- NA}
+        else {
+          if(upstr_copy_number == curr_cna_stat) {
+            amp_or_del <- "del"
+            if(curr_cna_stat > median_chrom_copy_number) {amp_or_del <- "amp"}
+            exp_diff_res <- get_expr_change(upstr_neighbor, expression_df, 
+                                            cna_df, amp_or_del, median_chrom_copy_number)
+          }
+        }
+      }
+      if(!is.na(downstr_neighbor)) {
+        downstr_copy_number <- as.integer(curr_file[curr_file$gene_id == downstr_neighbor, 
+                                                    'copy_number'][[1]])
+        if(length(downstr_copy_number) == 0) {downstr_copy_number <- NA}
+        else {
+          if(downstr_copy_number == curr_cna_stat) {
+            amp_or_del <- "del"
+            if(curr_cna_stat > median_chrom_copy_number) {amp_or_del <- "amp"}
+            exp_diff_res <- get_expr_change(downstr_neighbor, expression_df, 
+                                            cna_df, amp_or_del, median_chrom_copy_number)
+          }
+        }
+      }
+      #print(upstr_neighbor)
+      #print(downstr_neighbor)
+      #print(upstr_copy_number)
+      #print(downstr_copy_number)
+      if (exp_diff_res) {
+        gene_df_new <- bind_cols(gene_df, list("upstr_neighbor" = upstr_neighbor, 
+                                               "upstr_copy_number" = upstr_copy_number, 
+                                               "downstr_neighbor" = downstr_neighbor, 
+                                               "downstr_copy_number" = downstr_copy_number))
+        #colnames(gene_df_new)[ncol(gene_df)+1:ncol(gene_df_new)] <- c("upstr_neighbor", "upstr_copy_number", 
+        #"downstr_neighbor", "downstr_copy_number")
+      } else {
+        gene_df_new <- bind_cols(gene_df, list("upstr_neighbor" = "No.Exp.Diff", "upstr_copy_number" = NA,
+                                               "downstr_neighbor" = "No.Exp.Diff", "downstr_copy_number" = NA))
+      }
+      
+    } else {
+      gene_df_new <- bind_cols(gene_df, list("upstr_neighbor" = "No.CNA", "upstr_copy_number" = NA,
+                                             "downstr_neighbor" = "No.CNA", "downstr_copy_number" = NA))
+    }
+    #print("gene DF new")
+    #print(head(gene_df_new))
+    #return(gene_df_new)
+  })
   # Bind together the gene level DFs 
   full_df <- do.call(rbind, gene_level_dfs)
   print("FULL DF")
@@ -491,298 +638,132 @@ get_flanking_gene_cnas <- function(outdf, curr_file, driver_gene_df,
 }
 
 
-#' Helper function that, given a CNA file for a given patient that has been
-#' subsetted to the relevant chromosome, looks either up or downstream to find
-#' the closest driver gene neighbor. Returns the name of the neighbor.
-#' @param curr_file_sub a CNA file for given patient subsetted to chromosome
-#' of interest
-#' @param curr_start the start position of the CNA for this gene
-#' @param curr_end the end position of the CNA for this gene
-#' @param curr_cna_stat the raw CNA value for this gene
-#' @param driver_gene_df a table of known driver gene with their tumor
-#' suppressor/ oncogene status
-#' @param expression_df an expression data frame with the TMM-normalized 
-#' expression value for each sample (y-axis) and each gene (x-axis)
-#' @param cna_df a compiled CNA data frame from the previous section
-#' @param up_or_down whether we are looking "upstream" or "downstream" 
-get_neighbor <- function(curr_file_sub, curr_start, curr_end, curr_cna_stat,
-                         driver_gene_df, cna_df, expression_df, up_or_down) {
-  
-  driver_stat <- FALSE  # loop until we have found a neighboring driver gene or
-  matching_cna <- TRUE  # loop until we no longer have a matching CNA value (i.e. the end of the amplif. or del.)
-  neighbor_df <- data.frame(matrix(nrow = 1, ncol = 3))
-  
-  if(length(curr_cna_stat) == 0) {return(neighbor_df)}
-  
-  if(up_or_down == "upstream") {
-    neighbor_df <- data.frame("upstr_neighbor" = NA, "upstr_neighbor_start" = NA, 
-                              "upstr_neighbor_end" = NA)
-    if(curr_cna_stat == 2) {return(neighbor_df)}
-    tryCatch({
-      curr_file_sub <- curr_file_sub[(curr_file_sub$start < curr_start) &
-                                       (curr_file_sub$end <= curr_end)]
-    }, error = function(cond) {return(neighbor_df)})
-  }
-  else if (up_or_down == "downstream") {
-    neighbor_df <- data.frame("downstr_neighbor" = NA, "downstr_neighbor_start" = NA, 
-                              "downstr_neighbor_end" = NA)
-    if(curr_cna_stat == 2) {return(neighbor_df)}
-    tryCatch({
-      curr_file_sub <- curr_file_sub[(curr_file_sub$start >= curr_start) &
-                                       (curr_file_sub$end > curr_end)]
-    }, error = function(cond) {return(neighbor_df)})
-  } else {print("Must be either 'upstream' or 'downstream'.")}
-  
-  # Search up the chromosome until we find a driver gene with a matching CNA (if it exists)
-  while ((driver_stat == FALSE) & (matching_cna == TRUE)) {
-    nearest <- NA
-    ind_nearest <- NA
-    
-    if(up_or_down == "upstream") {
-      ind_nearest <- which.min(curr_file_sub$end - curr_start)
-      nearest <- curr_file_sub[ind_nearest,]
-      
-    } else if (up_or_down == "downstream") {
-      ind_nearest <- which.min(curr_end - curr_file_sub$start)
-      nearest <- curr_file_sub[ind_nearest,]
-      
-    } else {print("Must input either 'upstream' or 'downstream'.")}
-    
-    #print("nearest")
-    #print(nearest)
-    #print(paste("ind nearest", ind_nearest))
-    #print(paste("curr cna stat", curr_cna_stat))
-    
-    if (!(length(nearest) == 0)) {
-      if ((!(nrow(nearest) == 0)) & (!(ncol(nearest) < 8))) {
-        neighbor_df[,1] <- nearest$gene_name
-        neighbor_df[,2] <- nearest$start
-        neighbor_df[,3] <- nearest$end
-      }
-    }
-    print("Neighbor DF")
-    print(neighbor_df)
-    
-    # As long as they have the same copy number, check if this is a driver gene
-    if (!(length(nearest) == 0)) {
-      if ((!(nrow(nearest) == 0)) & (!(ncol(nearest) < 8)) & 
-          ("copy_number" %fin% colnames(nearest))) {
-        if (as.integer(nearest$copy_number) == curr_cna_stat) {
-          if (nearest$gene_name %fin% driver_gene_df$primary_gene_names) {
-            # Make sure that, for an amplification, this is an oncogene and, for a 
-            # deletion, this is a tumor suppressor
-            status <- driver_gene_df[driver_gene_df$primary_gene_names == nearest$gene_name, 
-                                     'cancer_driver_status']
-            status <- unlist(strsplit(status, ",", fixed = TRUE))
-            
-            if (((curr_cna_stat > 2) & ("O" %fin% status)) | ((curr_cna_stat < 2) & ("T" %fin% status)) |
-                (length(intersect(c("O", "T"), status)) == 0)) {
-              
-              amp_or_del <- NA
-              if (curr_cna_stat > 2) {amp_or_del <- "amp"}
-              else if (curr_cna_stat < 2) {amp_or_del <- "del"}
-              else {amp_or_del <- "norm"}
-              
-              # If we are looking at an amplification or deletion event, then make sure there
-              # is an expression difference in the right direction
-              if(!(amp_or_del == "norm")) {
-                exp_change <- get_expr_change(nearest, expression_df, cna_df, amp_or_del)
-                if (exp_change) {
-                  driver_stat <- TRUE
-                } else {
-                  curr_file_sub <- curr_file_sub[-ind_nearest,]
-                }
-              } else {driver_stat <- TRUE}
-            } else {
-              curr_file_sub <- curr_file_sub[-ind_nearest,]
-            } 
-          } else {
-            curr_file_sub <- curr_file_sub[-ind_nearest,]
-          } 
-        } else {
-          matching_cna <- FALSE
-          neighbor_df[1,] <- rep(NA, times = 3)
-        }
-      } else {
-        matching_cna <- FALSE
-        neighbor_df[1,] <- rep(NA, times = 3)
-      }
-    } else {
-      matching_cna <- FALSE
-      neighbor_df[1,] <- rep(NA, times = 3)
-    }
-  }
-  
-  #print(paste("Returning Neighbor"))
-  #print(neighbor_df)
-  #print(nrow(neighbor_df))
-  return(neighbor_df)
-}
-
 #' Given a neighbor gene and an expression DF, checks to see if there is a 
 #' significant difference in expression in the proper direction when this gene
 #' is amplified/ deleted. Returns TRUE if so, FALSE otherwise.
-#' @param nearest a single-row table with the name, CNA, etc. of the neighbor gene
+#' @param nearest a gene ID of a neighboring driver gene
 #' @param expression_df a TMM-normalized expression DF
 #' @param cna_df a CNA DF produced from the previous section
 #' @param amp_or_del whether we expect "amp", "del"
-get_expr_change <- function(nearest, expression_df, cna_df, amp_or_del) {
-  gene_id <- nearest$gene_id
-  cna_df_sub <- cna_df[rownames(cna_df) == gene_id,]
-  expression_df_sub <- expression_df[rownames(expression_df) == gene_id,]
+#' @param med_cna the median CN for the given chromosome
+get_expr_change <- function(gene_id, expression_df, cna_df, amp_or_del, med_cna) {
+  #gene_id <- nearest$gene_id
+  cna_df_sub <- cna_df[cna_df$Gene_ID == gene_id,]
+  expression_df_sub <- expression_df[expression_df$Gene_ID == gene_id,]
   
   # For amplification, split the patient population into those with amplifications 
   # and those without
   if(amp_or_del == "amp") {
-    ampl_patients <- colnames(cna_df_sub)[which(unlist(cna_df_sub[1,]) > 2)]
+    ampl_patients <- colnames(cna_df_sub)[which(unlist(cna_df_sub[1,]) > med_cna)]
+    ampl_patients <- ampl_patients[ampl_patients != "Gene_ID"]
     nonampl_patients <- setdiff(colnames(cna_df_sub), ampl_patients)
+
+    express_ampl_patients <- mean(as.numeric(expression_df_sub[,colnames(expression_df_sub) %fin% ampl_patients]))
+    express_nonampl_patients <- mean(as.numeric(expression_df_sub[,colnames(expression_df_sub) %fin% nonampl_patients]))
     
-    express_ampl_patients <- as.numeric(expression_df_sub[,colnames(expression_df_sub) %fin% ampl_patients])
-    express_nonampl_patients <- as.numeric(expression_df_sub[,colnames(expression_df_sub) %fin% nonampl_patients])
+    if(express_ampl_patients >= express_nonampl_patients) {return(TRUE)}
+    else{return(FALSE)}
+    #wilcox_res <- wilcox.test(express_ampl_patients, express_nonampl_patients, alternative = "greater")
     
-    wilcox_res <- wilcox.test(express_ampl_patients, express_nonampl_patients, alternative = "greater")
   } else {
-    del_patients <- colnames(cna_df_sub)[which(unlist(cna_df_sub[1,]) < 2)]
+    del_patients <- colnames(cna_df_sub)[which(unlist(cna_df_sub[1,]) < med_cna)]
+    del_patients <- del_patients[del_patients != "Gene_ID"]
     nondel_patients <- setdiff(colnames(cna_df_sub), del_patients)
     
-    express_del_patients <- as.numeric(expression_df_sub[,colnames(expression_df_sub) %fin% del_patients])
-    express_nondel_patients <- as.numeric(expression_df_sub[,colnames(expression_df_sub) %fin% nondel_patients])
+    express_del_patients <- mean(as.numeric(expression_df_sub[,colnames(expression_df_sub) %fin% del_patients]))
+    express_nondel_patients <- mean(as.numeric(expression_df_sub[,colnames(expression_df_sub) %fin% nondel_patients]))
     
-    wilcox_res <- wilcox.test(express_del_patients, express_nondel_patients, alternative = "less")
+    if(express_del_patients <= express_nondel_patients) {return(TRUE)}
+    else{return(FALSE)}
+    #wilcox_res <- wilcox.test(express_del_patients, express_nondel_patients, alternative = "less")
   }
   
-  print(wilcox_res)
-  if(wilcox_res$p.value < 0.05) {return(TRUE)}
-  else(return(FALSE))
+  #print(wilcox_res)
+  #if(wilcox_res$p.value < 0.05) {return(TRUE)}
+  #else(return(FALSE))
+  return(NA)
 }
+
+
 
 
 # Import necessary files
 path_to_cna_files <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/CNV_Data/Gene-Level Copy Number Raw/"
-sample_sheet <- read.csv(paste0(path_to_cna_files, "gdc_sample_sheet.2021-02-17.tsv"), header = TRUE, 
-                         check.names = FALSE, sep = "\t")
+sample_sheet <- fread(paste0(path_to_cna_files, "gdc_sample_sheet.2021-02-17.tsv"), 
+                      header = TRUE, sep = "\t")
 
 local_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
-cna_df <- read.csv(paste0(local_path, "CNV/Gene-level Raw/CNV_DF_AllGenes_CancerOnly.csv"), 
-                   header = TRUE, check.names = FALSE, row.names = 1)
-expression_df <- read.csv(paste0(local_path, "Expression/expression_tmm_DF_filtByExpr_2groups_SDGr1_TO.csv"), 
-                          header = TRUE, check.names = FALSE, row.names = 1)
-colnames(expression_df) <- unlist(lapply(colnames(expression_df), function(x) 
-  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
-
 driver_gene_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/GRCh38_driver_gene_list.tsv",
                            header = TRUE, comment.char = "#", sep = "\t")
 
-# Call function
-flanking_cna_status_df <- create_flanking_cna_status_df(path_to_cna_files, expression_df, driver_gene_df,
-                                                        sample_sheet, cna_df)
+expression_df <- fread(paste0(local_path, "Expression/expression_tmm_DF_filtByExpr_2groups_SDGr1_TO.csv"), 
+                       header = TRUE)
+colnames(expression_df) <- c("Gene_ID", unlist(lapply(colnames(expression_df)[2:ncol(expression_df)], function(x) 
+  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-"))))
 
-# If desired, add a column for the ENSG ID as well
-flanking_cna_status_df$ensg_id <- unlist(lapply(flanking_cna_status_df$gene_name, function(x) 
-  paste(unique(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'ensembl_gene_id']), collapse = ";")))
+cna_df <- fread(paste0(local_path, "CNV/Gene-level Raw/CNV_DF_AllGenes_CancerOnly.csv"), 
+                header = TRUE)
+colnames(cna_df)[1] <- "Gene_ID"
+cna_df <- cna_df[cna_df$Gene_ID %fin% expression_df$Gene_ID,]
+
+
+# Call function
+cna_neighbor_df <- create_flanking_cna_status_df(path_to_cna_files, expression_df, 
+                                                 proximal_driver_gene_table, sample_sheet, cna_df)
+
 
 # Write this to a file
-write.csv(flanking_cna_status_df, paste0(local_path, "CNV/Gene-level Raw/Neighboring_Driver_CNA_DF_AllGenes_CancerOnly.csv"))
+fwrite(cna_neighbor_df, paste0(local_path, "CNV/neighboring_driver_cna_df_allgenes.csv"))
+
+# Read back 
+cna_neighbor_df <- fread(paste0(local_path, "CNV/neighboring_driver_cna_df_allgenes.csv"), header = TRUE, check.names = FALSE)
 
 
-############################################################
-### CREATE A DATA FRAME WITH BINARY AMPLIFICATION/ DELETION 
-### STATUS OF NEIGHBORING TUMOR DRIVER GENES
-############################################################
-#' From this, create a binary sample x gene matrix that, as the value,
-#' has two binary values separated by a semicolon (e.g. 0;0, 0;1, 1;0,
-#' or 1;1) to indicate whether, if the gene in question is amplified or
-#' deleted in the given sample, there is an upstream;downstream cancer
-#' driver gene on the same chromosome that is likewise amplified or 
-#' deleted and has a resultant expression change
-#' @param flanking_cna_status_df a CNA data frame created from
-#' the above functions that has details of neighboring cancer driver
-#' gene amplification and deletion events
-create_binary_flanking_cna_status_df <- function(flanking_cna_status_df) {
-  samples <- unique(flanking_cna_status_df$sample_id)
-  genes <- unique(flanking_cna_status_df$ensg_id)
+#' Given a flanking status CNA data frame (produced from functions above),
+#' create a 0/1 bucketed data frame with genes as rows and patients as 
+#' columns, denoting whether or not there is a neighboring driver with
+#' a) shared amplification or deletion status (defined as a CN value that
+#' is above or below the median CN for the chromosome), and b) an expression
+#' difference in the affected driver gene that matches the direction of the
+#' effect (upregulated if amplified, downregulated if deleted).
+#' @param cna_neighbor_df a flanking status CNA data frame as described above
+bucket_flanking_cna_status_df <- function(cna_neighbor_df) {
   
-  # Get all the non-NA entries from the flanking CNA status DF and use them
-  # to create binary entries for new DF
-  new_dfs <- lapply(1:length(samples), function(i) {
-    sample <- samples[i]
+  cna_neighbor_df_sub <- cna_neighbor_df[!(is.na(cna_neighbor_df$upstr_copy_number) & 
+                                             is.na(cna_neighbor_df$downstr_copy_number)),]
+  
+  # Initialize a new data frame that we will fill
+  bucketed_cna_neighbor_df <- data.frame(matrix(ncol = length(unique(cna_neighbor_df$sample_id)),
+                                                nrow = length(unique(cna_neighbor_df$gene_id))))
+  colnames(bucketed_cna_neighbor_df) <- unique(cna_neighbor_df$sample_id)
+  rownames(bucketed_cna_neighbor_df) <- unique(cna_neighbor_df$gene_id)
+  
+  # Loop through all genes, and for each, get a 0/1 value for each patient indicating whether or
+  # not that patient has a driver gene co-amplified or co-deleted on the same chromosome (e.g. 
+  # whether the patient is in the DF after NA filtering)
+  for (i in 1:nrow(bucketed_cna_neighbor_df)) {
+    print(paste("Gene", paste(i, paste("/", nrow(bucketed_cna_neighbor_df)))))
     
-    flanking_df_sub <- flanking_cna_status_df[flanking_cna_status_df$sample_id == sample,]
-    
-    vals <- unlist(lapply(1:nrow(flanking_df_sub), function(j) {
-      row <- flanking_df_sub[j,]
-      if (!is.na(row$upstr_neighbor)) {
-        (!is.na(row$downstr_neighbor)) {
-          val <- "1;1"
-        } else {
-          val <- "1;0"
-        }
-      } else if (!is.na(row$downstr_neighbor)) {val <- "0;1"}
-      else {val <- "0;0"}
-      return(val)
+    gene <- rownames(bucketed_cna_neighbor_df)[i]
+    neighbor_df_sub <- cna_neighbor_df_sub[cna_neighbor_df_sub$gene_id == gene,]
+    binary_vals <- unlist(lapply(colnames(bucketed_cna_neighbor_df), function(samp) {
+      if(samp %fin% neighbor_df_sub$sample_id) {return(1)}
+      else {return(0)}
     }))
-    tmp_df <- data.frame("gene_id" = flanking_df_sub$gene_id, "value" = vals)
-    return(tmp_df)
-  })
+    bucketed_cna_neighbor_df[i,] <- binary_vals
+  }
   
-  combined_df <- Reduce(function(x,y) merge(x = x, y = y, by = "gene_id"), new_dfs)
-  colnames(combined_df) <- samples
-  rownames(combined_df) <- combined_df$gene_id
-  combined_df <- combined_df[, -c("gene_id")]
-
-  return(combined_df)
+  return(bucketed_cna_neighbor_df)
 }
+
+# First, just eliminate all rows in the data frame that have two or more NAs (because they do not 
+# have a neighboring co-amplified or co-deleted driver)
+cna_neighbor_df_sub <- cna_neighbor_df[!(is.na(cna_neighbor_df$upstr_copy_number) & 
+                                           is.na(cna_neighbor_df$downstr_copy_number)),]
+fwrite(cna_neighbor_df_sub, paste0(local_path, "CNV/neighboring_driver_cna_df_onlyAmpAndDel.csv"))
 
 # Call function
-binary_flanking_cna_status_df <- create_binary_flanking_cna_status_df(flanking_cna_status_df)
+bucketed_cna_neighbor_df <- bucket_flanking_cna_status_df(cna_neighbor_df)
 
 # Write to a file
-write.csv(binary_flanking_cna_status_df, paste0(local_path, "CNV/Gene-level Raw/Binary_Neighboring_Driver_CNA_DF_AllGenes_CancerOnly.csv"))
-
-
-################################
-
-
-#' As an alternative, creates a data frame containing all the CGC oncogenes and tumor 
-#' suppressors with their chromosome, start and end position, whether they are differently 
-#' expressed between amplified/ deleted patient cohorts within the larger group, and, for 
-#' each patient, their copy number. Then, we can reference this mapping for each gene
-#' of interest in order to obtain if there are matching CGC neighbors that are co-amplified or
-#' deleted.
-#' @param expression_df an expression data frame with the TMM-normalized 
-#' expression value for each sample (y-axis) and each gene (x-axis)
-#' @param driver_gene_df a table of known driver genes with their tumor
-#' suppressor/ oncogene status
-#' @param cna_df a compiled CNA data frame from the previous section
-create_cgc_cna_mapping <- function(expression_df, driver_gene_df, cna_df) {
-  driver_gene_mapping <- data.frame("driver.gene" = driver_gene_df$ensembl_gene_id, 
-                                    "onco.or.ts" = driver_gene_df$cancer_driver_status)
-  driver_gene_mapping$onco.or.ts <- unlist(lapply(driver_gene_mapping$onco.or.ts, function(x) {
-    x_spl <- unlist(strsplit(x, ",", fixed = TRUE))
-    x_spl <- x_spl[x_spl %in% c("O", "T")]  # keep only T or O labels
-  }))
-  
-  # Get the chromosome, start position, and strand for this gene
-  edb <- EnsDb.Hsapiens.v86
-  driver_gene_symbols <- driver_gene_df$primary_gene_name
-  driver_gene_mapping$chrom <- mapIds(edb, keys = driver_gene_symbols, 
-                             keytype = "SYMBOL", column = "SEQNAME")
-  driver_gene_mapping$txStart <- mapIds(edb, keys = driver_gene_symbols, 
-                               keytype = "SYMBOL", column = "TXSEQSTART")
-  driver_gene_mapping$txStrand <- mapIds(edb, keys = driver_gene_symbols, 
-                                keytype = "SYMBOL", column = "SEQSTRAND")
-  driver_gene_mapping <- driver_gene_mapping[!(is.na(driver_gene_mapping$chrom))]
-  
-  # Get the copy number for each of these genes in each patient
-  cna_df_drivers <- cna_df[rownames(cna_df) %in% driver_gene_mapping$driver.gene,]
-  cna_df_drivers$driver.gene <- rownames(cna_df_drivers)
-  rownames(cna_df_drivers) <- 1:nrow(cna_df_drivers)
-  
-  driver_gene_mapping_full <- merge(driver_gene_mapping, cna_df_drivers, by = "driver.gene")
-  
-  return(driver_gene_mapping_full)
-}
-
-
-
-
+write.csv(bucketed_cna_neighbor_df, paste0(local_path, "CNV/neighboring_driver_cna_df_binary.csv"))

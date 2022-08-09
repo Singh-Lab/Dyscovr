@@ -27,7 +27,35 @@ metabric_mutation_df <- read.table(paste0(main_path, "data_mutations.txt"), head
                                    sep = "\t", check.names = FALSE)
 #metabric_MN_mutation_df <- metabric_mutation_df[(metabric_mutation_df$Variant_Classification == "Missense_Mutation") |
                                                   #(metabric_mutation_df$Variant_Classification == "Nonsense_Mutation"),]
-# Use this file in the "process_mutation_data.R" pipeline
+# Use this file in the "process_mutation_data.R" pipeline to get the iprotein-level DF
+
+# Generate the mutation count matrices, using helper functions from maf_helper_functions.R
+maf_file_df_unfilt <- import.MAF(maf_filename, sep = "\t", is.TCGA = FALSE, 
+                                 merge.mutation.types = FALSE, to.TRONCO = FALSE) 
+clin_filename <- paste(path, "Input Data Files/BRCA Data/cBioPortal/brca_metabric/data_clinical_sample_sub.txt", sep = "")
+clinical_df <- read.table(clin_filename, header = TRUE, sep = ",")
+maf_file_df <- maf_file_df_unfilt[maf_file_df_unfilt$Tumor_Sample_Barcode %fin% clinical_df$SAMPLE_ID,]
+maf_file_df_missense <- maf_file_df[maf_file_df$Variant_Classification == "Missense_Mutation",]
+maf_file_df_misAndNon <- maf_file_df[(maf_file_df$Variant_Classification == "Missense_Mutation") | 
+                                       (maf_file_df$Variant_Classification == "Nonsense_Mutation"),]
+maf_missense <- read.maf(maf_file_df_missense)
+maf_misAndNon <- read.maf(maf_file_df_misAndNon)
+mut_count_matrix_misAndNon <- get_mut_count_matrix(maf_misAndNon)
+mut_count_matrix_missense <- get_mut_count_matrix(maf_missense)
+
+# Now, append rows of '0s' for those genes that are not mutated in any patient
+allgene_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/allgene_targets.csv",
+                            header = TRUE, check.names = FALSE, row.names = 1)
+all_gene_names <- unlist(lapply(allgene_targets$ensg, function(x) 
+  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == x,'external_gene_name'])), collapse = ";")))
+unincluded_genes <- setdiff(all_gene_names, rownames(mut_count_matrix_misAndNon))
+unincluded_gene_df <- data.frame(matrix(nrow = length(unincluded_genes), ncol = ncol(mut_count_matrix_misAndNon)))
+unincluded_gene_df[is.na(unincluded_gene_df)] <- 0
+rownames(unincluded_gene_df) <- unincluded_genes
+colnames(unincluded_gene_df) <- colnames(mut_count_matrix_misAndNon)
+
+mut_count_matrix_misAndNon <- rbind(mut_count_matrix_misAndNon, unincluded_gene_df)
+mut_count_matrix_missense <- rbind(mut_count_matrix_missense, unincluded_gene_df)
 
 
 ############################################################
@@ -192,7 +220,7 @@ is_brca <- TRUE
 #is_brca <- FALSE
 if(is_brca) {patient_df <- patient_df[, -which(colnames(patient_df) == "Gender")]}
 
-sample_df <- read.csv(paste(main_path, "Patient and Sample DFs/sample_dataframe_cibersort_total_frac.csv", sep = ""), 
+sample_df <- read.csv(paste(output_path, "Patient and Sample DFs/sample_dataframe_cibersort_total_frac.csv", sep = ""), 
                       header = TRUE, row.names = 1)  # Total fraction
 
 # Use the combine_patient_and_samp_dfs() function from additional_premodel_processing.R to combine
@@ -225,6 +253,16 @@ metabric_mutation_count_df_misAndNon <- read.csv(paste0(output_path, "Mutation/M
 colnames(metabric_mutation_count_df_missense)[1] <- 'Gene_Symbol'
 colnames(metabric_mutation_count_df_misAndNon)[1] <- 'Gene_Symbol'
 
+# If the gene symbols are currently rownames and not the first column
+#metabric_mutation_count_df_missense <- cbind(data.frame("Gene_Symbol" = rownames(metabric_mutation_count_df_missense)), metabric_mutation_count_df_missense)
+#rownames(metabric_mutation_count_df_missense) <- 1:nrow(metabric_mutation_count_df_missense)
+#metabric_mutation_count_df_misAndNon <- cbind(data.frame("Gene_Symbol" = rownames(metabric_mutation_count_df_misAndNon)), metabric_mutation_count_df_misAndNon)
+#rownames(metabric_mutation_count_df_misAndNon) <- 1:nrow(metabric_mutation_count_df_misAndNon)
+
+metabric_mutation_count_df_missense$Swissprot <- unlist(lapply(metabric_mutation_count_df_missense$Gene_Symbol, function(x) 
+  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x,'uniprot_gn_id'])), collapse = ";")))
+metabric_mutation_count_df_misAndNon$Swissprot <- unlist(lapply(metabric_mutation_count_df_misAndNon$Gene_Symbol, function(x) 
+  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x,'uniprot_gn_id'])), collapse = ";")))
 
 metabric_cna_df <- read.csv(paste0(output_path, "CNV/CNA_DF_AllGenes.csv"), 
                                           header = TRUE, check.names = FALSE, row.names = 1)
@@ -281,6 +319,9 @@ print(length(intersecting_patients)) # 826 patients
 write.table(intersecting_patients, "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/cBioPortal/METABRIC/intersecting_ids.txt",
             quote = FALSE, row.names = FALSE)
 
+# Read back
+intersecting_patients <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/cBioPortal/METABRIC/intersecting_ids.txt", 
+                                    header = FALSE)[,1]
 
 ############################################################
 ### IF NECESSARY, SUBSET FINALIZED DATASETS BY INTERSECTING IDs

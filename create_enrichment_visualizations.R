@@ -197,20 +197,20 @@ plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cu
   # Create inset plot
   p2 <- ggplot(target_sets_fraction_df_m[target_sets_fraction_df_m$Rank %in% 1:cutout_thres,], 
                mapping = aes(x = Rank, y = Frac, color = Source)) + 
-    geom_line(aes(linetype=Mutation.Type, alpha = Source), size = 1.25) +
+    geom_line(aes(linetype=Mutation.Type), size = 1.25) +
     #geom_point(size = 1) + 
     scale_x_continuous(limits = c(1,cutout_thres)) + 
     #scale_color_nejm() + 
-    scale_alpha_manual(values=c(0.9,0.9,0.4,0.4)) +
-    scale_color_manual(values = c("#BC3C29FF", "#0072B5FF", "#BC3C29FF", "#0072B5FF")) + 
+    #scale_alpha_manual(values=c(0.9,0.9,0.4,0.4)) +
+    #scale_color_manual(values = c("#BC3C29FF", "#0072B5FF", "#BC3C29FF", "#0072B5FF")) + 
     theme(legend.position = "none", axis.title.x = element_blank(), axis.title.y = element_blank(),
           panel.grid.minor = element_blank(), axis.text.x = element_text(size = 14, face = "bold"), 
           axis.text.y =  element_text(size = 14, face = "bold"))
   
   p <- ggplot(target_sets_fraction_df_m[target_sets_fraction_df_m$Rank %in% 1:thres,], 
               mapping = aes(x = Rank, y = Frac, color = Source)) + 
-    geom_line(aes(linetype=Mutation.Type, alpha = Source), size = 1.25) +
-    theme_minimal() +
+    geom_line(aes(linetype=Mutation.Type), size = 1.25) +
+    #theme_minimal() +
     theme(axis.text = element_text(size = 16, face = "bold"), 
           axis.title = element_text(size = 18, face = "bold"), #panel.grid.major = element_blank(), 
           panel.grid.minor = element_blank(), #panel.border = element_blank(),
@@ -220,11 +220,10 @@ plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cu
     #ggtitle(paste("Fraction of Model-Prioritized Target Genes in", paste(goi, "Sourced Targets"))) +
     xlab("Gene Rank") + ylab("Fraction in Set of Known Targets") + 
     scale_x_continuous(limits = c(1,thres)) +
-    #theme_minimal() +
     #scale_color_nejm() + 
-    scale_alpha_manual(values=c(0.9,0.9,0.4,0.4)) +
-    scale_color_manual(values = c("#BC3C29FF", "#0072B5FF", "#BC3C29FF", "#0072B5FF"),
-                       labels = c(names(target_sets_list), rep("", times = length(names(target_sets_list))))) + 
+    #scale_alpha_manual(values=c(0.9,0.9,0.4,0.4)) +
+    #scale_color_manual(values = c("#BC3C29FF", "#0072B5FF", "#BC3C29FF", "#0072B5FF"),
+                       #labels = c(names(target_sets_list), rep("", times = length(names(target_sets_list))))) + 
     annotation_custom(ggplotGrob(p2), xmin =(thres-round(thres/1.5)), xmax = thres, ymin = 0.30, ymax = 1.0) +
     geom_rect(data=target_sets_fraction_df_m[1:cutout_thres,], 
               aes(xmin = 1, xmax = cutout_thres, ymin = 0, ymax = 1, fill = "gray"),
@@ -276,14 +275,13 @@ pik3ca_target_set_list <- list("Compiled.Cancer" = known_cancer_genes,
                                "Curated.Cizkova.2017" = pik3ca_curated_targs)
 
 # For grant
-tp53_select_target_set_list <- list("Curated.Fischer.2017" = tp53_curated_targets,
-                                    "STRING" = tp53_string_nw_targs, "KEGG.hsa04115" = tp53_kegg_pathway_genes,
-                                    "TRRUST" = tp53_trrust_targets)
+tp53_select_target_set_list <- list("Curated.Fischer.2017" = tp53_curated_targets, "KEGG.hsa04115" = tp53_kegg_pathway_genes,
+                                    "TRRUST" = tp53_trrust_targets, "DoRothEA" = tp53_dorothea_targets)
 tp53_select_target_set_list <- list("Curated.Fischer.2017" = tp53_curated_targets,
                                     "DoRothEA" = tp53_dorothea_targets)
 tp53_select_target_set_list_cna <- list("STRING" = tp53_string_nw_targs,
                                         "TRRUST" = tp53_trrust_targets_upstr)
-pik3ca_select_target_set_list <- list("STRING" = pik3ca_string_nw_targs_top500, "KEGG.hsa04151" = pik3ca_kegg_pathway_genes)
+pik3ca_select_target_set_list <- list("Curated.Cizkova.2017" = pik3ca_curated_targs, "KEGG.hsa04151" = pik3ca_kegg_pathway_genes)
 
 
 # Call function
@@ -639,8 +637,6 @@ sf3b1_eclip_targets_numBindSites_gr125 <- sf3b1_eclip_targets[sf3b1_eclip_target
 # TP53 target genes from Fischer et al., 2017: https://pubmed.ncbi.nlm.nih.gov/28288132/
 tp53_curated_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Validation_Files/TP53_Targets_Fischer_2017_Oncogene.csv",
                                  header = FALSE, check.names = FALSE)[,1]
-tp53_curated_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Validation_Files/TP53_targets.csv",
-                                 header = FALSE, check.names = FALSE)[,'Gene.Symbol']
 # PIK3CA target genes from Cizkova et al., 2010: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3012715/
 pik3ca_curated_targs <- c("WNT5A", "TCF7L2", "MSX2", "TNFRSF11B", "SEC14L2", "MSX2", 
                           "TFAP2B", "NRIP3", "CYP4Z1", "CYPZ2P", "SLC40A1", "LTF", "LIMCH1")
@@ -680,12 +676,14 @@ tp53_dorothea_targets <- unlist(dorothea_net[dorothea_net$tf == "TP53", 'target'
 nfkb_dorothea_targets <- unlist(dorothea_net[grepl("NFKB", dorothea_net$tf), 'target'])
 foxo_dorothea_targets <- unlist(dorothea_net[grepl("FOXO", dorothea_net$tf), 'target'])
 creb_dorothea_targets <- unlist(dorothea_net[grepl("CREB", dorothea_net$tf), 'target'])
+gata3_dorothea_targets <- unlist(dorothea_net[grepl("GATA3", dorothea_net$tf), 'target'])
+foxa1_dorothea_targets <- unlist(dorothea_net[grepl("FOXA1", dorothea_net$tf), 'target'])
 
 
 ### GENETIC PATHWAYS ###
 # Import the network interaction files for the genes of interest
 nw_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Network_Data/"
-# nw_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/"
+nw_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/"
 
 
 ### REACTOME PATHWAYS ###
@@ -714,8 +712,14 @@ mtorc_signaling_reactome_pw_gns <- unlist(lapply(mtorc_signaling_reactome_pw$Mol
   unlist(strsplit(x, " ", fixed = TRUE))[2]))
 mtorc_signaling_reactome_pw_gns <- unique(mtorc_signaling_reactome_pw_gns[mtorc_signaling_reactome_pw_gns != "PIK3CA"])
 
+tp53_regulates_metabolism_pw <- read.csv(paste0(nw_path, "Reactome/TP53 Regulates Metabolic Genes_R-HSA-5628897.csv"), 
+                                         header = TRUE, check.names = FALSE)
+tp53_regulates_metabolism_pw_gns <- unlist(lapply(tp53_regulates_metabolism_pw$MoleculeName, function(x) 
+  unlist(strsplit(x, " ", fixed = TRUE))[2]))
+tp53_regulates_metabolism_pw_gns <- unique(tp53_regulates_metabolism_pw_gns[tp53_regulates_metabolism_pw_gns != "TP53"])
+#tp53_regulates_metabolism_pw_gns <- setdiff(tp53_regulates_metabolism_pw_gns, metabol_p53$T_k.name)
 
-# Additional TP53 pathway targets
+
 # PIK3CA's TF targets are primarily NFKB, CREB, and FOXO
 nfkb_trrust_targets <- unique(trrust_df[trrust_df[,1] == "NFKB1", 'V2'])
 nfkb_trrust_targets <- nfkb_trrust_targets[nfkb_trrust_targets != "NFKB1"]  # 301 targets
