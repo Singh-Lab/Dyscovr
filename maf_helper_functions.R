@@ -60,12 +60,65 @@ get_pfam_domains <- function(maf, n) {
 #' @param maf a MAF file that has been read in by maftools
 get_mut_count_matrix <- function(maf) {
   #mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = NULL)
+  #mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = c("Missense_Mutation", 
+                                                              #"Nonsense_Mutation"))
   mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = c("Missense_Mutation", 
-                                                              "Nonsense_Mutation"))
+                                                              "Nonsense_Mutation",
+                                                              "Nonstop_Mutation",
+                                                              "Splice_Site"))
   #mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = "Missense_Mutation")
-  print(mut_count_matrix)
+  #print(mut_count_matrix)
   return(mut_count_matrix)
 }
+
+# As an aside--add rows of 0's to this matrix for genes that are not included
+allgene_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/allgene_targets.csv", 
+                            header = TRUE, row.names = 1, check.names = FALSE)
+
+#' Function to add genes with no mutations across any sample to the mutation count matrix
+#' @param mut_count_matrix a maftools-produced mutation count matrix
+#' @param allgene_targets a list of all target genes created from ensembl
+add_missing_genes_to_mut_count_mat <- function(mut_count_matrix, allgene_targets) {
+  # Get ENSG IDs from gene symbols
+  mut_count_mat_ensgs <- unlist(lapply(rownames(mut_count_matrix), function(x) 
+    unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'ensembl_gene_id']))[1]))
+  
+  # Get the genes that are missing
+  missing_genes <- setdiff(allgene_targets$ensg, mut_count_mat_ensgs)
+  
+  # Create a table for them and append to mutation count matrix
+  missing_genes_df <- data.table(matrix(nrow = length(missing_genes), ncol = ncol(mut_count_matrix)))
+  missing_genes_df[is.na(missing_genes_df)] <- 0
+  rownames(missing_genes_df) <- make.names(unlist(lapply(missing_genes, function(x) 
+    unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == x, 'external_gene_name']))[1])), unique = TRUE)
+  colnames(missing_genes_df) <- colnames(mut_count_matrix)
+  
+  mut_count_matrix_full <- rbind(mut_count_matrix, missing_genes_df)
+  
+  return(mut_count_matrix_full)
+}
+
+#' Function to add patients with no mutation of the the given specificity in any protein
+#' @param mut_count_matrix a maftools-produced mutation count matrix
+#' @param intersecting_patients a list of patients that have all data types within the given
+#' cancer type, before filtering is done
+add_missing_patients_to_mut_count_mat <- function(mut_count_matrix, intersecting_patients) {
+  colnames(mut_count_matrix) <- unlist(lapply(colnames(mut_count_matrix), function(x)
+    paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
+  missing_patients <- setdiff(intersecting_patients, unlist(lapply(colnames(mut_count_matrix), function(x) 
+    unlist(strsplit(x, "-", fixed = TRUE))[1])))
+  new_pat_df <- data.frame(matrix(nrow = nrow(mut_count_matrix), ncol = length(missing_patients)))
+  new_pat_df[is.na(new_pat_df)] <- 0
+  colnames(new_pat_df) <- paste(missing_patients, "-01A")
+  
+  new_mut_count_mat <- cbind(mut_count_matrix, new_pat_df)
+  return(new_mut_count_mat)
+}
+
+mut_count_matrix_full <- add_missing_genes_to_mut_count_mat(mut_count_matrix, allgene_targets)
+mut_count_matrix_full <- add_missing_patients_to_mut_count_mat(mut_count_matrix_full, intersecting_patients)
+
+write.csv(mut_count_matrix_full, paste0(path, "Saved Output Data Files/BRCA/Mutation/Mutation Count Matrices/mut_count_matrix_nonMutantGenesAdded.csv"))
 
 
 ############################################################
@@ -313,6 +366,26 @@ update_clin_with_mut_counts <- function(total_mut_count_tab, clinical_df, is_tcg
   clinical_df$Total.Num.Muts <- total_mut_counts
   
   return(clinical_df)
+}
+
+
+############################################################
+
+#' FOR A PARTICULAR DRIVER GOI, KEEP ONLY MUTATIONS IN PARTICULAR
+#' REGIONS OF INTEREST (E.G. GOI HOTSPOTS)
+#' Removes rows of the MAF file with mutations for the given GOI that
+#' do not fall into the given vector of hotspot positions
+#' @param maf_df a MAF file processed by maftools
+#' @param goi the Hugo gene symbol of the gene-of-interest
+#' @param vect_of_pos a vector of hotspot positions we'd like to keep
+filter_by_region <- function(maf_df, goi, vect_of_pos) {
+  maf_df_goi <- maf_df[maf_df$Hugo_Symbol == goi,]
+  maf_df_noGoi <- maf_df[maf_df$Hugo_Symbol != goi,]
+  
+  maf_df_goi_sub <- maf_df_goi[maf_df_goi$Start_Position %fin% vect_of_pos,]
+  
+  maf_df_comb <- rbind(maf_df_noGoi, maf_df_goi_sub)
+  return(maf_df_comb)
 }
 
 

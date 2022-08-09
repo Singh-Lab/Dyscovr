@@ -18,8 +18,8 @@
 #' @param dataset either "tcga", "metabric", "icgc", or "cptac3"
 prep_cdsearch_files <- function(proteome, label, dataset) {
   
-  path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Proteome/BRCA"
-  #path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Proteome/Pan-Cancer"
+  path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Proteome/BRCA/"
+  #path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Proteome/Pan-Cancer/"
   
   # Split the proteome into sub-proteomes for Batch CD-Search if needed
   if (length(proteome) > 3000) {
@@ -35,7 +35,7 @@ prep_cdsearch_files <- function(proteome, label, dataset) {
         output_fasta_name <- paste0(paste0(paste0(paste(paste0("proteome_subset_", label), dataset, sep = "_"), "_part"), i), ".fasta")
       }
       
-      write.fasta(prot_subset[[1]], names = names(prot_subset[[1]]), as.string = TRUE, file.out = paste(path_cdsearch, output_fasta_name))
+      write.fasta(prot_subset[[1]], names = names(prot_subset[[1]]), as.string = TRUE, file.out = paste0(path_cdsearch, output_fasta_name))
     }
   } else {
     output_filename <- ""
@@ -52,22 +52,22 @@ prep_cdsearch_files <- function(proteome, label, dataset) {
 ### SPLIT INTO SUB-PROTEOMES FOR BATCH CD-SEARCH
 ############################################################
 #' This function takes a proteome and, based on its length, splits it into 
-#' sub-FASTA files for use with Batch CD-Search (accepts max 4000 protein entries,
-#' but we use 3000 here to be on the safe side)
+#' sub-FASTA files for use with Batch CD-Search (accepts max 1000 protein entries,
+#' but we use 1000 here to be on the safe side) # UPDATE: this changed from 4K to 1K in 2022
 #' @param proteome a proteome of the human genome in FASTA format
 split_into_subproteomes <- function(proteome) {
   proteome_subsets <- list()   # A vector of all the resultant proteome subset DFs to return
   
-  num_subfiles <- as.integer(length(proteome) / 3000) + 1
+  num_subfiles <- as.integer(length(proteome) / 900) + 1
   
   line_count <-  1
   for (i in 1:num_subfiles) {
-    if (!(length(proteome) - line_count < 3000)) {
-      proteome_subsets[[i]] <- proteome[line_count:(line_count+3000)]
+    if (!(length(proteome) - line_count < 900)) {
+      proteome_subsets[[i]] <- proteome[line_count:(line_count+900)]
     } else {
       proteome_subsets[[i]] <- proteome[line_count:length(proteome)]
     }
-    line_count <- line_count + 3001
+    line_count <- line_count + 900
   }
   return(proteome_subsets)
 }

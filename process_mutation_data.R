@@ -1,6 +1,6 @@
 ############################################################
 ### Process TCGA Mutation Data File
-### Written By: Sara Camilli, July 2020
+### Written By: Sara Geraghty, July 2020
 ############################################################
 
 library(TCGAbiolinks)
@@ -14,6 +14,9 @@ library("RColorBrewer")
 # TCGA Workflow: https://www.bioconductor.org/packages/release/data/experiment/vignettes/TCGAWorkflowData/inst/doc/TCGAWorkflowData.html
 # TRONCO Package Vignette: https://bioconductor.org/packages/devel/bioc/vignettes/TRONCO/inst/doc/vignette.pdf
   # NOTE: Can also use TRONCO to import GISTEC CNV data
+# Useful information about MAF file formats: 
+  # GDC specified format with column descriptors: https://docs.gdc.cancer.gov/Data/File_Formats/MAF_Format/
+  # Biostars MAF caveats: https://www.biostars.org/p/69222/
 
 # OVERALL PROCESSING PIPELINE:
 
@@ -99,7 +102,7 @@ maf_filename <- paste(path, "Input Data Files/BRCA Data/Somatic_Mut_Data/TCGA.BR
 # maf_filename <- paste(path, "Input Data Files/BRCA Data/cBioPortal/brca_metabric/data_mutations.txt", sep = "")
 
 # maf_filename <- paste(path, "Input Data Files/Pan-Cancer/Somatic_Mut_Data/TCGA.Aggregate.muse.aggregated.somatic.maf", sep = "")
-# maf_file <- import.MAF(maf_filename, sep = "\t", is.TCGA = TRUE, merge.mutation.types = FALSE)
+# maf_file <- import.MAF(maf_filename, sep = "\t", is.TCGA = TRUE, merge.mutation.types = FALSE, to.TRONCO = FALSE)
   # This will return the MAF file in TRONCO format; set to.TRONCO to FALSE to import as DF
 # Alternatively, upload each individual MAF file for each cancer type to separately filter
   # hypermutators by cancer type
@@ -134,7 +137,6 @@ clinical_df <- read.csv(clin_filename, header = TRUE)
 # Filter by case ID
 maf_file_df <- maf_file_df_unfilt[maf_file_df_unfilt$case_id %fin% clinical_df$case_id,]
 #maf_file_df <- maf_file_df_unfilt[maf_file_df_unfilt$Tumor_Sample_Barcode %fin% clinical_df$SAMPLE_ID,]
-# This limits to only 173 unique proteins with mutations across these 854 patients
 
 # For pan-cancer with all MAF files, filter each by case ID
 maf_file_dfs <- lapply(maf_file_dfs_unfilt, function(df) 
@@ -150,7 +152,6 @@ maf_file_dfs <- lapply(maf_file_dfs_unfilt, function(df)
 hypermut_res <- filter_hypermutators(maf_filename, maf_file_df)
 maf_file_df <- hypermut_res[[1]] 
   # BRCA: The filtered maf file still has 30305 entries, 12097 unique Swissprot, 12968 unique names
-  # TCGA: The filtered maf file still has X entries, X unique Swissprot, X unique names
   # METABRIC: The filtered maf file still has 6058 entries, 173 unique names
 total_mut_count_df <- hypermut_res[[2]]  # The filtered mutation count matrix
 
@@ -192,11 +193,25 @@ clinical_df <- read.csv(clin_filename, header = TRUE)
 
 
 ############################################################
+# OPT: KEEP ONLY MUTATIONS IN PARTICULAR POSITIONS FOR 
+# A PARTICULAR GENE OF INTEREST
+############################################################
+goi <- "PIK3CA"
+vect_of_pos <- c(179234297, 179218303, 179218294, 179203765)
+maf_file_df <- filter_by_region(maf_file_df, goi, vect_of_pos)
+
+
+############################################################
 # FILTER OUT NON-MISSENSE/NONSENSE MUTATIONS
 ############################################################
+# An explanation of the difference between a "Splice_Region" variant and a "Splice_Site" variant: https://github.com/mskcc/vcf2maf/issues/63#issuecomment-236981452
+# Essentially, "splice site" mutations are more likely to alter splicing (within 2bp of the splice site), while "splice region"
+# mutations are more uncertain in their effect on splicing (3-8bp from the splice site)
 maf_file_df_missense <- maf_file_df[maf_file_df$Variant_Classification == "Missense_Mutation",]
-#maf_file_df_misAndNon <- maf_file_df[(maf_file_df$Variant_Classification == "Missense_Mutation") | 
-            #(maf_file_df$Variant_Classification == "Nonsense_Mutation"),]
+maf_file_df_misAndNon <- maf_file_df[(maf_file_df$Variant_Classification == "Missense_Mutation") | 
+            (maf_file_df$Variant_Classification == "Nonsense_Mutation"),]
+maf_file_nonsyn <- maf_file_df[maf_file_df$Variant_Classification %fin% c("Missense_Mutation", "Nonsense_Mutation",
+                                                                          "Nonstop_Mutation", "Splice_Site"),]
   # BRCA: Narrows to 16689 entries, 8685 unique SWISSPROT IDs, 8954 unique Hugo IDs
   # TCGA (ALL): Narrows to 300796 entries, 17944 unique SWISSPROT IDs, and 18660 unique Hugo IDs
   # METABRIC: Narrows to 3353 entries, 170 unique Hugo IDs
@@ -267,7 +282,7 @@ proteome_subset_missense <- get_proteome_subset(proteome, maf_swissprot_ids_miss
 proteome_subset_missense_symb <- get_proteome_subset(proteome, maf_symbols_missense, 'hugo')
 
 length(unique(proteome_subset_missense))  # check the number of protein sequences remaining
-  # The length of this subset: BRCA - 8675 (11068 for missense + nonsense), TCGA (ALL) - 17899 (18062 for missense + nonsense)
+  # The length of this subset: BRCA - 8569 (8912 for missense + nonsense, 9023 for nonsynonymous), TCGA (ALL) - 17899 (18062 for missense + nonsense)
   # 4242 for BRCA for silent, 16725 for Pan-Cancer for silent
   # 160 for METABRIC BRCA missense, 162 for METABRIC BRCA missense + nonsense
 
@@ -343,7 +358,7 @@ accessions_numeric <- regmatches(accessions_missense, regexpr("[[:digit:]]+", ac
 intersecting_domain_acc_missense <- intersect(accessions_numeric, binding_domains_ids_noPF)
 length(intersecting_domain_acc_missense)
 
-  # BRCA is 1162 intersecting domains (1250 for missense + nonsense, 895 for silent); TCGA (ALL) is 1453 domains (1437 for missense + nonsense, 1414 for silent)
+  # BRCA is 1137 intersecting domains (1151 for missense + nonsense, 895 for silent, 1156 for nonsynon.); TCGA (ALL) is 1453 domains (1437 for missense + nonsense, 1414 for silent)
   # NUC ACIDS ONLY: BRCA is 218 intersecting domains, TCGA (ALL) is 279
 
   # METABRIC has 131 intersecting domains for missense, 131 for missense + nonsense
@@ -447,7 +462,7 @@ domains_missense_iprotein_sub <- merge_proteome_and_domains(domains_missense_ipr
 ############################################################
 # Examine how many actual unique accessions we have
 length(unique(domains_missense_iprotein_sub$Accession))  
-  # All Ligands: BRCA: 1910 (2092 missense + nonsense, 1237 silent); TCGA (ALL): 2767 (2749 missense + nonsense, 2644 silent)
+  # All Ligands: BRCA: 1865 (1910 missense + nonsense, 1237 silent, 1881 nonsynon.); TCGA (ALL): 2767 (2749 missense + nonsense, 2644 silent)
   # Nucleic Acids Only: BRCA: 257; TCGA (ALL): 324
 
   # METABRIC BRCA: 133 missense (133 missense + nonsense)
@@ -487,7 +502,7 @@ swissprot_ids_missense_iprotein <- extract_swissprot_ids(domains_missense_iprote
 protein_ids_missense_iprotein <- extract_protein_names(domains_missense_iprotein_sub)  
 length(protein_ids_missense_iprotein)
 
-# All Ligands: BRCA: 6214 (7808 with missense + nonsense, 3040 silent); TCGA (ALL): 11,939 (11,989 with missense + nonsense, 11,348 silent)
+# All Ligands: BRCA: 6118 (6360 with missense + nonsense, 3040 silent, 6383 nonsyn.); TCGA (ALL): 11,939 (11,989 with missense + nonsense, 11,348 silent)
 # Nuc. Acids Only: BRCA: 1914; TCGA (ALL): 3,644
 
 # METABRIC BRCA: 121 missense (122 for missense + nonsense)
@@ -656,8 +671,8 @@ get_overlap_with_binding_domains <- function(id, domain_df_sub, maf_sub,
     # Make sure this mutation is in the coding region
     if (!mut_pos == "-") {
       # Also get the patient under consideration
-      patient_id <- unlist(strsplit(maf_sub$Tumor_Sample_Barcode[which(maf_sub$Protein_position == x)], 
-                                    "-", fixed = TRUE))[3]
+      patient_id <- paste(unlist(strsplit(maf_sub$Tumor_Sample_Barcode[which(maf_sub$Protein_position == x)], 
+                                    "-", fixed = TRUE))[3:4], collapse = "-")
       
       # First, check if the mutation is in a conserved binding domain 
       domain_rows <- lapply(1:nrow(domain_df_sub), function(i) {
@@ -669,7 +684,7 @@ get_overlap_with_binding_domains <- function(id, domain_df_sub, maf_sub,
           # Columns to fill: "Swissprot", "From", "To", "Source", "Accession", 
             # "Short Name", "Superfamily", "Mut.Pos", "Patient"
           return(c(id, start_dom, end_dom, "Conserved Domain", domain_df_sub[i, 'Accession'], 
-                   domain_df_sub[i, 'Shortname'], domain_df_sub[i, 'Superfamily'], mut_pos, patient_id))
+                   domain_df_sub[i, 'Short name'], domain_df_sub[i, 'Superfamily'], mut_pos, patient_id))
           # Or return(c(id, start_dom, end_dom, "Conserved Domain", domain_df_sub[i, 'Accession'], 
             # domain_df_sub[i, 'Short.name'], domain_df_sub[i, 'Superfamily'], mut_pos, patient_id)) 
             # depending on headers
@@ -745,14 +760,14 @@ domains_missense_idomain_sub <- distinct(domains_missense_idomain_sub)
 # Get the number of unique domains in this DF:
 length(unique(domains_missense_idomain_sub$Accession)) 
 
-# All Ligands: BRCA: 1130; Pan-Cancer: 2605
+# All Ligands: BRCA: 1099; Pan-Cancer: 2605
 # Nuc. Acids Only: BRCA: 151; Pan-Cancer: 310
 
 # Get the Swissprot IDs
 swissprot_ids_missense_idomain <- unique(domains_missense_idomain_sub$Swissprot)
 print(length(swissprot_ids_missense_idomain)) 
 
-# All Ligands: BRCA: 3997; Pan-Cancer: 11305
+# All Ligands: BRCA: 3964; Pan-Cancer: 11305
 # Nuc. Acids Only: BRCA: 1190; Pan-Cancer: 3274
 
 # Write the full table to a CSV
@@ -892,8 +907,9 @@ check_if_in_bp <- function(mut_pos, binding_pos, patient_id, label, id) {
 }
 
 
-domains_missense_ibindingpos_sub <- get_ibindingpos_subset(interacdome_binding_positions_df,
-                                                           canbind_df_sub, domains_missense_idomain_sub,
+domains_missense_ibindingpos_sub <- get_ibindingpos_subset(domains_missense_idomain_sub,
+                                                           interacdome_binding_positions_df,
+                                                           canbind_df_sub, 
                                                            concavity_df_sub)
 
 # For nucleic acids, not using ConCavity
@@ -909,7 +925,7 @@ domains_missense_ibindingpos_sub <- distinct(domains_missense_ibindingpos_sub)
 # Get the number of unique proteins in this DF:
 swissprot_ids_missense_ibindingpos <- unique(domains_missense_ibindingpos_sub$Protein.ID)
 length(swissprot_ids_missense_ibindingpos) 
-  # All Ligands: BRCA: 810; Pan- Cancer: 4610
+  # All Ligands: BRCA: 638; Pan- Cancer: 4610
   # Nuc. Acids Only: BRCA: 55; Pan-Cancer: 499
   
 # Write the full table to a CSV
