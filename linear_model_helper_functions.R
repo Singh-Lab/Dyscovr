@@ -8,7 +8,8 @@
 
 library(stringr)
 library(caret)
-
+library(glmnet)
+library(gglasso)
 
 ############################################################
 
@@ -441,11 +442,13 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
 #' cis gene pairings 
 #' @param removeMetastatic a TRUE/ FALSE value indicating whether or not we have removed 
 #' metastatic samples from the analysis
+#' @param regularization either "None", "L1" or "Lasso", or "L2" or "Ridge" to indicate
+#' if regularization was performed
 create_output_filename <- function(test, tester_name, run_name, targets_name, expression_df_name,
                                    cna_bucketing, mutation_regprot_df_name, meth_bucketing,
                                    meth_type, patient_df_name, num_PEER, num_pcs, randomize,
                                    covs_to_incl_label, patients_to_incl_label, removeCis, 
-                                   removeMetastatic) {
+                                   removeMetastatic, regularization) {
   outfn <- "res"
   
   # Add the name of the patient population of interest, if there is one
@@ -484,11 +487,17 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   if(!(num_PEER == 0)) {outfn <- paste(outfn, paste(num_PEER, "PEER", sep = ""), sep = "_")}
   if(!(num_pcs == 0))  {outfn <- paste(outfn, paste(num_pcs, "PCs", sep = ""), sep = "_")}
   
-  # If we are removing cis comparisons, add a label to denote this
-  if(removeCis) {outfn <- paste(outfn, "rmCis", sep = "_")}
+  # If we are NOT removing cis comparisons, add a label to denote this
+  if(!removeCis) {outfn <- paste(outfn, "noRmCis", sep = "_")}
   
-  # If we are removing metastatic samples, add a label to denote this
-  if(removeMetastatic) {outfn <- paste(outfn, "rmMetast", sep = "_")}
+  # If we are NOT removing metastatic samples, add a label to denote this
+  if(!removeMetastatic) {outfn <- paste(outfn, "notRmMetast", sep = "_")}
+  
+  # If we have regularized in some way, denote this
+  if(!(regularization == "None")) {
+    if (regularization %in% c("L1", "Lasso")) {outfn <- paste(outfn, "L1", sep = "_")}
+    if (regularization %in% c("L2", "Ridge")) {outfn <- paste(outfn, "L2", sep = "_")}
+  }
   
   # If we've restricted the number of covariates, add that label
   if(!(covs_to_incl_label == "")) {outfn <- paste(outfn, covs_to_incl_label, sep = "_")}
@@ -513,66 +522,119 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
 #' variables in the formula
 #' @param type a string indicating the type of regularization (ridge or lasso)
 #' @param debug a TRUE/ FALSE value indicating whether or not we are in debug mode
-run_regularization_model <- function(formula, lm_input_table, type, debug) {
+#' @param meth_bucketing a TRUE/FALSE value indicating whether or not methylation 
+#' was bucketed; only used in the case of group lasso
+#' @param cna_bucketing a TRUE/FALSE value indicating whether or not CNA was
+#' bucketed; only used in the case of group lasso
+run_regularization_model <- function(formula, lm_input_table, type, debug, 
+                                     meth_bucketing, cna_bucketing) {
   
   lm_input_table <- as.data.frame(lm_input_table)
   
   # Get the data of interest using the formula
   spl_formula <- unlist(strsplit(formula, " ~ ", fixed = TRUE))
   y_var <- trimws(spl_formula[1], which = "both")
-  print(y_var)
   y_data <- as.matrix(lm_input_table[,colnames(lm_input_table) == y_var])
   x_vars <- unlist(strsplit(trimws(spl_formula[2], which = "both"), " + ", fixed = TRUE))
-  print(x_vars)
   x_data <- as.matrix(lm_input_table[,colnames(lm_input_table) %fin% x_vars])
+  
+  #print(head(y_data))
+  #print(head(x_data))
   
   # Do standard scaling preprocessing, using preProcess function from the caret package
   #pre_proc_val <- preProcess(x_data, method = c("center", "scale"))
   #x_data <- predict(pre_proc_val, x_data)
   #summary(x_data)
-  print(head(lm_input_table))
-  print(y_data)
-  print(x_data)
+  #print(head(lm_input_table))
+  #print(y_data)
+  #print(x_data)
   
   # Use a cross validation glmnet to get the best lambda value; alpha = 0 
   # indicates that we are doing L2-regularization
   lambdas <- 10^seq(2, -3, by = -.1)
+  best_model <- NA
   
   # Ridge regression
   if((type == "ridge") | (type == "L2")) {
-    ridge.cv <- cv.glmnet(x_data, y_data, alpha = 0, lambda = lambdas)
-    optimal_lambda <- ridge.cv$lambda.min
-    if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
-    # Run the model with the best lambda
-    best_model <- glmnet(x_data, y_data, alpha = 0, lambda = optimal_lambda)
-  
+    tryCatch({
+      ridge.cv <- cv.glmnet(x_data, y_data, alpha = 0, lambda = lambdas)
+      optimal_lambda <- ridge.cv$lambda.min
+      if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
+      # Run the model with the best lambda
+      best_model <- glmnet(x_data, y_data, alpha = 0, family = "gaussian", 
+                           lambda = optimal_lambda, standardize = FALSE)
+    }, error = function(cond) {best_model <- NA})
+   
   # Lasso
   } else if((type == "lasso") | (type == "L1")) {
-    lasso.cv <- cv.glmnet(x_data, y_data, alpha = 1, lambda = lambdas, 
-                          standardize = TRUE, nfolds = 5)
-    optimal_lambda <- lasso.cv$lambda.min
-    if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
-    # Run the model with the best lambda
-    best_model <- glmnet(x_data, y_data, alpha = 1, lambda = optimal_lambda, 
-                         standardize = TRUE)
-    
+    tryCatch({
+      lasso.cv <- cv.glmnet(x_data, y_data, alpha = 1, lambda = lambdas, 
+                            standardize = TRUE, nfolds = 5)
+      optimal_lambda <- lasso.cv$lambda.min
+      if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
+      # Run the model with the best lambda
+      #best_model <- glmnet(x_data, y_data, alpha = 1, family = "gaussian",
+      #lambda = optimal_lambda, standardize = FALSE, intercept = FALSE)
+      
+      # Alternatively, could use a group lasso using the gglasso package, to account
+      # for the dummy variables (bucketed variables)
+      v.group <- get_groups_for_variables(x_vars, meth_bucketing, cna_bucketing)
+      best_model <- gglasso(x_data, y_data, lambda = optimal_lambda, 
+                            group = v.group, loss = "ls", intercept = FALSE)
+    }, error = function(cond) {best_model <- NA})
+
     
   } else {
     print(paste("Only implemented for ridge or lasso;", 
                 paste(type, "is not implemented. Proceeding with ridge.")))
-    ridge.cv <- cv.glmnet(x_data, y_data, alpha = 0, lambda = lambdas)
-    optimal_lambda <- ridge.cv$lambda.min
-    if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
+    tryCatch({
+      ridge.cv <- cv.glmnet(x_data, y_data, alpha = 0, lambda = lambdas)
+      optimal_lambda <- ridge.cv$lambda.min
+      if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
+    }, error = function(cond) {best_model <- NA})
     
     # Run the model with the best lambda
     best_model <- glmnet(x_data, y_data, alpha = 0, lambda = optimal_lambda)
   }
   
-  if(debug) {
-    print("Summary of Best Regularized Model")
-    print(summary(best_model))
+  #if(debug) {
+    #print("Summary of Best Regularized Model")
+    #print(summary(best_model))
+  #}
+  #best_model <- tidy(best_model)
+  
+  # Pipe the selected covariates back into a LM to get p-values
+  # Adapted from: https://stats.stackexchange.com/questions/410173/lasso-regression-p-values-and-coefficients
+  x_data_sub <- NA
+  if(!is.na(best_model)) {
+    covs <- as.matrix(coef(best_model))
+    keep_x <- rownames(covs)[covs != 0]
+    keep_x <- keep_x[!keep_x == "(Intercept)"]
+    x_data_sub <- as.data.frame(x_data[, keep_x])
+    if(ncol(x_data_sub) == 1) {colnames(x_data_sub) <- as.character(keep_x)}
+    
+    if(debug) {
+      print(covs)
+      print(keep_x)
+      print(head(x_data_sub))
+      print(colnames(x_data_sub))
+    }
   }
-  return(best_model)
+  
+  if(!(is.null(colnames(x_data_sub)) | is.na(best_model))) {
+    if(ncol(x_data_sub) == 1) {
+      formula <- paste("y_data", colnames(x_data_sub)[1], sep = " ~ ")
+    } else {
+      formula <- paste(c(paste("y_data", colnames(x_data_sub)[1], sep = " ~ "), 
+                         colnames(x_data_sub)[2:length(colnames(x_data_sub))]), collapse = " + ")
+    }
+    print(formula)
+    input_df <- as.data.frame(cbind(y_data, x_data_sub))
+    names(input_df)[1] <- "y_data"
+    lm_res <- speedlm(formula = formula, data = input_df)
+  } else {lm_res <- NA}
+  
+  return(lm_res)
 }
 
 
@@ -592,6 +654,57 @@ eval_metrics <- function(model, df, predictions, target){
   print(paste("RMSE:", as.character(round(sqrt(sum(resids2)/N), 2)))) #RMSE
 }
 
+
+#' Helper function to get the categorical variables that we have bucketed (e.g. one-hot
+#' encoded) for group lasso, and assign them to groups. Returns a vector of group
+#' assignments for all variables in x_data.
+#' @param x_vars a vector of the names of the x variables (covariates)
+#' @param meth_bucketing a TRUE/FALSE value indicating whether or not methylation 
+#' was bucketed
+#' @param cna_bucketing a TRUE/FALSE value indicating whether or not CNA was
+#' bucketed
+get_groups_for_variables <- function(x_vars, meth_bucketing, cna_bucketing) {
+  
+  # Obtain the bucketed, categorical variables
+  bucketed_vars <- c("Tot_Mut_b","Tumor_purity_b", "Tot_IC_Frac_b", "Cancer_type_b")
+  if(meth_bucketing) {
+    bucketed_vars <- c(bucketed_vars, "MethStat_k")
+    if(analysis_type == "eQTL") {bucketed_vars <- c(bucketed_vars, "MethStat_i")}
+  }
+  if(!((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing)))) {
+    bucketed_vars <- c(bucketed_vars, "CNAStat_k", "CNAStat_i")
+  }
+  
+  # Assign these variables to numerical groups (non-bucketed variables are given
+  # their own group number)
+  grp_index <- 1
+  curr_grp <- ""
+  group_assignments <- c()
+  
+  for(i in 1:length(x_vars)) {
+    x <- unlist(strsplit(x_vars[i], "_", fixed = TRUE))[2]
+    # This is a bucketed variable
+    if(TRUE %in% unlist(lapply(bucketed_vars, function(var) ifelse(grepl(x, var), TRUE, FALSE)))) {
+      # If it's a bucketed variable, but not in the current group, advance the
+      # group index
+      if ((curr_grp != x) & (curr_grp != "")) {
+        grp_index <- grp_index + 1
+      } 
+      # Change the group assignment and assign the group index
+      curr_grp <- x
+      group_assignments <- c(group_assignments, grp_index)
+    } else {
+      # Advance and assign the group index
+      grp_index <- grp_index + 1
+      group_assignments <- c(group_assignments, grp_index)
+      curr_grp <- x
+    }
+  }
+  print(x_vars)
+  print(group_assignments)
+  
+  return(group_assignments)
+}
 
   
 ############################################################

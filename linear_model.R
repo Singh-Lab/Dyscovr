@@ -75,6 +75,8 @@ parser$add_argument("--tester_ensg_id", default = "ENSG00000141510", type = "cha
                     help = "ENSG ID of regulatory protein if doing a 1-protein test. Defaults to TP53 (ENSG00000141510).")
 parser$add_argument("--incl_nextMutDriver", default = "FALSE", type = "character",
                     help = "Currently implemented only for TP53 and PIK3CA in BRCA. If TRUE, will include mutation status, CNA status, and mutation interaction term of the other (TP53 if PIK3CA, PIK3CA if TP53) in the model as well.")
+parser$add_argument("--run_query_genes_jointly", default = "TRUE", type = "character",
+                    help = "If TRUE, will run all the query regulatory proteins together in the same joint model, rather than running one model per query-target pair.")
 
 # The files to use for the other inputs
 parser$add_argument("--protein_ids_df", default = "iprotein_protein_ids_df.csv", 
@@ -121,8 +123,6 @@ parser$add_argument("--meth_bucketing", default = TRUE, type = "character",
 parser$add_argument("--meth_type", default = "Beta", type = "character",
                     help = "The type methylation values we are using. Default is Beta, but other options are M and Threshold_X, where X is the threshold value.")
 
-# Label for the explanatory variable we are interested in (which output files to write/ output visualizations to make)
-
 # What type of test we are running, so we can write the results files to an appropriate directory. 
 # Only necessary if --test is F.
 parser$add_argument("--run_name", default = "cancerRelated", type = "character",
@@ -145,7 +145,6 @@ parser$add_argument("--collinearity_diagn", default = "FALSE", type = "character
                     help = "A TRUE/ FALSE value indicating whether or not we want detailed collinearity diagnostics. Can be useful but adds to runtime; not suggested for large runs. Default is FALSE.")
 parser$add_argument("--inclResiduals", default = "FALSE", type = "character",
                     help = "A TRUE/FALSE value indicating whether we want to include residuals in the output DF. Default is FALSE.")
-
 
 # Add a flag for adding a regularization method
 parser$add_argument("--regularization", default = "None", type = "character",
@@ -208,6 +207,7 @@ removeCis <- str2bool(args$removeCis)
 removeMetastatic <- str2bool(args$removeMetastatic)
 useNumFunctCopies <- str2bool(args$useNumFunctCopies)
 incl_nextMutDriver <- str2bool(args$incl_nextMutDriver)
+runRegprotsJointly <- str2bool(args$run_query_genes_jointly)
 inclResiduals <- str2bool(args$inclResiduals)
 
 
@@ -480,6 +480,9 @@ if(useNumFunctCopies) {
 # CNA_i : The copy number alteration status of protein i (1 if amplified, -1 if deleted, 0 if no amp. or del. OR copy #) 
 # across all tumor samples 1..j..M
 
+# NOTE: if we opt to run all regulatory proteins jointly in the same model, we repeat these
+# three covariates for all given regulatory proteins
+
 # ALTERNATIVE: Rather than MutStat_i and CNA_i, can also use a bulk "Num. Functional Copies" (Num_F_Copies_i) term,
 # which is the log2 of the number of functional copies a given sample possesses of the regulatory protein i 
   # Can also bucket (0 = no functional copies, 1 = 1 functional copy, 2 = at least 2 functional copies)
@@ -518,7 +521,7 @@ if(useNumFunctCopies) {
 #' @param methylation_df table of methylation results (rows are proteins, columns 
 #' are patients, entries are methylation values)
 #' @param methylation_df_meQTL OPTIONAL: table of methylation results (rows are 
-#' proteins, columnsare patients, entries are raw methylation values to be used
+#' proteins, columns are patients, entries are raw methylation values to be used
 #' for regulatory protein i in the case of an meQTL and bucketed methylation for t_k)
 #' @param cna_df table of CNA per gene (rows are proteins, columns are patients, 
 #' entries are CNA values)
@@ -569,6 +572,9 @@ if(useNumFunctCopies) {
 #' cis pairings if needed
 #' @param incl_nextMutDriver a TRUE/FALSE value indicating, if we are running just on
 #' TP53 or PIK3CA in BRCA, whether or not we include mutation/ CNA/ mutation interaction
+#' @param run_query_genes_jointly a TRUE/ FALSE value indicating whether or not we 
+#' want to run all query regulatory proteins jointly in the same model, or separately
+#' (one model per query-target pair)
 #' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3', to denote what columns
 #' we are referencing/ specific data types we are using
 #' @param inclResiduals a TRUE/FALSE value indicating whether or not we want to include 
@@ -578,216 +584,162 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                              methylation_df_meQTL, cna_df, expression_df, num_funct_copies_df,
                              neighboring_cna_df, is_rank_or_quant_norm, log_expression, analysis_type, 
                              tumNormMatched, randomize, cna_bucketing, meth_bucketing, 
-                             useNumFunctCopies, num_PEER, num_pcs, 
-                             debug, collinearity_diagn, outpath, outfn, regularization, 
-                             covs_to_incl, removeCis, all_genes_id_conv, incl_nextMutDriver,
+                             useNumFunctCopies, num_PEER, num_pcs, debug, collinearity_diagn, 
+                             outpath, outfn, regularization, covs_to_incl, removeCis, 
+                             all_genes_id_conv, incl_nextMutDriver, run_query_genes_jointly,
                              dataset, inclResiduals) {
   
-  # We need to get a mini-table for every r_i, t_k combo that we rbind into a master table of results
-  results_df_list <- lapply(1:protein_ids_df[, .N], function(i) {
+  # If we are looking at each query protein individually, create a mini-table for 
+  # every r_i, t_k combo that we rbind into a master table of results
+  master_df <- NA
+  
+  if(!run_query_genes_jointly) {
+    results_df_list <- lapply(1:protein_ids_df[, .N], function(i) {
+      
+      # Get the given regulatory protein r_i's Swissprot & ENSG IDs
+      regprot <- protein_ids_df$swissprot_ids[i]
+      regprot_ensg <- unlist(strsplit(protein_ids_df$ensg_ids[i], ";", fixed = TRUE))
+      
+      print(paste("Regulatory protein", paste(i, paste("/", protein_ids_df[, .N]))))
+      
+      # Create a starter table that gets the mutation, CNA, and methylation status 
+      # for this regulatory protein and bind it to the patient DF
+      regprot_i_df <- fill_regprot_inputs(patient_df = patient_df,
+                                          regprot_i_uniprot = regprot, 
+                                          regprot_i_ensg = regprot_ensg, 
+                                          mutation_regprot_df = mutation_df_regprot, 
+                                          methylation_df = methylation_df, 
+                                          cna_df = cna_df,
+                                          num_funct_copies_df = num_funct_copies_DF,
+                                          useNumFunctCopies = useNumFunctCopies,
+                                          cna_bucketing = cna_bucketing, 
+                                          meth_bucketing = meth_bucketing, 
+                                          tumNormMatched = tumNormMatched, 
+                                          incl_nextMutDriver = incl_nextMutDriver,
+                                          run_query_genes_jointly = run_query_genes_jointly,
+                                          debug = debug, dataset = dataset)
+      starter_df <- cbind(patient_df, regprot_i_df)
+      
+      if(debug) {
+        print("Starter DF, with Regprot Inputs")
+        print(head(starter_df))
+      }
+      
+      # If remove cis is TRUE, limit the downstream target DF to only trans pairings
+      if(removeCis) {
+        downstream_target_df <- subset_to_trans_targets(regprot_ensg, downstream_target_df,
+                                                        all_genes_id_conv, debug)
+      }
+
+      regprot_i_results_df_list <- run_linear_model_per_target_gene(downstream_target_df, methylation_df,
+                                                                    methylation_df_meQTL, starter_df, 
+                                                                    mutation_targ_df, cna_df, expression_df, 
+                                                                    log_expression, cna_bucketing, meth_bucketing, 
+                                                                    analysis_type, tumNormMatched, debug, 
+                                                                    dataset, randomize, num_PEER, num_pcs,
+                                                                    covs_to_incl, inclResiduals, removeCis,
+                                                                    collinearity_diagn, regularization,
+                                                                    run_query_genes_jointly, regprot)
+      
+      # Now we have a list of output summary DFs for each of this regulatory protein's targets. 
+      # Bind them all together.
+      #return(do.call("rbind", regprot_i_results_df_list))
+      regprot_i_results_df_list <- regprot_i_results_df_list[!is.na(regprot_i_results_df_list)]
+      regprot_i_results_df <- as.data.table(rbindlist(regprot_i_results_df_list, fill = TRUE))
+      
+      if(debug) {
+        print("Combined Results DF")
+        print(head(regprot_i_results_df))
+      }
+      
+      return(regprot_i_results_df)
+    })
     
-    # Get the given regulatory protein r_i's Swissprot & ENSG IDs
-    regprot <- protein_ids_df$swissprot_ids[i]
-    regprot_ensg <- unlist(strsplit(protein_ids_df$ensg_ids[i], ";", fixed = TRUE))
+    # Now we have a list of the results tables, one table per regulatory protein, 
+    # with entries for each target. Bind these all together into one master table.
+    if(debug) {
+      print("Results DF list")
+      print(head(results_df_list))
+    }
     
-    print(paste("Regulatory protein", paste(i, paste("/", protein_ids_df[, .N]))))
+    # Check that none of the DF entries are NA or empty data.tables
+    results_df_list <- results_df_list[!is.na(results_df_list)]
+    results_df_list <- Filter(function(dt) nrow(dt) != 0, results_df_list)
     
-    # Create a starter table that gets the mutation, CNA, and methylation status 
-    # for this regulatory protein and binds it to the patient DF
-    starter_df <- fill_regprot_inputs(patient_df = patient_df, 
-                                      regprot_i_uniprot = regprot, 
-                                      regprot_i_ensg = regprot_ensg, 
-                                      mutation_regprot_df = mutation_df_regprot, 
-                                      methylation_df = methylation_df, 
-                                      cna_df = cna_df,
-                                      num_funct_copies_df = num_funct_copies_DF,
-                                      useNumFunctCopies = useNumFunctCopies,
-                                      cna_bucketing = cna_bucketing, 
-                                      meth_bucketing = meth_bucketing, 
-                                      tumNormMatched = tumNormMatched, 
-                                      incl_nextMutDriver = incl_nextMutDriver,
-                                      debug = debug, dataset = dataset)
+    master_df <- rbindlist(results_df_list, use.names = TRUE, fill = TRUE)
+    #master_df <- do.call(rbind, results_df_list)
+  }
+  
+  # Otherwise, if we are running all our regulatory proteins jointly in one model
+  else {
+    
+    protein_input_dfs <- lapply(1:protein_ids_df[, .N], function(i) {
+      
+      # Get the given regulatory protein r_i's Swissprot & ENSG IDs
+      regprot <- protein_ids_df$swissprot_ids[i]
+      regprot_ensg <- unlist(strsplit(protein_ids_df$ensg_ids[i], ";", fixed = TRUE))
+      
+      print(paste("Regulatory protein", paste(i, paste("/", protein_ids_df[, .N]))))
+      
+      # Create a starter table that gets the mutation, CNA, and methylation status 
+      # for this regulatory protein and bind it to the patient DF
+      regprot_i_df <- fill_regprot_inputs(patient_df = patient_df,
+                                          regprot_i_uniprot = regprot, 
+                                          regprot_i_ensg = regprot_ensg, 
+                                          mutation_regprot_df = mutation_df_regprot, 
+                                          methylation_df = methylation_df, 
+                                          cna_df = cna_df,
+                                          num_funct_copies_df = num_funct_copies_DF,
+                                          useNumFunctCopies = useNumFunctCopies,
+                                          cna_bucketing = cna_bucketing, 
+                                          meth_bucketing = meth_bucketing, 
+                                          tumNormMatched = tumNormMatched, 
+                                          incl_nextMutDriver = incl_nextMutDriver,
+                                          run_query_genes_jointly = run_query_genes_jointly,
+                                          debug = debug, dataset = dataset)
+      setnames(regprot_i_df, "MutStat_i", paste0(regprot, "_MutStat_i"))
+      setnames(regprot_i_df, "CNAStat_i", paste0(regprot, "_CNAStat_i"))
+      setnames(regprot_i_df, "MethStat_i", paste0(regprot, "_MethStat_i"))
+      
+      # If remove cis is TRUE, limit the downstream target DF to only trans pairings
+      if(removeCis) {
+        downstream_target_df <- subset_to_trans_targets(regprot_ensg, downstream_target_df,
+                                                        all_genes_id_conv, debug)
+      }
+      
+      print(head(regprot_i_df))
+      print(dim(regprot_i_df))
+      return(regprot_i_df)
+    })
+    
+    # Bind these together
+    regprot_df <- do.call(cbind, protein_input_dfs)
+    
+    # Add the patient/ sample DF to this 
+    starter_df <- cbind(patient_df, regprot_df)
     
     if(debug) {
       print("Starter DF, with Regprot Inputs")
       print(head(starter_df))
     }
     
-    # If remove cis is TRUE, limit the downstream target DF to only trans pairings
-    if(removeCis) {
-      downstream_target_df <- subset_to_trans_targets(regprot_ensg, downstream_target_df,
-                                                      all_genes_id_conv, debug)
-    }
-    
-    # Loop through all the targets for this protein of interest and create a table 
-    # for each of them from this starter DF
-    regprot_i_results_df_list <- lapply(1:downstream_target_df[, .N], function(k) {
-      
-      # Get the target t_k's Swissprot & ENSG IDs
-      targ <- unlist(strsplit(downstream_target_df$swissprot[k], ";", fixed = TRUE))
-      targ_ensg <- unlist(strsplit(downstream_target_df$ensg[k], ";", fixed = TRUE))
-      
-      print(paste("Target gene", paste(k, paste("/", downstream_target_df[, .N]))))
-      
-      # OPT: Filter outlier expression for each group (mutated, unmutated) using 
-      # a standard (1.5 x IQR) + Q3 schema
-      #starter_df <- filter_expression_df(expression_df, starter_df, targ_ensg)
-      
-      if(length(intersect(targ_ensg, regprot_ensg)) == 0) {
-        # Create a full input table to the linear model for this target
-        #print(methylation_df_meQTL)
-        methylation_df_targ <- methylation_df
-        if(!is.null(methylation_df_meQTL)) {
-          if(!is.na(methylation_df_meQTL)) {
-            methylation_df_targ <- methylation_df_meQTL
-          }
-        } 
-        
-        lm_input_table <- fill_targ_inputs(starter_df = starter_df, targ_k = targ, 
-                                           targ_k_ensg = targ_ensg, 
-                                           mutation_targ_df = mutation_df_targ,
-                                           methylation_df = methylation_df_targ, 
-                                           cna_df = cna_df, expression_df = expression_df, 
-                                           log_expression = log_expression,
-                                           cna_bucketing = cna_bucketing,
-                                           meth_bucketing = meth_bucketing, 
-                                           analysis_type = analysis_type,
-                                           tumNormMatched = tumNormMatched, 
-                                           debug = debug, dataset = dataset)
-        
-        
-        if(length(lm_input_table) == 0) {return(NA)}
-        if (is.na(lm_input_table)) {return(NA)}
-        if(lm_input_table[, .N] == 0) {return(NA)}
-        
-        # If a row has NA, remove that whole row and predict without it
-        #lm_input_table <- na.exclude(lm_input_table)
-        lm_input_table <- na.omit(lm_input_table)
-        
-        # Make sure everything is numeric type
-        #lm_input_table[,2:ncol(lm_input_table)] <- sapply(lm_input_table[,2:ncol(lm_input_table)], as.numeric) 
-        
-        if(debug) {
-          print("LM Input Table")
-          print(head(lm_input_table))
-          #new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "lm_input_table", 
-                                                                             # sep = "_"), sep = "_"))
-          #fwrite(lm_input_table, paste(outpath, paste(new_fn, ".csv", sep = ""), sep = "/"))
-        }
-        
-        # Randomize expression across cancer and normal, across all samples
-        if (randomize) {
-          if(analysis_type == "eQTL") {lm_input_table$ExpStat_k <- sample(lm_input_table$ExpStat_k)}
-          else if (analysis_type == "meQTL") {lm_input_table$MethStat_k <- sample(lm_input_table$MethStat_k)}
-          else {print(paste("Analysis type is invalid:", analysis_type))}
-        }
-        
-        formula <- construct_formula(lm_input_table, analysis_type, num_PEER, num_pcs,
-                                     cna_bucketing, meth_bucketing, covs_to_incl)
-        
-        if (regularization == "None") {
-          
-          if(debug) {
-            print(paste("Formula:", formula))
-          }
-          lm_fit <- tryCatch(
-            {
-              speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
-              #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), 
-              #data = lm_input_table)
-            }, error = function(cond) {
-              message("There was a problem with this linear model run:")
-              message(cond)
-              print(formula)
-              print(head(lm_input_table))
-              return(NA)
-            })
-          
-        } else if (regularization == "L2" | regularization == "ridge" | 
-                   regularization == "L1" | regularization == "lasso") {
-          
-          lm_fit <- run_regularization_model(formula, lm_input_table, type = regularization, debug)
-          
-        } else {
-          lm_fit <- NA
-          print("Model only has L1, L2 or None implemented for regularization. Please provide one of these options.")
-        }
-        
-        # Tidy the output
-        summary_table <- tidy(lm_fit)
-        print(dim(summary_table))
-        if(inclResiduals) {
-          print(length(lm_input_table$ExpStat_k))
-          print(as.numeric(unlist(predict.speedlm(lm_fit, newdata = lm_input_table))))
-          print(head(lm_input_table$ExpStat_k))
-          residuals <- as.numeric(lm_input_table$ExpStat_k) - 
-            as.numeric(unlist(predict.speedlm(lm_fit, newdata = lm_input_table)))
-          summary_table$Residual <- paste(residuals, collapse = ";")
-        }
-        
-        # Restrict the output table to just particular columns, if desired
-        #summary_table <- lm_fit[lm_fit$term == "MutStat_i" | lm_fit$term == "CNAStat_i",]
-        
-        # Add a column for the regulatory protein and target gene to ID them
-        summary_table$R_i <- regprot
-        summary_table$T_k <- paste(targ, collapse = ";")
-        
-        if(debug) {
-          print("Summary Table")
-          print(head(summary_table))
-          #new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "summary_table", 
-                                                                             # sep = "_"), sep = "_"))
-          #new_fn <- paste(new_fn, ".csv", sep = "")
-          #fwrite(summary_table, paste(outpath, new_fn, sep = "/"))
-        }
-        
-        # Run collinearity diagnostics 
-        if(collinearity_diagn) {
-          print("Running Collinearity Diagnostics")
-          #fit_lm <- lm(formula = formula, offset = log2(Lib_Size), 
-                       #data = lm_input_table)
-          fit_lm <- lm(formula = formula, offset = log2(Lib_Size), 
-                       data = lm_input_table)
-          source(paste(getwd(), "run_collinearity_diagnostics.R", sep = "/"), local = TRUE)
-        }
-        
-        # Remove the memory from the input tables
-        rm(lm_input_table)
-        gc()
-        
-        # Return this summary table
-        return(summary_table)
-      }
-      else {return(NA)}
-    })
+    regprot_results_df_list <- run_linear_model_per_target_gene(downstream_target_df, methylation_df,
+                                                                  methylation_df_meQTL, starter_df, 
+                                                                  mutation_targ_df, cna_df, expression_df, 
+                                                                  log_expression, cna_bucketing, meth_bucketing, 
+                                                                  analysis_type, tumNormMatched, debug, 
+                                                                  dataset, randomize, num_PEER, num_pcs,
+                                                                  covs_to_incl, inclResiduals, removeCis,
+                                                                  collinearity_diagn, regularization,
+                                                                run_query_genes_jointly, NA)
     
     # Now we have a list of output summary DFs for each of this regulatory protein's targets. 
     # Bind them all together.
     #return(do.call("rbind", regprot_i_results_df_list))
-    regprot_i_results_df_list <- regprot_i_results_df_list[!is.na(regprot_i_results_df_list)]
-    regprot_i_results_df <- as.data.table(rbindlist(regprot_i_results_df_list, fill = TRUE))
+    regprot_results_df_list <- regprot_results_df_list[!is.na(regprot_results_df_list)]
+    master_df <- as.data.table(rbindlist(regprot_results_df_list, fill = TRUE))
     
-    if(debug) {
-      print("Combined Results DF")
-      print(head(regprot_i_results_df))
-    }
-    
-    return(regprot_i_results_df)
-  })
-        
-  # Now we have a list of the results tables, one table per regulatory protein, 
-  # with entries for each target. Bind these all together into one master table.
-  if(debug) {
-    print("Results DF list")
-    print(head(results_df_list))
   }
-        
-  # Check that none of the DF entries are NA or empty data.tables
-  results_df_list <- results_df_list[!is.na(results_df_list)]
-  results_df_list <- Filter(function(dt) nrow(dt) != 0, results_df_list)
-        
-  master_df <- rbindlist(results_df_list, use.names = TRUE, fill = TRUE)
-  #master_df <- do.call(rbind, results_df_list)
         
   if(debug) {
     print("Master DF")
@@ -799,17 +751,207 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
 }
 
 
+#' The part of the function that involves running through all the target genes
+#' and creating a linear model for each; returns the list of results
+#' @param downstream_target_df table of regulatory proteins (columns) with gene 
+#' targets we're testing for each (entries)
+#' @param methylation_df table of methylation results (rows are proteins, columns 
+#' are patients, entries are methylation values)
+#' @param methylation_df_meQTL OPTIONAL: table of methylation results (rows are 
+#' proteins, columns are patients, entries are raw methylation values to be used
+#' for regulatory protein i in the case of an meQTL and bucketed methylation for t_k)
+#' @param cna_df table of CNA per gene (rows are proteins, columns are patients, 
+#' entries are CNA values)
+#' @param expression_df table of expression (rows are genes, columns are patients, 
+#' entries are expression values)
+#' @param log_expression a TRUE/FALSE value indicating whether we need to take the
+#' log2(exp + 1), or whether expression has already been transformed to a normal
+#' distribution in some way
+#' @param analysis_type a string label that reads either "eQTL" or "meQTL" to 
+#' determine what kind of model we should run
+#' @param tumNormMatched a TRUE/FALSE value indicating whether or not the analysis is 
+#' tumor-normal matched
+#' @param randomize a TRUE/FALSE value indicating whether or not we are randomizing 
+#' expression
+#' @param cna_bucketing a string indicating if/how we are bucketing CNA values. 
+#' Possible values are "bucket_inclAmp", "bucket_exclAmp", "bucket_justAmp", 
+#' "bucket_justDel" and "rawCNA"
+#' @param meth_bucketing a TRUE/FALSE value indicating whether or not we are bucketing
+#' methylation values
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3', to denote what columns
+#' we are referencing/ specific data types we are using
+#' @param inclResiduals a TRUE/FALSE value indicating whether or not we want to include 
+#' residuals in our output DF, to evaluate model fit
+#' @param num_PEER a value from 0-10 indicating the number of PEER factors we 
+#' are including as covariates in the model
+#' @param num_pcs a value from 0-2 indicating the number of  
+#' principal components we are including as covariates in the model 
+#' @param debug a TRUE/FALSE value indicating if we are in debug mode and should 
+#' use additional prints
+#' @param collinearity_diagn a TRUE/FALSE value indicating if we are running 
+#' collinearity diagnostics
+#' @param removeCis a TRUE/FALSE value indicating whether or not we are eliminating 
+#' all cis pairings
+#' @param regularization a string with the type of regularization to be used; currently
+#' only implemented for "L2" or "None"
+#' @param run_query_genes_jointly a TRUE/ FALSE value indicating whether or not we 
+#' want to run all query regulatory proteins jointly in the same model, or separately
+#' (one model per query-target pair)
+#' @param regprot the swissprot ID of the regulatory protein, if not running them
+#' jointly (NA if we are)
+run_linear_model_per_target_gene <- function(downstream_target_df, methylation_df,
+                                             methylation_df_meQTL, starter_df, 
+                                             mutation_targ_df, cna_df, expression_df, 
+                                             log_expression, cna_bucketing, meth_bucketing, 
+                                             analysis_type, tumNormMatched, debug, 
+                                             dataset, randomize, num_PEER, num_pcs,
+                                             covs_to_incl, inclResiduals, removeCis,
+                                             collinearity_diagn, regularization,
+                                             run_query_genes_jointly, regprot) {
+  
+  # Loop through all the targets for this protein(s) of interest and create a table 
+  # for each of them from this starter DF
+  results_df_list <- lapply(1:downstream_target_df[, .N], function(k) {
+    
+    # Get the target t_k's Swissprot & ENSG IDs
+    targ <- unlist(strsplit(downstream_target_df$swissprot[k], ";", fixed = TRUE))
+    targ_ensg <- unlist(strsplit(downstream_target_df$ensg[k], ";", fixed = TRUE))
+    
+    print(paste("Target gene", paste(k, paste("/", downstream_target_df[, .N]))))
+    
+    # OPT: Filter outlier expression for each group (mutated, unmutated) using 
+    # a standard (1.5 x IQR) + Q3 schema
+    #starter_df <- filter_expression_df(expression_df, starter_df, targ_ensg)
+    
+    #if(length(intersect(targ_ensg, regprot_ensg)) == 0) {
+    # Create a full input table to the linear model for this target
+    methylation_df_targ <- methylation_df
+    if(!is.null(methylation_df_meQTL)) {
+      if(!is.na(methylation_df_meQTL)) {
+        methylation_df_targ <- methylation_df_meQTL
+      }
+    } 
+    
+    lm_input_table <- fill_targ_inputs(starter_df = starter_df, targ_k = targ, 
+                                       targ_k_ensg = targ_ensg, 
+                                       mutation_targ_df = mutation_targ_df,
+                                       methylation_df = methylation_df_targ, 
+                                       cna_df = cna_df, expression_df = expression_df, 
+                                       log_expression = log_expression,
+                                       cna_bucketing = cna_bucketing,
+                                       meth_bucketing = meth_bucketing, 
+                                       analysis_type = analysis_type,
+                                       tumNormMatched = tumNormMatched, 
+                                       debug = debug, dataset = dataset)
+      
+      
+    if(length(lm_input_table) == 0) {return(NA)}
+    if (is.na(lm_input_table)) {return(NA)}
+    if(lm_input_table[, .N] == 0) {return(NA)}
+    
+    # If a row has NA, remove that whole row and predict without it
+    #lm_input_table <- na.exclude(lm_input_table)
+    lm_input_table <- na.omit(lm_input_table)
+    
+    # Make sure everything is numeric type
+    #lm_input_table[,2:ncol(lm_input_table)] <- sapply(lm_input_table[,2:ncol(lm_input_table)], as.numeric) 
+    
+    if(debug) {
+      print("LM Input Table")
+      print(head(lm_input_table))
+      print(dim(lm_input_table))
+      #new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "lm_input_table", 
+      # sep = "_"), sep = "_"))
+      #fwrite(lm_input_table, paste(outpath, paste(new_fn, ".csv", sep = ""), sep = "/"))
+    }
+    
+    # Randomize expression across cancer and normal, across all samples
+    if (randomize) {
+      if(analysis_type == "eQTL") {lm_input_table$ExpStat_k <- sample(lm_input_table$ExpStat_k)}
+      else if (analysis_type == "meQTL") {lm_input_table$MethStat_k <- sample(lm_input_table$MethStat_k)}
+      else {print(paste("Analysis type is invalid:", analysis_type))}
+    }
+    
+    formula <- construct_formula(lm_input_table, analysis_type, num_PEER, num_pcs,
+                                 cna_bucketing, meth_bucketing, covs_to_incl)
+    
+    if (regularization == "None") {
+      
+      if(debug) {
+        print(paste("Formula:", formula))
+      }
+      lm_fit <- tryCatch(
+        {
+          speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
+          #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), data = lm_input_table)
+        }, error = function(cond) {
+          message("There was a problem with this linear model run:")
+          message(cond)
+          print(formula)
+          print(head(lm_input_table))
+          return(NA)
+        })
+      
+    } else if (regularization == "L2" | regularization == "ridge" | 
+               regularization == "L1" | regularization == "lasso") {
+      
+      lm_fit <- run_regularization_model(formula, lm_input_table, type = regularization, debug,
+                                         meth_bucketing, cna_bucketing)
+      
+    } else {
+      lm_fit <- NA
+      print("Model only has L1, L2 or None implemented for regularization. Please provide one of these options.")
+    }
+    
+    # Tidy the output
+    summary_table <- tidy(lm_fit)
+    if(inclResiduals) {
+      residuals <- as.numeric(lm_input_table$ExpStat_k) - 
+        as.numeric(unlist(predict.speedlm(lm_fit, newdata = lm_input_table)))
+      summary_table$Residual <- paste(residuals, collapse = ";")
+    }
+    
+    # Add a column for the regulatory protein and target gene to ID them
+    if(!run_query_genes_jointly) {summary_table$R_i <- regprot}
+    summary_table$T_k <- paste(targ, collapse = ";")
+    
+    if(debug) {
+      print("Summary Table")
+      print(head(summary_table))
+      #new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "summary_table", 
+      # sep = "_"), sep = "_"))
+      #new_fn <- paste(new_fn, ".csv", sep = "")
+      #fwrite(summary_table, paste(outpath, new_fn, sep = "/"))
+    }
+    
+    # Run collinearity diagnostics 
+    if(collinearity_diagn) {
+      print("Running Collinearity Diagnostics")
+      #fit_lm <- lm(formula = formula, data = lm_input_table)
+      fit_lm <- lm(formula = formula, data = lm_input_table)
+      source(paste(getwd(), "run_collinearity_diagnostics.R", sep = "/"), local = TRUE)
+    }
+    
+    # Remove the memory from the input tables
+    rm(lm_input_table)
+    gc()
+    
+    # Return this summary table
+    return(summary_table)
+  })
+  
+  return(results_df_list)
+}
 
 ############################################################
 #### FILL IN REGULATORY PROTEIN R_I INPUTS TO TABLE
 ############################################################
-#' Function takes a data frame of inputs for the given patient p_j, as well as 
-#' the data files for regulatory protein r_i (and its IDs), and uses them to 
-#' construct a partial tabular input to a linear model function for a given 
-#' regulatory protein r_i of the following form:
+#' Function takes the data files for regulatory protein r_i (and its IDs), 
+#' and uses them to  construct a partial tabular input to a linear model 
+#' function for a given regulatory protein r_i of the following form:
 #' Columns: Linear model input variables
 #' Rows: Patients 
-#' @param patient_df a 'starter DF' that has all the patient characteristics 
+#' @param patient_df the starter DF with all of the patient/ sample information
 #' @param regprot_i_uniprot the uniprot ID of regulatory protein i
 #' @param regprot_i_ensg the ensembl ID of regulatory protein i
 #' @param mutation_regprot_df the mutation DF for regulatory proteins 
@@ -829,58 +971,42 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
 #' TP53 or PIK3CA in BRCA, whether or not we include mutation/ CNA/ mutation interaction
 #' terms for the other driver gene (e.g. for TP53 if PIK3CA or PIK3CA if TP53). If we
 #' are running on TTN (as a control), then we use PIK3CA covariates as a control
+#' @param run_query_genes_jointly a TRUE/ FALSE value indicating whether or not we 
+#' want to run all query regulatory proteins jointly in the same model, or separately
+#' (one model per query-target pair)
 #' @param debug a TRUE/FALSE value indicating if we are in debug mode and should 
 #' use additional prints
 #' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3', to denote what columns
 #' we are referencing/ specific data types we are using
-fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg, 
-                                mutation_regprot_df, methylation_df, cna_df, num_funct_copies_df,
+fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg, mutation_regprot_df, 
+                                methylation_df, cna_df, num_funct_copies_df,
                                 useNumFunctCopies, cna_bucketing, meth_bucketing, tumNormMatched, 
-                                incl_nextMutDriver, debug, dataset) {
+                                incl_nextMutDriver, run_query_genes_jointly, debug, dataset) {
   
   # Filter the data frames to look at only this regulatory protein
   mutation_regprot_df_sub <- mutation_regprot_df[Swissprot %like% regprot_i_uniprot]
   cna_df_sub <- filter_cna_by_ensg(cna_df, regprot_i_ensg)   #TODO: try and make this faster
   methylation_df_sub <- filter_meth_by_ensg(methylation_df, regprot_i_ensg)  #TODO: try and make this faster
   
-  #print(paste("REGPROTi ENSG:", regprot_i_ensg))
+  #print(paste("REGPROT_i ENSG:", regprot_i_ensg))
   
-  # Optionally, add mutation, amplification status covariates for PIK3CA if regprot is TP53
-  # and vice versa 
-  # Also, optionally add all of these covariates for genes that are not PIK3CA or TP53
-  cna_df_pik3ca <- NA
-  cna_df_tp53 <- NA
-  if(incl_nextMutDriver) {
-    if(regprot_i_ensg == "ENSG00000141510") {
-      cna_df_pik3ca <- filter_cna_by_ensg(cna_df, "ENSG00000121879")
-      mutation_regprot_df_pik3ca <- mutation_regprot_df[Swissprot %like% "P42336"]
-    }
-    else if(regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) {
-      cna_df_tp53 <- filter_cna_by_ensg(cna_df, "ENSG00000141510")
-      mutation_regprot_df_tp53 <- mutation_regprot_df[Swissprot %like% "P04637"]
-    }
-    else {
-      cna_df_pik3ca <- filter_cna_by_ensg(cna_df, "ENSG00000121879")
-      mutation_regprot_df_pik3ca <- mutation_regprot_df[Swissprot %like% "P42336"]
-      cna_df_tp53 <- filter_cna_by_ensg(cna_df, "ENSG00000141510")
-      mutation_regprot_df_tp53 <- mutation_regprot_df[Swissprot %like% "P04637"]
-    }
+  # Optionally, add mutation, CNA status covariates for PIK3CA if regprot is TP53 and vice versa 
+  if(incl_nextMutDriver & !(run_query_genes_jointly)) {
+    tp53_pik3ca_dfs <- get_next_mut_driver_dfs(regprot_i_ensg, cna_df, mutation_regprot_df)
+    cna_df_pik3ca <- tp53_pik3ca_dfs[[1]]
+    mutation_regprot_df_pik3ca <- tp53_pik3ca_dfs[[2]]
+    cna_df_tp53 <- tp53_pik3ca_dfs[[3]]
+    mutation_regprot_df_tp53 <- tp53_pik3ca_dfs[[4]]
   }
-
   
   # If tumor-normal matched, limit to just cancer samples (we'll ID the matched normal in each run)
-  if(tumNormMatched) {
-    patient_df2 <- patient_df[grepl("-0", patient_df$sample_id)]
-  } else {
-    patient_df2 <- patient_df
-  }
+  if(tumNormMatched) {patient_df2 <- patient_df[grepl("-0", patient_df$sample_id)]} 
+  else {patient_df2 <- patient_df}
   
   # Loop through all tumor samples to get the info on this regulatory protein for each
   regprot_rows <- mclapply(1:patient_df2[, .N], function(i) {
     sample <- patient_df2$sample_id[i]
-    if (debug) {
-      print(paste("Sample:", sample))
-    }
+    if (debug) {print(paste("Sample:", sample))}
     
     # Is this regulatory protein mutated in this sample at the given level of specificity?
     # OPT 1: FOR I-DOMAIN & I-BINDING POSITION:
@@ -912,40 +1038,13 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
     }
     
     altern_stats <- list(NA,NA,NA,NA,NA,NA)
-    
-    #' Helper function that will get stats for TP53 or PIK3CA if we are adding them
-    #' as covariates as well 
-    get_altern_stats <- function(regprot_i_ensg, cna_df_sub, cna_df_altern, bucket_type,
-                                 mutation_regprot_df, sample, dataset, mut_stat) {
-      
-      altern_cna_stat <- get_cna_stat(cna_df_altern, sample, bucket_type, dataset)
-      mutation_regprot_df_sub <- mutation_regprot_df[Patient %like% sample]
-      if(mutation_regprot_df_sub[, .N] > 0) {
-        altern_mut_stat <- 1
-      } else {altern_mut_stat <- 0}
-      if ((mut_stat == 1) & (altern_mut_stat == 1)) {
-        altern_comb_stat <- 1
-      } else {altern_comb_stat <- 0}
-      
-      name <- ""
-      if(regprot_i_ensg == "ENSG00000141510") {name <- "PIK3CA."}
-      if(regprot_i_ensg == "ENSG00000121879") {name <- "TP53."}
-      list_to_ret <- list(altern_cna_stat, altern_mut_stat, altern_comb_stat)
-      names(list_to_ret) <- c(paste0(name, "altern_cna_stat"), paste0(name, "altern_mut_stat"),
-                              paste0(name, "altern_comb_stat"))
-      return(list_to_ret)
-    }
-    
-    if (incl_nextMutDriver) {
+    if (incl_nextMutDriver & !(run_query_genes_jointly)) {
       if(regprot_i_ensg == "ENSG00000141510") {
         cna_b <- cna_bucketing
         if(grepl("just", cna_bucketing)) {cna_b <- "bucket_justAmp"}
         altern_stats <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_pik3ca,
                                          cna_b, mutation_regprot_df_pik3ca,
                                          sample, dataset, mut_stat)
-        #altern_stats <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_pik3ca,
-                                         #"bucket_justAmp", mutation_regprot_df_pik3ca,
-                                         #sample, dataset, mut_stat)
       }
       else if(regprot_i_ensg  == "ENSG00000121879") {
         cna_b <- cna_bucketing
@@ -953,9 +1052,6 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
         altern_stats <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_tp53,
                                          cna_b, mutation_regprot_df_tp53,
                                          sample, dataset, mut_stat)
-        #altern_stats <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_tp53,
-                                         #"bucket_justDel", mutation_regprot_df_tp53,
-                                         #sample, dataset, mut_stat)
       }
       else {
         cna_b_tp53 <- cna_bucketing
@@ -971,12 +1067,6 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
         altern_stats_pik3ca <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_pik3ca,
                                          cna_b_pik3ca, mutation_regprot_df_pik3ca,
                                          sample, dataset, mut_stat)
-        #altern_stats_tp53 <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_tp53,
-                                         #"bucket_justDel", mutation_regprot_df_tp53,
-                                         #sample, dataset, mut_stat)
-        #altern_stats_pik3ca <- get_altern_stats(regprot_i_ensg, cna_df_sub, cna_df_pik3ca,
-                                         #"bucket_justAmp", mutation_regprot_df_pik3ca,
-                                         #sample, dataset, mut_stat)
         altern_stats <- c(altern_stats_tp53, altern_stats_pik3ca)
       }
     }
@@ -986,8 +1076,8 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
       print(paste("CNA stat:", cna_stat))
       print(paste("Mut stat:", mut_stat))
       if(useNumFunctCopies) {print(paste("FNC stat:", fnc_stat))}
-      print("Altern driver stats:")
-      print(altern_stats)
+      #print("Altern driver stats:")
+      #print(altern_stats)
     }
     
     outdf <- data.table()
@@ -1000,17 +1090,8 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
                                          "MethStat_i_b2" = meth_stat[2], 
                                          "MethStat_i_b3" = meth_stat[3]))
       }
-      if(incl_nextMutDriver) {
-        if(!(regprot_i_ensg == "ENSG00000121879")) {
-          outdf[, 'TP53_MutStat_i'] <- altern_stats[['TP53.altern_mut_stat']]
-          outdf[, 'TP53_DelStat_i'] <- altern_stats[['TP53.altern_cna_stat']]
-          outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_stats[['TP53.altern_comb_stat']]
-        } 
-        if (!(regprot_i_ensg == "ENSG00000141510")) {
-          outdf[, 'PIK3CA_MutStat_i'] <- altern_stats[['PIK3CA.altern_mut_stat']]
-          outdf[, 'PIK3CA_AmplStat_i'] <- altern_stats[['PIK3CA.altern_cna_stat']]
-          outdf[, 'PIK3CAP53_MutStat_i'] <- altern_stats[['PIK3CA.altern_comb_stat']]
-        }
+      if(incl_nextMutDriver & !(run_query_genes_jointly)) {
+        outdf <- add_altern_stats_to_outdf(outdf, altern_stats, regprot_i_ensg)
       }
       
     } else {
@@ -1022,16 +1103,7 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
                               "CNAStat_i_b3" = cna_stat[3], "MethStat_i" = meth_stat)
         }
         if(incl_nextMutDriver) {
-          if(!(regprot_i_ensg == "ENSG00000121879")) {
-            outdf[, 'TP53_MutStat_i'] <- altern_stats[['TP53.altern_mut_stat']]
-            outdf[, 'TP53_DelStat_i'] <- altern_stats[['TP53.altern_cna_stat']]
-            outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_stats[['TP53.altern_comb_stat']]
-          } 
-          if (!(regprot_i_ensg == "ENSG00000141510")) {
-            outdf[, 'PIK3CA_MutStat_i'] <- altern_stats[['PIK3CA.altern_mut_stat']]
-            outdf[, 'PIK3CA_AmplStat_i'] <- altern_stats[['PIK3CA.altern_cna_stat']]
-            outdf[, 'PIK3CAP53_MutStat_i'] <- altern_stats[['PIK3CA.altern_comb_stat']]
-          }
+          outdf <- add_altern_stats_to_outdf(outdf, altern_stats, regprot_i_ensg)
         }
 
       } else {
@@ -1044,41 +1116,111 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg,
                               "MethStat_i_b3" = meth_stat[3])
         }
       }
-      if(incl_nextMutDriver) {
-        if(!(regprot_i_ensg == "ENSG00000121879")) {
-          outdf[, 'TP53_MutStat_i'] <- altern_stats[['TP53.altern_mut_stat']]
-          outdf[, 'TP53_DelStat_i'] <- altern_stats[['TP53.altern_cna_stat']]
-          outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_stats[['TP53.altern_comb_stat']]
-        } 
-        if (!(regprot_i_ensg == "ENSG00000141510")) {
-          outdf[, 'PIK3CA_MutStat_i'] <- altern_stats[['PIK3CA.altern_mut_stat']]
-          outdf[, 'PIK3CA_AmplStat_i'] <- altern_stats[['PIK3CA.altern_cna_stat']]
-          outdf[, 'PIK3CAP53_MutStat_i'] <- altern_stats[['PIK3CA.altern_comb_stat']]
-        }
+      if(incl_nextMutDriver & !(run_query_genes_jointly)) {
+        outdf <- add_altern_stats_to_outdf(outdf, altern_stats, regprot_i_ensg)
       }
     }
     return(outdf)
   })
   
-  
-  # Bind these rows into the starter DF
+  # Bind these rows together
   if(debug) {print(head(regprot_rows))}
   tryCatch({
     colnam <- colnames(regprot_rows[[1]])
     regprot_i_df <- data.table::rbindlist(regprot_rows)
     colnames(regprot_i_df) <- colnam
-    starter_df <- cbind(patient_df, regprot_i_df)
     
   }, error=function(cond){
     print("Unexpected error; regprot rows is not valid: ")
     print(regprot_rows)
-    return(starter_df)
+    return(regprot_i_df)
   })
-  
-  # Return this full input DF
-  return(starter_df)
+
+  # Return this bound DF
+  return(regprot_i_df)
 }
 
+
+
+#' Helper function if we are including TP53- and PIK3CA-specific covariates in
+#' breast cancer to obtain TP53 and PIK3CA CNA and mutation regulatory protein DFs
+#' @param regprot_i_ensg the ensg ID for the current regulatory protein of interest
+#' @param cna_df the full CNA input DF, to be subsetted
+#' @param mutation_regprot_df the full regulatory protein mutation DF, to be subsetted
+get_next_mut_driver_dfs <- function(regprot_i_ensg, cna_df, mutation_regprot_df) {
+  cna_df_pik3ca <- NA
+  cna_df_tp53 <- NA
+  mutation_regprot_df_pik3ca <- NA
+  mutation_regprot_df_tp53 <- NA
+  
+  if(regprot_i_ensg == "ENSG00000141510") {
+    cna_df_pik3ca <- filter_cna_by_ensg(cna_df, "ENSG00000121879")
+    mutation_regprot_df_pik3ca <- mutation_regprot_df[Swissprot %like% "P42336"]
+  }
+  else if(regprot_i_ensg %in% c("ENSG00000121879", "ENSG00000155657")) {
+    cna_df_tp53 <- filter_cna_by_ensg(cna_df, "ENSG00000141510")
+    mutation_regprot_df_tp53 <- mutation_regprot_df[Swissprot %like% "P04637"]
+  }
+  else {
+    cna_df_pik3ca <- filter_cna_by_ensg(cna_df, "ENSG00000121879")
+    mutation_regprot_df_pik3ca <- mutation_regprot_df[Swissprot %like% "P42336"]
+    cna_df_tp53 <- filter_cna_by_ensg(cna_df, "ENSG00000141510")
+    mutation_regprot_df_tp53 <- mutation_regprot_df[Swissprot %like% "P04637"]
+  }
+  return(list(cna_df_pik3ca, mutation_regprot_df_pik3ca, cna_df_tp53, mutation_regprot_df_tp53))
+}
+
+
+#' Helper function that will get stats for TP53 or PIK3CA if we are adding them
+#' as covariates as well 
+#' @param regprot_i_ensg the ensg ID for the current regulatory protein of interest
+#' @param cna_df_sub the CNA DF, subsetted to the regulatory protein of interest
+#' @param cna_df_altern the CNA DF, subsetted to the next mutated driver gene (either 
+#' PIK3CA or TP53)
+#' @param bucket_type the bucketing type for CNA, for use with the get_cna_stat function
+#' @param mutation_regprot_df the mutation regprot DF, unsubsetted
+#' @param sample the current sample ID
+#' @param dataset the dataset name
+#' @param mut_stat the mutation status of the regulatory protein of interest
+get_altern_stats <- function(regprot_i_ensg, cna_df_sub, cna_df_altern, bucket_type,
+                             mutation_regprot_df, sample, dataset, mut_stat) {
+  
+  altern_cna_stat <- get_cna_stat(cna_df_altern, sample, bucket_type, dataset)
+  mutation_regprot_df_sub <- mutation_regprot_df[Patient %like% sample]
+  if(mutation_regprot_df_sub[, .N] > 0) {
+    altern_mut_stat <- 1
+  } else {altern_mut_stat <- 0}
+  if ((mut_stat == 1) & (altern_mut_stat == 1)) {
+    altern_comb_stat <- 1
+  } else {altern_comb_stat <- 0}
+  
+  name <- ""
+  if(regprot_i_ensg == "ENSG00000141510") {name <- "PIK3CA."}
+  if(regprot_i_ensg == "ENSG00000121879") {name <- "TP53."}
+  list_to_ret <- list(altern_cna_stat, altern_mut_stat, altern_comb_stat)
+  names(list_to_ret) <- c(paste0(name, "altern_cna_stat"), paste0(name, "altern_mut_stat"),
+                          paste0(name, "altern_comb_stat"))
+  return(list_to_ret)
+}
+
+#' Helper function to add the alternative stats (e.g. CNA status or mutation status
+#' of TP53 and/or PIK3CA) to the output data frame
+#' @param outdf the regulatory output df we are currently building
+#' @param altern_stats the alternative CNA/ mutation statuses for TP53 and/or PIK3CA
+#' @param regprot_i_ensg the ensg ID of the current regulatory protein of interest
+add_altern_stats_to_outdf <- function(outdf, altern_stats, regprot_i_ensg) {
+  if(!(regprot_i_ensg == "ENSG00000121879")) {
+    outdf[, 'TP53_MutStat_i'] <- altern_stats[['TP53.altern_mut_stat']]
+    outdf[, 'TP53_DelStat_i'] <- altern_stats[['TP53.altern_cna_stat']]
+    outdf[, 'TP53PIK3CA_MutStat_i'] <- altern_stats[['TP53.altern_comb_stat']]
+  } 
+  if (!(regprot_i_ensg == "ENSG00000141510")) {
+    outdf[, 'PIK3CA_MutStat_i'] <- altern_stats[['PIK3CA.altern_mut_stat']]
+    outdf[, 'PIK3CA_AmplStat_i'] <- altern_stats[['PIK3CA.altern_cna_stat']]
+    outdf[, 'PIK3CAP53_MutStat_i'] <- altern_stats[['PIK3CA.altern_comb_stat']]
+  }
+  return(outdf)
+}
 
 ############################################################
 #### FILL IN TARGET T_K INPUTS TO TABLE
@@ -1254,10 +1396,21 @@ construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
   bucketed_vars <- c("Tot_Mut_b","Tumor_purity_b", "Tot_IC_Frac_b", "Cancer_type_b")
   if(meth_bucketing) {
     bucketed_vars <- c(bucketed_vars, "MethStat_k")
-    if(analysis_type == "eQTL") {bucketed_vars <- c(bucketed_vars, "MethStat_i")}
+    if(!runRegprotsJointly) {
+      if(analysis_type == "eQTL") {bucketed_vars <- c(bucketed_vars, "MethStat_i")}
+    } else {
+      meth_stat_i <- unlist(lapply(protein_ids_df$swissprot, function(x) paste0(x, "_MethStat_i")))
+      bucketed_vars <- c(bucketed_vars, meth_stat_i)
+    }
   }
   if(!((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing)))) {
-    bucketed_vars <- c(bucketed_vars, c("CNAStat_k", "CNAStat_i"))
+    bucketed_vars <- c(bucketed_vars, "CNAStat_k")
+    if(!runRegprotsJointly) {
+      bucketed_vars <- c(bucketed_vars, "CNAStat_i")
+    } else {
+      cna_stat_i <- unlist(lapply(protein_ids_df$swissprot, function(x) paste0(x, "_CNAStat_i")))
+      bucketed_vars <- c(bucketed_vars, cna_stat_i)
+    }
   }
   
   vals_to_remove <- unlist(lapply(bucketed_vars, function(var) {
@@ -1273,8 +1426,8 @@ construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
   # like to remove those as well, as long as they are not MutStat_i, CNAStat_i or FNCStat_i
   uniform_val_ind <- which(sapply(lm_input_table, function(x) length(unique(x)) == 1))
   uniform_vals <- colnames(lm_input_table)[uniform_val_ind]
-  uniform_vals <- uniform_vals[!((uniform_vals == "MutStat_i") | (uniform_vals == "CNAStat_i") | 
-                                   (uniform_vals == "FNCStat_i"))]
+  uniform_vals <- uniform_vals[!(grepl("MutStat_i", uniform_vals) | grepl("CNAStat_i", uniform_vals) | 
+                                   grepl("FNCStat_i", uniform_vals))]
   colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% uniform_vals)]
   
   # Exclude the library size, as we are using this as an offset instead
@@ -1344,7 +1497,7 @@ outfn <- create_output_filename(test = test, tester_name = args$tester_name, run
                                 patient_df_name = args$patient_df, num_PEER = args$num_PEER, 
                                 num_pcs = args$num_pcs, randomize = randomize, covs_to_incl_label = args$select_args_label,
                                 patients_to_incl_label = args$patientsOfInterestLabel, removeCis = removeCis,
-                                removeMetastatic = removeMetastatic)
+                                removeMetastatic = removeMetastatic, regularization = args$regularization)
 
 if(debug) {
   print(paste("Outfile Name:", outfn))
@@ -1462,6 +1615,7 @@ if(is.na(patient_cancer_mapping)) {
                                 useNumFunctCopies = useNumFunctCopies,
                                 num_funct_copies_df = num_funct_copies_DF,
                                 incl_nextMutDriver = incl_nextMutDriver,
+                                run_query_genes_jointly = runRegprotsJointly,
                                 dataset = args$dataset,
                                 inclResiduals = inclResiduals)
   
@@ -1537,6 +1691,7 @@ if(is.na(patient_cancer_mapping)) {
                                   useNumFunctCopies = useNumFunctCopies,
                                   num_funct_copies_df = num_funct_copies_DF,
                                   incl_nextMutDriver = incl_nextMutDriver,
+                                  run_query_genes_jointly = runRegprotsJointly,
                                   dataset = args$dataset,
                                   inclResiduals = inclResiduals)
     
@@ -1587,14 +1742,14 @@ process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn,
   
   # Limit the data frame to just the term of interest (typically either MutStat_i or CNAStat_i)
   if(!useNumFunctCopies) {
-    master_df_mut <- master_df[master_df$term == "MutStat_i",]
+    master_df_mut <- master_df[grepl("MutStat_i", master_df$term),]
     master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
     
     # Write these to files as well 
     fwrite(master_df_mut, paste(outpath, paste(outfn, "_MUT.csv", sep = ""), sep = "/")) 
     fwrite(master_df_cna, paste(outpath, paste(outfn, "_CNA.csv", sep = ""), sep = "/"))  
   } else {
-    master_df_fnc <- master_df[master_df$term == "FNCStat_i",]
+    master_df_fnc <- master_df[grepl("FNCStat_i", master_df$term),]
     fwrite(master_df_fnc, paste(outpath, paste(outfn, "_FNC.csv", sep = ""), sep = "/")) 
   }
   
@@ -1615,22 +1770,13 @@ process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn,
 if(is.na(patient_cancer_mapping)) {
   outpath <- as.character(unlist(outpath[[1]]))
   outfn <- as.character(unlist(outfn[[1]]))
+  master_df <- na.omit(master_df)
   master_df <- process_raw_output_df(master_df = master_df, outpath = outpath, outfn = outfn, 
                                      collinearity_diagn = collinearity_diagn, debug = debug,
                                      randomize = randomize, useNumFunctCopies = useNumFunctCopies)
   if(!useNumFunctCopies) {
-    master_df_mut <- master_df[master_df$term == "MutStat_i",]
+    master_df_mut <- master_df[grepl("MutStat_i", master_df$term),]
     master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
-    if((args$tester_name == "TP53") & incl_nextMutDriver) {
-      master_df_pik3ca_mut <- master_df[master_df$term == "PIK3CA_MutStat_i",]
-      master_df_pik3ca_cna <- master_df[master_df$term == "PIK3CA_AmplStat_i",]
-      master_df_p53_pik3ca_mut <- master_df[master_df$term == "PIK3CAP53_MutStat_i",]
-    }    
-    if((args$tester_name == "PIK3CA") & incl_nextMutDriver) {
-      master_df_tp53_mut <- master_df[master_df$term == "TP53_MutStat_i",]
-      master_df_tp53_cna <- master_df[master_df$term == "TP53_AmplStat_i",]
-      master_df_tp53_pik3ca_mut <- master_df[master_df$term == "TP53PIK3CA_MutStat_i",]
-    } 
   } else {
     master_df_fnc <- master_df[master_df$term == "FNCStat_i",]
   }
@@ -1647,22 +1793,11 @@ if(is.na(patient_cancer_mapping)) {
                                        collinearity_diagn = collinearity_diagn, debug = debug,
                                        randomize = randomize, useNumFunctCopies = useNumFunctCopies)
     if(!useNumFunctCopies) {
-      master_df_mut <- master_df[master_df$term == "MutStat_i",]
+      master_df_mut <- master_df[grepl("MutStat_i", master_df$term),]
       master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
-      if((args$tester_name == "TP53") & incl_nextMutDriver) {
-        master_df_pik3ca_mut <- master_df[master_df$term == "PIK3CA_MutStat_i",]
-        master_df_pik3ca_cna <- master_df[master_df$term == "PIK3CA_AmplStat_i",]
-        master_df_tp53_pik3ca_mut <- master_df[master_df$term == "PIK3CAP53_MutStat_i",]
-      }    
-      if((args$tester_name == "PIK3CA") & incl_nextMutDriver) {
-        master_df_tp53_mut <- master_df[master_df$term == "TP53_MutStat_i",]
-        master_df_tp53_cna <- master_df[master_df$term == "TP53_AmplStat_i",]
-        master_df_tp53_pik3ca_mut <- master_df[master_df$term == "TP53PIK3CA_MutStat_i",]
-      }    
     } else {
       master_df_fnc <- master_df[master_df$term == "FNCStat_i",]
     }
-    
     
     # Call the file to create output visualizations
     source(paste(source_path, "process_LM_output.R", sep = "")) 

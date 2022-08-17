@@ -198,7 +198,13 @@ mh_correct <- function(results_table, fn_qvalvis, fn_qvalsum) {
     # so we set to 1 (the equivalent of B-H correction)
     qobj <- qvalue(p = results_table$p.value, pi0 = 1)
   } else {
-    qobj <- qvalue(p = results_table$p.value)
+    tryCatch({
+      qobj <- qvalue(p = results_table$p.value)
+    }, error = function(cond) {
+      if(grepl("The estimated pi0 <= 0", as.character(cond))) {
+        qobj <- qvalue(p = results_table$p.value, lambda = 0.05)
+      } else {qobj <- NA}
+    })
   }
   
   # Plot some useful plots & print some useful information
@@ -249,23 +255,27 @@ if(!useNumFunctCopies) {
 #' and regulatory protein gene name. Return the updated data frame.
 #' @param master_df_sig a data.table object produced from the linear_model.R function
 #' @param all_genes_id_conv a bioMart file with conversions between different gene ID types
-add_targ_regprot_gns <- function(master_df_sig, all_genes_id_conv) {
+#' @param runRegprotsJointly a TRUE/ FALSE value to indicate if we are running all regulatory
+#' proteins jointly in the same model
+add_targ_regprot_gns <- function(master_df_sig, all_genes_id_conv, runRegprotsJointly) {
   master_df_sig$T_k.name <- unlist(lapply(master_df_sig$T_k, function(x) 
     paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
                                           'external_gene_name'])), collapse = ";")))
   
   # Add a column for the regulatory protein name
-  master_df_sig$R_i.name <- unlist(lapply(master_df_sig$R_i, function(x) 
-    paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
-                                   'external_gene_name']), collapse = ";")))
+  if(!runRegprotsJointly) {
+    master_df_sig$R_i.name <- unlist(lapply(master_df_sig$R_i, function(x) 
+      paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
+                                     'external_gene_name']), collapse = ";")))
+  }
   return(master_df_sig)
 }
 
 if(!useNumFunctCopies) {
   tryCatch({
     # Call this function
-    master_df_mut_corrected <- add_targ_regprot_gns(master_df_mut_corrected, all_genes_id_conv)
-    master_df_cna_corrected <- add_targ_regprot_gns(master_df_cna_corrected, all_genes_id_conv)
+    master_df_mut_corrected <- add_targ_regprot_gns(master_df_mut_corrected, all_genes_id_conv, runRegprotsJointly)
+    master_df_cna_corrected <- add_targ_regprot_gns(master_df_cna_corrected, all_genes_id_conv, runRegprotsJointly)
     
     # Write this to a new file
     outfn <- str_replace(outfn, "uncorrected", "corrected") 
@@ -276,7 +286,7 @@ if(!useNumFunctCopies) {
 } else {
   tryCatch({
     # Call this function
-    master_df_fnc_corrected <- add_targ_regprot_gns(master_df_fnc_corrected, all_genes_id_conv)
+    master_df_fnc_corrected <- add_targ_regprot_gns(master_df_fnc_corrected, all_genes_id_conv, runRegprotsJointly)
 
     # Write this to a new file
     outfn <- str_replace(outfn, "uncorrected", "corrected") 
@@ -361,7 +371,7 @@ create_heat_map <- function(results_table) {
   # return(data.frame(gene = rownames(matrix)[hm$rowInd]))
 }
 
-if(!test) {
+if(!(test & runRegprotsJointly)) {
   fn_mut <- paste(output_vis_path, paste("BetaHeatmap_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
   fn_cna <- paste(output_vis_path, paste("BetaHeatmap_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
   
@@ -437,7 +447,7 @@ compute_and_print_spearman <- function(results_table, ri_1, ri_2) {
 }
 
 
-if(!test) {
+if(!(test & runRegprotsJointly)) {
   fn_mut <- paste(output_vis_path, paste("Spearman_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
   fn_cna <- paste(output_vis_path, paste("Spearman_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
   
@@ -491,29 +501,29 @@ get_signif_correl <- function(results_table, qval_thres) {
 qval_thres <- 0.1
 if(!useNumFunctCopies) {
   tryCatch({
-    master_df_mut_sig <- get_signif_correl(master_df_mut_corrected, qval_thres)
-    master_df_cna_sig <- get_signif_correl(master_df_cna_corrected, qval_thres)
+    #master_df_mut_sig <- get_signif_correl(master_df_mut_corrected, qval_thres)
+    #master_df_cna_sig <- get_signif_correl(master_df_cna_corrected, qval_thres)
     
     # Write these results to a new file
-    outfn <- str_replace(outfn, "corrected_", "") 
-    outfn <- str_replace(outfn, "res", "sig_res")
-    if(length(master_df_mut_sig) > 0) {
-      fwrite(master_df_mut_sig, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
-    }
-    if(length(master_df_cna_sig) > 0) {
-      fwrite(master_df_cna_sig, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
-    }
+    #outfn <- str_replace(outfn, "corrected_", "") 
+    #outfn <- str_replace(outfn, "res", "sig_res")
+    #if(length(master_df_mut_sig) > 0) {
+      #fwrite(master_df_mut_sig, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
+    #}
+    #if(length(master_df_cna_sig) > 0) {
+      #fwrite(master_df_cna_sig, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
+    #}
   }, error = function(cond) {print(cond)})
 } else {
   tryCatch({
-    master_df_fnc_sig <- get_signif_correl(master_df_fnc_corrected, qval_thres)
+    #master_df_fnc_sig <- get_signif_correl(master_df_fnc_corrected, qval_thres)
 
     # Write these results to a new file
-    outfn <- str_replace(outfn, "corrected_", "") 
-    outfn <- str_replace(outfn, "res", "sig_res")
-    if(length(master_df_fnc_sig) > 0) {
-      fwrite(master_df_fnc_sig, paste(outpath, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
-    }
+    #outfn <- str_replace(outfn, "corrected_", "") 
+    #outfn <- str_replace(outfn, "res", "sig_res")
+    #if(length(master_df_fnc_sig) > 0) {
+      #fwrite(master_df_fnc_sig, paste(outpath, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
+    #}
   }, error = function(cond) {print(cond)})
 }
 
@@ -742,3 +752,122 @@ annotate_master_w_tfcancer <- function(master_df_sig, tfcancer_df) {
 
 
 #### NOTE: ANOTHER OPTION IS TO COPY THE TOP HIT GENES INTO GENEONTOLOGY: http://geneontology.org/
+
+
+############################################################
+#### ASIDE: DETERMINE WHAT COVARIATES ARE IMPORTANT
+############################################################
+
+# Read back a master DF
+master_df <- fread(paste(main_path, "Linear Model/TP53/Non-Tumor-Normal Matched/iprotein_output_results_TP53_alltargs_TMM_bucketCNA_iprot_iciTotFrac_uncorrected.csv", sep = ""), 
+                   header = TRUE)
+
+# Remove the (Intercept) terms
+master_df <- master_df[master_df$term != "(Intercept)",]
+
+# Of the top X remaining tests, get what the terms are and plot the proportions
+x <- 500
+master_df_topx <- master_df[1:x,]
+terms <- unique(master_df_topx$term)
+terms_counts <- unlist(lapply(terms, function(x) nrow(master_df_topx[master_df_topx$term == x,])))
+terms_counts_df <- data.frame('term' = terms, 'freq' = terms_counts)
+pie(terms_counts_df$freq, labels = terms_counts_df$term, main = paste("Most Significant Covariates (Top", paste(x, "from All Tests)")))
+
+
+# Get the proportions of all the tests with p-value <0.05
+master_df_sig <- master_df[master_df$p.value < 0.05,]
+terms <- unique(master_df_sig$term)
+terms_counts <- unlist(lapply(terms, function(x) nrow(master_df_sig[master_df_sig$term == x,])))
+terms_counts_df <- data.frame('term' = terms, 'freq' = terms_counts)
+pie(terms_counts_df$freq, labels = terms_counts_df$term, main = "Categories of Significant Covariates (All Tests)")
+
+
+############################################################
+#### ASIDE: INVESTIGATE WHICH RUNS HAVE THE MOST EXTREME 
+#### VALUES
+############################################################
+
+# The case: we are seeing outliers in the Beta values that are skewing the values 
+# non-normal. We want to see if this problem is widespread and under what conditions
+# the Beta values are the most well-behaved.
+
+# Path to location out output files (we'll be looking at the uncorrected files).
+output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Linear Model/TP53/Non-Tumor-Normal Matched/"
+
+# Import the uncorrected full, MUT and CNA results of a few sample files
+master_df <- read.csv(paste(output_path, "eQTL/output_results_P53_chipeat_iprotein_tmm_CNAbucket_inclAmp_methBetaBucketed_cibersortTotalFrac_uncorrected.csv", sep = ""), header = TRUE, check.names = FALSE)
+master_df_mut <- read.csv(paste(output_path, "eQTL/output_results_P53_chipeat_iprotein_tmm_CNAbucket_inclAmp_methBetaBucketed_cibersortTotalFrac_uncorrected_MUT.csv", sep = ""), header = TRUE, check.names = FALSE)
+master_df_cna <- read.csv(paste(output_path, "eQTL/output_results_P53_chipeat_iprotein_tmm_CNAbucket_inclAmp_methBetaBucketed_cibersortTotalFrac_uncorrected_CNA.csv", sep = ""), header = TRUE, check.names = FALSE)
+
+# Test for normality of Betas -- shapiro.test only valid up to 5000 samples
+ks.test(master_df_mut$estimate, y = 'pnorm', alternative = 'two.sided')
+ks.test(master_df_cna$estimate, y = 'pnorm', alternative = 'two.sided')
+ks.test(master_df$estimate, y = 'pnorm', alternative = 'two.sided')
+
+# All results files
+results_files_mut_eQTL <- list.files(paste(output_path, "eQTL/", sep = ""), pattern = "uncorrected_MUT.csv")
+results_files_cna_eQTL <- list.files(paste(output_path, "eQTL/", sep = ""), pattern = "uncorrected_CNA.csv")
+
+#' Get the top p-values and return a ranked list of these files with the 
+#' corresponding p-value and the top gene
+#' @param results_files a vector of the names of the results files (uncorrected)
+#' @param path a local path to the results files directory
+get_files_with_outliers <- function(results_files, path) {
+  output_tab <- data.frame(matrix(nrow = length(results_files), ncol = 8))
+  
+  switch <- 0
+  for (i in 1:length(results_files)) {
+    # import the file
+    filename <- results_files[i]
+    file <- fread(paste0(path, filename), header = TRUE)
+    
+    # if the first file, get the column names
+    if(switch == 0) {
+      colnames(output_tab) <- c("file.name", colnames(file)[2:ncol(file)])
+      switch <- 1
+    }
+    
+    # Get the first entry and add to the output table with the file name
+    fn_sub <- unlist(strsplit(filename, "results_", fixed = TRUE))[2]
+    
+    output_tab[i,] <- c(fn_sub, file[1, 2:ncol(file)])
+  }
+  return(output_tab)
+}
+
+mut_files_with_outliers <- get_files_with_outliers(results_files_mut_eQTL, 
+                                                   paste0(output_path, "eQTL/"))
+cna_files_with_outliers <- get_files_with_outliers(results_files_cna_eQTL, 
+                                                   paste0(output_path, "eQTL/"))
+
+# To look at PEER factor trends
+mut_peer_vals <- mut_files_with_outliers[grepl("PEER", mut_files_with_outliers$file.name), 'p.value']
+mut_peer_vals <- c(mut_peer_vals[length(mut_peer_vals)], mut_peer_vals[1:(length(mut_peer_vals)-1)])
+plot(mut_peer_vals)
+plot(log(mut_peer_vals))
+
+# Check which have Beta distributions that are non-normal
+get_nonnormal_betaDistr <- function(results_files, path) {
+  list_nonnorm_betas <- c()
+  
+  for (i in 1:length(results_files)) {
+    # import the file
+    filename <- results_files[i]
+    file <- fread(paste0(path, filename), header = TRUE)
+    print(head(file))
+    
+    # test for normality of the Betas
+    ks_res <- ks.test(file$estimate, y = 'pnorm', alternative = 'two.sided')
+    print(ks_res$p.value)
+    if(ks_res$p.value < 1*10^(-20)) {
+      fn_sub <- unlist(strsplit(filename, "results_", fixed = TRUE))[2]
+      list_nonnorm_betas <- c(list_nonnorm_betas, fn_sub)
+    }
+  }
+  return(list_nonnorm_betas)
+}
+
+mut_files_nonnormalBetas <- get_nonnormal_betaDistr(results_files_mut_eQTL, 
+                                                   paste0(output_path, "eQTL/"))
+cna_files_nonnormalBetas <- get_nonnormal_betaDistr(results_files_cna_eQTL, 
+                                                   paste0(output_path, "eQTL/"))
