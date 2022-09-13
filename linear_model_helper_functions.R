@@ -615,28 +615,36 @@ run_regularization_model <- function(formula, lm_input_table, type, debug,
     
     if(debug) {
       print(covs)
-      print(keep_x)
       print(head(x_data_sub))
-      print(colnames(x_data_sub))
     }
   }
   
+  input_df <- NA
+
   if(!(is.null(colnames(x_data_sub)) | is.na(best_model))) {
     if(ncol(x_data_sub) == 1) {
-      formula <- paste("y_data", colnames(x_data_sub)[1], sep = " ~ ")
+      #formula_new <- as.character(paste("ExpStat_k", colnames(x_data_sub)[1], sep = " ~ "))
+      input_df <- as.data.frame(cbind(y_data, x_data_sub))
+      names(input_df)[1] <- "ExpStat_k"
+      if(debug) {print(head(input_df))}
+      #if(debug) {print(formula_new)}
+      #lm_res <- speedlm(formula = formula_new, data = input_df)
     } else {
-      formula <- paste(c(paste("y_data", colnames(x_data_sub)[1], sep = " ~ "), 
-                         colnames(x_data_sub)[2:length(colnames(x_data_sub))]), collapse = " + ")
+      #formula_new <- as.character(paste(c(paste("ExpStat_k", colnames(x_data_sub)[1], sep = " ~ "), 
+                         #colnames(x_data_sub)[2:length(colnames(x_data_sub))]), collapse = " + "))
+      input_df <- as.data.frame(cbind(y_data, x_data_sub))
+      names(input_df)[1] <- "ExpStat_k"
+      if(debug) {print(head(input_df))}
+      #if(debug) {print(formula_new)}
+      #lm_res <- speedlm(formula = formula_new, data = input_df)
     }
-    print(formula)
-    input_df <- as.data.frame(cbind(y_data, x_data_sub))
-    names(input_df)[1] <- "y_data"
-    lm_res <- speedlm(formula = formula, data = input_df)
-  } else {lm_res <- NA}
-  
-  return(lm_res)
+    
+  } 
+  #return(list("input_df" = input_df, "formula" = formula))
+  return(input_df)
 }
 
+# NOTE: getting an object not found error for formula_new; adjusted according to this post: https://stackoverflow.com/questions/8218196/object-not-found-error-when-passing-model-formula-to-another-function
 
 #' Evaluation metrics function from plural sight guide (R-squared and RMSE)
 #' https://www.pluralsight.com/guides/linear-lasso-and-ridge-regression-with-r
@@ -700,8 +708,8 @@ get_groups_for_variables <- function(x_vars, meth_bucketing, cna_bucketing) {
       curr_grp <- x
     }
   }
-  print(x_vars)
-  print(group_assignments)
+  #print(x_vars)
+  #print(group_assignments)
   
   return(group_assignments)
 }

@@ -875,6 +875,7 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
     formula <- construct_formula(lm_input_table, analysis_type, num_PEER, num_pcs,
                                  cna_bucketing, meth_bucketing, covs_to_incl)
     
+    lm_fit <- NA
     if (regularization == "None") {
       
       if(debug) {
@@ -895,26 +896,46 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
     } else if (regularization == "L2" | regularization == "ridge" | 
                regularization == "L1" | regularization == "lasso") {
       
-      lm_fit <- run_regularization_model(formula, lm_input_table, type = regularization, debug,
+      lm_input_table_new <- run_regularization_model(formula, lm_input_table, type = regularization, debug,
                                          meth_bucketing, cna_bucketing)
-      
+      if(!is.na(lm_input_table_new)) {
+        formula <- as.character(paste("ExpStat_k", colnames(lm_input_table_new)[2], sep = " ~ "))
+	if(ncol(lm_input_table_new) > 2) {
+          formula <- as.character(paste(formula, paste(colnames(lm_input_table_new)[3:length(colnames(lm_input_table_new))], collapse = " + "), sep = " + "))
+	}
+        if(debug) {print(formula)}
+        lm_fit <- tryCatch({
+          speedglm::speedlm(formula = formula, data = lm_input_table_new)  # Do not include library size as offset
+        }, error = function(cond) {
+          message("There was a problem with this linear model run:")
+          message(cond)
+          print(formula)
+          print(head(lm_input_table_new))
+          return(NA)
+        })
+      }  
     } else {
-      lm_fit <- NA
       print("Model only has L1, L2 or None implemented for regularization. Please provide one of these options.")
     }
     
     # Tidy the output
-    summary_table <- tidy(lm_fit)
-    if(inclResiduals) {
+    if(!is.na(lm_fit)) {print(summary(lm_fit))}
+    summary_table <- NA
+    if(!is.na(lm_fit)) {
+      summary_table <- tidy(lm_fit)
+    }    
+    if(inclResiduals & (!(is.na(summary_table)))) {
       residuals <- as.numeric(lm_input_table$ExpStat_k) - 
         as.numeric(unlist(predict.speedlm(lm_fit, newdata = lm_input_table)))
       summary_table$Residual <- paste(residuals, collapse = ";")
     }
     
     # Add a column for the regulatory protein and target gene to ID them
-    if(!run_query_genes_jointly) {summary_table$R_i <- regprot}
-    summary_table$T_k <- paste(targ, collapse = ";")
-    
+    if(!is.na(summary_table)) {
+      if(!run_query_genes_jointly) {summary_table$R_i <- regprot}
+      summary_table$T_k <- paste(targ, collapse = ";")
+    }
+        
     if(debug) {
       print("Summary Table")
       print(head(summary_table))
