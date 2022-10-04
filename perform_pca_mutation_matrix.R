@@ -8,11 +8,21 @@ library(ggplot2)
 
 mut_count_mat <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_nonsense_CancerOnly_IntersectPatients.csv", 
                           header= TRUE, check.names = FALSE, row.names = 1)
+#mut_count_mat <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_nonsense_CancerOnly_IntersectPatients.csv", 
+                          #header= TRUE, check.names = FALSE, row.names = 1)
+#mut_count_mat <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_nonsense_BRCA_BLCA_HNSC_CancerOnly_IntersectPatients.csv", 
+                          #header= TRUE, check.names = FALSE, row.names = 1)
+
+
+
 rownames(mut_count_mat) <- mut_count_mat$Gene_Symbol
-mut_count_mat <- mut_count_mat[mut_count_mat$Gene_Symbol != "TP53",]
+#mut_count_mat <- mut_count_mat[mut_count_mat$Gene_Symbol != "TP53",]  # to exclude TP53, or other geme
 
 mutation_regprot_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Linear Model/Tumor_Only/Regprot_Mutation/iprotein_results_missense_nonsense_CancerOnly_IntersectPatients.csv", 
                                 header = TRUE, check.names = FALSE)
+#mutation_regprot_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Linear Model/Tumor_Only/Regprot_Mutation/iprotein_results_missense_nonsense_CancerOnly_IntersectPatients.csv", 
+                                #header = TRUE, check.names = FALSE)
+
 unique_patients <- unique(unlist(lapply(mutation_regprot_df$Patient, function(x) unlist(strsplit(x, ";", fixed = TRUE)))))
 
 mut_count_mat <- mut_count_mat[,c(1, (which(colnames(mut_count_mat)[2:ncol(mut_count_mat)] %in%
@@ -72,4 +82,6 @@ pc1.5 %>%
                               as.character(Name),'')),hjust=1,vjust=0) +
   geom_text(aes(label= ifelse(PC1 > quantile(PC1, 0.99),
                               as.character(Name),'')),hjust=0,vjust=0)
+
+
 

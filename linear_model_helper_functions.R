@@ -10,6 +10,7 @@ library(stringr)
 library(caret)
 library(glmnet)
 library(gglasso)
+library(selectiveInference)
 
 ############################################################
 
@@ -26,18 +27,20 @@ restrict_mut_pc_cols <- function(patient_df, mut_pc_vect) {
   # Identify the PC columns within the patient DF
   patient_df_pc_cols <- which(grepl("Mut_PC", colnames(patient_df)))
   
-  # Ensure the largest given PC is within the DF (discard any that are larger than what we have)
-  if(TRUE %in% unlist(lapply(mut_pc_vect, function(x) ifelse(x > length(patient_df_pc_cols), TRUE, FALSE)))) {
-    print("Some mutation matrix PCs given exceed the number of PCs provided in patient DF. Restricting PCs
+  if(length(patient_df_pc_cols) > 0) {
+    # Ensure the largest given PC is within the DF (discard any that are larger than what we have)
+    if(TRUE %in% unlist(lapply(mut_pc_vect, function(x) ifelse(x > length(patient_df_pc_cols), TRUE, FALSE)))) {
+      print("Some mutation matrix PCs given exceed the number of PCs provided in patient DF. Restricting PCs
           to those within given range.")
-    mut_pc_vect <- mut_pc_vect[mut_pc_vect <= length(patient_df_pc_cols)]
+      mut_pc_vect <- mut_pc_vect[mut_pc_vect <= length(patient_df_pc_cols)]
+    }
+    
+    # Remove any PC columns we don't want to keep
+    cols_to_remove <- unlist(lapply(1:length(patient_df_pc_cols), function(i) {
+      if(!(i %in% mut_pc_vect)) {return(patient_df_pc_cols[i])}
+    }))
+    patient_df <- patient_df[, (cols_to_remove) := NULL]
   }
-
-  # Remove any PC columns we don't want to keep
-  cols_to_remove <- unlist(lapply(1:length(patient_df_pc_cols), function(i) {
-    if(!(i %in% mut_pc_vect)) {return(patient_df_pc_cols[i])}
-  }))
-  patient_df <- patient_df[, (cols_to_remove) := NULL]
   
   return(patient_df)
 }
@@ -438,6 +441,7 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
 #' @param covs_to_incl_label a label indicating what covariates we've included in this run
 #' @param patients_to_incl_label a label indicating the subpopulation we are restricting 
 #' to, if any
+#' @param model_type either "linear" or "mixed" (to indicate a linear mixed effects model)
 #' @param removeCis a TRUE/ FALSE value indicating whether or not we have removed
 #' cis gene pairings 
 #' @param removeMetastatic a TRUE/ FALSE value indicating whether or not we have removed 
@@ -447,7 +451,7 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
 create_output_filename <- function(test, tester_name, run_name, targets_name, expression_df_name,
                                    cna_bucketing, mutation_regprot_df_name, meth_bucketing,
                                    meth_type, patient_df_name, num_PEER, num_pcs, randomize,
-                                   covs_to_incl_label, patients_to_incl_label, removeCis, 
+                                   covs_to_incl_label, patients_to_incl_label, model_type, removeCis, 
                                    removeMetastatic, regularization) {
   outfn <- "res"
   
@@ -492,6 +496,8 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   
   # If we are NOT removing metastatic samples, add a label to denote this
   if(!removeMetastatic) {outfn <- paste(outfn, "notRmMetast", sep = "_")}
+  
+  if(!model_type == "linear") {outfn <- paste(outfn, "mixed", sep = "_")}
   
   # If we have regularized in some way, denote this
   if(!(regularization == "None")) {
@@ -538,9 +544,6 @@ run_regularization_model <- function(formula, lm_input_table, type, debug,
   x_vars <- unlist(strsplit(trimws(spl_formula[2], which = "both"), " + ", fixed = TRUE))
   x_data <- as.matrix(lm_input_table[,colnames(lm_input_table) %fin% x_vars])
   
-  #print(head(y_data))
-  #print(head(x_data))
-  
   # Do standard scaling preprocessing, using preProcess function from the caret package
   #pre_proc_val <- preProcess(x_data, method = c("center", "scale"))
   #x_data <- predict(pre_proc_val, x_data)
@@ -553,6 +556,7 @@ run_regularization_model <- function(formula, lm_input_table, type, debug,
   # indicates that we are doing L2-regularization
   lambdas <- 10^seq(2, -3, by = -.1)
   best_model <- NA
+  optimal_lambda <- NA
   
   # Ridge regression
   if((type == "ridge") | (type == "L2")) {
@@ -568,19 +572,65 @@ run_regularization_model <- function(formula, lm_input_table, type, debug,
   # Lasso
   } else if((type == "lasso") | (type == "L1")) {
     tryCatch({
-      lasso.cv <- cv.glmnet(x_data, y_data, alpha = 1, lambda = lambdas, 
-                            standardize = TRUE, nfolds = 5)
+      
+      # Use a group lasso using the gglasso package, to account
+      # for the dummy variables (bucketed variables)
+      v.group <- get_groups_for_variables(x_vars, meth_bucketing, cna_bucketing)
+      
+      # Get the optimal lambda using cross-validation
+      #lasso.cv <- cv.glmnet(x_data, y_data, alpha = 1, lambda = lambdas, 
+                            #standardize = TRUE, nfolds = 5)
+      # Default number of folds is 5
+      lasso.cv <- cv.gglasso(x_data, y_data, group = v.group, lambda = lambdas, 
+                             loss = "ls")
       optimal_lambda <- lasso.cv$lambda.min
       if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
+      
       # Run the model with the best lambda
       #best_model <- glmnet(x_data, y_data, alpha = 1, family = "gaussian",
       #lambda = optimal_lambda, standardize = FALSE, intercept = FALSE)
-      
-      # Alternatively, could use a group lasso using the gglasso package, to account
-      # for the dummy variables (bucketed variables)
-      v.group <- get_groups_for_variables(x_vars, meth_bucketing, cna_bucketing)
       best_model <- gglasso(x_data, y_data, lambda = optimal_lambda, 
-                            group = v.group, loss = "ls", intercept = FALSE)
+                            group = v.group, loss = "ls")
+      
+      # Get p-values for LASSO using the selectiveInference package in R
+      # The -1 when getting the Beta is to remove the intercept Beta
+      # Need to divide lambda by n because glmnet uses a different objective function 
+      # than selectiveInference
+      betas <- coef(best_model, x = x_data, y = y_data, s = (lambda / nrow(x_data)), exact = TRUE)[-1]
+      pvals_and_intervals <- fixedLassoInf(x_data, y_data, beta = betas, family = "gaussian",
+                                           lambda = optimal_lambda)
+      pvals <- pvals_and_intervals$pv
+      intervals <- pvals_and_intervals$ci
+      sds <- pvals_and_intervals$sd
+      
+      # Get the p-values for everything, assigning 1 to those variables that were not selected
+      pvals_full <- NA
+      intervals_full <- NA
+      sds_full <- NA
+      index <- 1
+      for(i in 1:length(betas)) {
+        if(b == 0) {
+          pvals_full[i] <- 1
+          intervals_full <- NA
+          sds_full <- NA
+        }
+        else {
+          pvals_full[i] <- pvals[index]
+          intervals_full[i] <- paste0(intervals[index, 1], intervals[index, 2], collapse = ":")
+          sds_full <- sds[i]
+          index <- index + 1
+        }
+      }
+      
+      # Construct an output DF using all the measures we are interested in
+      best_model <- as.data.frame(best_model$beta)
+      colnames(best_model) <- c("estimate")
+      best_model$term <- rownames(best_model)
+      best_model$p.value <- pvals_full
+      best_model$sds <- sds_full
+      best_model$conf.int <- intervals_full
+      
+      
     }, error = function(cond) {best_model <- NA})
 
     
@@ -603,45 +653,13 @@ run_regularization_model <- function(formula, lm_input_table, type, debug,
   #}
   #best_model <- tidy(best_model)
   
-  # Pipe the selected covariates back into a LM to get p-values
-  # Adapted from: https://stats.stackexchange.com/questions/410173/lasso-regression-p-values-and-coefficients
-  x_data_sub <- NA
-  if(!is.na(best_model)) {
-    covs <- as.matrix(coef(best_model))
-    keep_x <- rownames(covs)[covs != 0]
-    keep_x <- keep_x[!keep_x == "(Intercept)"]
-    x_data_sub <- as.data.frame(x_data[, keep_x])
-    if(ncol(x_data_sub) == 1) {colnames(x_data_sub) <- as.character(keep_x)}
-    
-    if(debug) {
-      print(covs)
-      print(head(x_data_sub))
-    }
-  }
+  # Option to return an input data frame that will then be 
+  # put back into a multiple linear regression model with LASSO-selected x variables
+  #input_df <- run_regularization_output_in_lm(best_model, x_data, y_data)
+  #return(input_df)
   
-  input_df <- NA
-
-  if(!(is.null(colnames(x_data_sub)) | is.na(best_model))) {
-    if(ncol(x_data_sub) == 1) {
-      #formula_new <- as.character(paste("ExpStat_k", colnames(x_data_sub)[1], sep = " ~ "))
-      input_df <- as.data.frame(cbind(y_data, x_data_sub))
-      names(input_df)[1] <- "ExpStat_k"
-      if(debug) {print(head(input_df))}
-      #if(debug) {print(formula_new)}
-      #lm_res <- speedlm(formula = formula_new, data = input_df)
-    } else {
-      #formula_new <- as.character(paste(c(paste("ExpStat_k", colnames(x_data_sub)[1], sep = " ~ "), 
-                         #colnames(x_data_sub)[2:length(colnames(x_data_sub))]), collapse = " + "))
-      input_df <- as.data.frame(cbind(y_data, x_data_sub))
-      names(input_df)[1] <- "ExpStat_k"
-      if(debug) {print(head(input_df))}
-      #if(debug) {print(formula_new)}
-      #lm_res <- speedlm(formula = formula_new, data = input_df)
-    }
-    
-  } 
-  #return(list("input_df" = input_df, "formula" = formula))
-  return(input_df)
+  
+  return(best_model)
 }
 
 # NOTE: getting an object not found error for formula_new; adjusted according to this post: https://stackoverflow.com/questions/8218196/object-not-found-error-when-passing-model-formula-to-another-function
@@ -675,13 +693,24 @@ get_groups_for_variables <- function(x_vars, meth_bucketing, cna_bucketing) {
   
   # Obtain the bucketed, categorical variables
   bucketed_vars <- c("Tot_Mut_b","Tumor_purity_b", "Tot_IC_Frac_b", "Cancer_type_b")
-  if(meth_bucketing) {
-    bucketed_vars <- c(bucketed_vars, "MethStat_k")
-    if(analysis_type == "eQTL") {bucketed_vars <- c(bucketed_vars, "MethStat_i")}
-  }
-  if(!((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing)))) {
-    bucketed_vars <- c(bucketed_vars, "CNAStat_k", "CNAStat_i")
-  }
+  #if(meth_bucketing) {
+  #  bucketed_vars <- c(bucketed_vars, "MethStat_k")
+  #  if(analysis_type == "eQTL") {bucketed_vars <- c(bucketed_vars, "MethStat_i")}
+  #}
+  #if(!((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing)))) {
+  #  bucketed_vars <- c(bucketed_vars, "CNAStat_k", "CNAStat_i")
+  #}
+  
+  # If we'd like for all driver covariates to be selected together in group lasso (e.g. for driver X,
+  # X_MutStat_i, X_CNAStat_i, and X_MethStat_i would be a group), implement that here
+  unique_driver_ids <- unique(unlist(lapply(x_vars, function(x) {
+    if(grepl("MutStat_i|CNAStat_i|MethStat_i", x)) {
+      id <- unlist(strsplit(x, "_", fixed = TRUE))[1]
+      return(id)
+    } else {return(NA)}
+  })))
+  unique_driver_ids <- unique_driver_ids[!is.na(unique_driver_ids)]
+  bucketed_vars <- c(bucketed_vars, unique_driver_ids)
   
   # Assign these variables to numerical groups (non-bucketed variables are given
   # their own group number)
@@ -690,7 +719,7 @@ get_groups_for_variables <- function(x_vars, meth_bucketing, cna_bucketing) {
   group_assignments <- c()
   
   for(i in 1:length(x_vars)) {
-    x <- unlist(strsplit(x_vars[i], "_", fixed = TRUE))[2]
+    x <- unlist(strsplit(x_vars[i], "_", fixed = TRUE))[1]
     # This is a bucketed variable
     if(TRUE %in% unlist(lapply(bucketed_vars, function(var) ifelse(grepl(x, var), TRUE, FALSE)))) {
       # If it's a bucketed variable, but not in the current group, advance the
@@ -709,11 +738,59 @@ get_groups_for_variables <- function(x_vars, meth_bucketing, cna_bucketing) {
     }
   }
   #print(x_vars)
-  #print(group_assignments)
+  print(group_assignments)
   
   return(group_assignments)
 }
 
+
+#' If we want to re-run the output from LASSO using a simple, multiple linear 
+#' regression model, create a new input DF that has only the covariates selected
+#' by LASSO
+#' Concept adapted from: https://stats.stackexchange.com/questions/410173/lasso-regression-p-values-and-coefficients
+#' @param best_model the model output from glmnet or gglasso
+#' @param x_data the columns of the input data frame for the full set of 
+#' x-variables
+#' @param y_data the column of the input data frame corresponding to the
+#' outcome variable
+run_regularization_output_in_lm <- function(best_model, x_data, y_data) {
+  # Adjust the input DF to pipe the selected covariates back into a LM to get p-values
+  x_data_sub <- NA
+  if(!is.na(best_model)) {
+    # Get the non-zero covariates from the the model (selected by group lasso)
+    covs <- as.matrix(coef(best_model))
+    keep_x <- rownames(covs)[covs != 0]
+    keep_x <- keep_x[!keep_x == "(Intercept)"]
+    # Add these to the standard model coefficients, using unique to ensure no duplicates
+    std_coeff <- unlist(lapply(rownames(covs), function(x) ifelse(grepl("MutStat_i|CNAStat_i|MethStat_i", x), NA, x)))
+    std_coeff <- std_coeff[!is.na(std_coeff) & !std_coeff == "(Intercept)"]
+    if(debug) {
+      print("Std. Coefficients")
+      print(head(std_coeff))
+    }
+    keep_x <- unique(c(keep_x, std_coeff))
+    # Subset the input data frame to reflect the standard covariates and the selected drivers covs
+    x_data_sub <- as.data.frame(x_data[, colnames(x_data) %fin% keep_x])
+    if(ncol(x_data_sub) == 1) {colnames(x_data_sub) <- as.character(keep_x)}
+    
+    if(debug) {
+      print("X Data, subsetted")
+      print(head(x_data_sub))
+    }
+  }
+  
+  input_df <- NA
+  
+  if(!(is.null(colnames(x_data_sub)) | is.na(best_model))) {
+    input_df <- as.data.frame(cbind(y_data, x_data_sub))
+    names(input_df)[1] <- "ExpStat_k"
+    if(debug) {
+      print("New input data frame, post-lasso regression")
+      print(head(input_df))
+    }
+  } 
+  return(input_df)
+}
   
 ############################################################
 #' A function to combine the collinearity diagnostic statistics,
@@ -948,7 +1025,7 @@ subset_regprot_df_by_intersecting_ids <- function(patients, mutation_regprot_df,
 remove_metastatic_samples <- function(df, colNames) {
   df <- as.data.frame(df)
   
-  column_names_to_keep <- c("ensg_id", "Swissprot", "swissprot", "gene_name", "ensg_ids")
+  column_names_to_keep <- c("ensg_id", "Swissprot", "swissprot", "gene_name", "ensg_ids", "Patient", "patient")
   
   if(colNames == TRUE) {
     # Keep only primary patients

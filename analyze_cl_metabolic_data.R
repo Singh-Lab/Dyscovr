@@ -244,13 +244,13 @@ length(intersect(metabolism_gene_list_ensg, unlist(strsplit(as.character(unlist(
 #' a significantly dysregulated metabolite from this paper
 #' @param master_df a master DF produced from our model, subsetted
 #' to the given protein of interest
-#' @param mut_df a metabolism DF for a particular protein of interest 
+#' @param mut_df genes from a metabolism DF for a particular protein of interest 
 #' @param thres a qvalue threshold for significance
-plot_target_assoc_w_metabol_enrichment <- function(master_df, mut_df, thres) {
+plot_target_assoc_w_metabol_enrichment <- function(master_df, mut_df_genes, thres) {
   master_df_sig <- master_df[master_df$q.value < thres,]
   
   sig_hits <- unique(unlist(master_df_sig$T_k.name))
-  
+
   rank <- 1:length(sig_hits)
   
   cumulat_val <- 0
@@ -258,9 +258,8 @@ plot_target_assoc_w_metabol_enrichment <- function(master_df, mut_df, thres) {
   
   for(i in 1:length(sig_hits)) {
     sig_hit <- sig_hits[i]
-    if(sig_hit %in% (unlist(lapply(unname(mut_df$Assoc.Gene.Names), function(x) 
-      unlist(strsplit(x, ",", fixed = TRUE)))))) {
-      cumulat_val <- cumulat_val + 1
+    if(sig_hit %in% mut_df_genes) {
+        cumulat_val <- cumulat_val + 1
     }
     frac <- cumulat_val / i
     print(frac)
@@ -272,6 +271,12 @@ plot_target_assoc_w_metabol_enrichment <- function(master_df, mut_df, thres) {
   
 }
 
-plot_target_assoc_w_metabol_enrichment(master_df_mut, tp53_mut_df, 0.2)
+tp53_mut_df_genes <- unique(unlist(strsplit(as.character(unlist(tp53_mut_df$Assoc.Genes)), ",", fixed = TRUE)))
+tp53_mut_df_genes_overlap <- tp53_mut_df_genes[tp53_mut_df_genes %in% metabolism_gene_list_ensg]
+tp53_mut_df_genes_overlap_names <- unique(unlist(lapply(tp53_mut_df_genes_overlap, function(x) 
+  all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == x, 'external_gene_name'])))
+
+
+plot_target_assoc_w_metabol_enrichment(master_df_mut, tp53_mut_df_genes_overlap_names, 0.2)
 
 

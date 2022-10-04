@@ -176,52 +176,85 @@ max_pcs <- 5
 # TODO: RUN THIS FOR METABRIC
 
 ############################################################
+# IMPORT PRE-CALLED GENOTYPE PCs
+############################################################
+# Link to file downloads: https://gdc.cancer.gov/about-data/publications/CCG-AIM-2020
+# Link to associated Carrot-Zhang Paper: https://www.cell.com/cancer-cell/pdf/S1535-6108(20)30211-7.pdf
+
+pc_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Genotype_Mut_Data/"
+
+# 1. Washington University
+washu_pcs <- read.table(paste0(pc_path, "WashU_PCA_ethnicity_assigned.tsv"), 
+                        header = TRUE, check.names = FALSE, sep = "\t")
+
+# 2. UCSF 
+ucsf_pcs <- read.csv(paste0(pc_path, "UCSF_Ancestry_Calls.csv"), 
+                     header = TRUE, check.names = FALSE)
+
+# 3. The Broad Institute
+broad_pcs <- read.csv(paste0(pc_path, "Broad_ancestry_PCA.txt"), 
+                      header = TRUE, check.names = FALSE, sep = "\t")
+
+
+############################################################
 ### CALL CREATE SAMPLE DATA FRAME FUNCTION
 ############################################################
 # CIBERSORT abs
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
                                             icd_precomp_est, CIBERSORT_abs_cols, 
-                                            peer_factors_tmm, pca_results_misAndNon, max_pcs, "tcga")
+                                            peer_factors_tmm, ucsf_pcs, "ucsf", 
+                                            pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
                                             icd_precomp_est, CIBERSORT_abs_cols, 
-                                            peer_factors_fpkm, pca_results_misAndNon, max_pcs, "tcga")
+                                            peer_factors_fpkm, ucsf_pcs, "ucsf",
+                                            pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
                                             icd_precomp_est, CIBERSORT_abs_cols, 
-                                            peer_factors_fpkm_top10k, pca_results_misAndNon, max_pcs, "tcga")
+                                            peer_factors_fpkm_top10k, ucsf_pcs, "ucsf",
+                                            pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
                                             icd_precomp_est, CIBERSORT_abs_cols, 
-                                            peer_factors_qn_top10k, pca_results_misAndNon, max_pcs, "tcga")
+                                            peer_factors_qn_top10k, ucsf_pcs, "ucsf",
+                                            pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
                                             icd_precomp_est, CIBERSORT_abs_cols, 
-                                            peer_factors_rn, pca_results_misAndNon, max_pcs, "tcga")
+                                            peer_factors_rn, ucsf_pcs, "ucsf",
+                                            pca_results_misAndNon, max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
                                             icd_precomp_est, CIBERSORT_abs_cols, 
-                                            peer_factors_rn_top10k, pca_results_misAndNon, max_pcs, "tcga")
+                                            peer_factors_rn_top10k, ucsf_pcs, "ucsf",
+                                            pca_results_misAndNon, max_pcs, "tcga")
 
 # For METABRIC
 sample_dataframe <- create_sample_dataframe(clin_samp_df, NA, tumor_purity_df, 
-                                            icd_precomp_est, NA, NA, NA, NA, "metabric")
+                                            icd_precomp_est, NA, NA, NA, NA, NA, NA, "metabric")
 
 
 # TIMER
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
                                             icd_precomp_est, TIMER_cols, peer_factors_tmm, 
-                                            pca_results_misAndNon, max_pcs, "tcga")
+                                            ucsf_pcs, "ucsf", pca_results_misAndNon, 
+                                            max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
                                             icd_precomp_est, TIMER_cols, peer_factors_fpkm, 
-                                            pca_results_misAndNon, max_pcs, "tcga")
+                                            ucsf_pcs, "ucsf", pca_results_misAndNon, 
+                                            max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
                                             icd_precomp_est, TIMER_cols, peer_factors_fpkm_top10k, 
-                                            pca_results_misAndNon, max_pcs, "tcga")
+                                            ucsf_pcs, "ucsf", pca_results_misAndNon, 
+                                            max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
                                             icd_precomp_est, TIMER_cols, peer_factors_qn_top10k, 
-                                            pca_results_misAndNon, max_pcs, "tcga")
+                                            ucsf_pcs, "ucsf", pca_results_misAndNon, 
+                                            max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
                                             icd_precomp_est, TIMER_cols, peer_factors_rn, 
-                                            pca_results_misAndNon, max_pcs, "tcga")
+                                            ucsf_pcs, "ucsf", pca_results_misAndNon, 
+                                            max_pcs, "tcga")
 sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_purity_df, 
                                             icd_precomp_est, TIMER_cols, peer_factors_rn_top10k, 
-                                            pca_results_misAndNon, max_pcs, "tcga")
+                                            ucsf_pcs, "ucsf", pca_results_misAndNon, 
+                                            max_pcs, "tcga")
 
 write.csv(sample_dataframe, paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_timer_tmm.csv", sep = ""))
 write.csv(sample_dataframe, paste(main_path, "Linear Model/Patient and Sample DFs/sample_dataframe_timer_fpkm.csv", sep = ""))
@@ -270,13 +303,19 @@ write.csv(sample_dataframe, paste(main_path, "Patient and Sample DFs/sample_data
 #' @param ici_columns a vector of strings indicating the column names of the tool of
 #' interest for the immune cell infiltration DF
 #' @param peer_df a data frame with results from running PEER on expression matrix
+#' @param genotype_pc_file a file with pre-called genotype PCs from an external source
+#' (either the Broad, UCSF, or WashU). NA if not using.
+#' @param genotype_pc_file_label either "broad", "ucsf", or "washu" to indicate the 
+#' source of the file and dictate how we parse it. NA if not using.
+#' @param num_geno_pcs the number of genotype PCs we wish to include (default is 3)
 #' @param mutation_pc_df a data frame with results from running PCA on the mutation matrix
-#' @param max_pcs the maximum number of PCs to include in the sample file
+#' @param max_pcs the maximum number of mutation PCs to include in the sample file
 #' @param dataset either 'tcga', 'metabric', 'icgc', or 'cptac3' to indicate what column
 #' names to reference/ data types to include
 create_sample_dataframe <- function(aliquot_df, expression_df, tumor_purity_df, 
-                                    immune_cell_infl_df, ici_columns, peer_df,
-                                    mutation_pc_df, max_pcs, dataset) {
+                                    immune_cell_infl_df, ici_columns, peer_df, 
+                                    genotype_pc_file, genotype_pc_file_label, 
+                                    mutation_pc_df, max_pcs, dataset, num_geno_pcs = 3) {
   
   # Create relational data frame to hold patient-dependent inputs to linear model
   # Columns: Linear model input variables 
@@ -298,8 +337,9 @@ create_sample_dataframe <- function(aliquot_df, expression_df, tumor_purity_df,
   sample_dataframe <- input_sample_specific_info(sample_dataframe, aliquot_df, 
                                                  expression_df, tumor_purity_df,
                                                  immune_cell_infl_df, ici_columns,
-                                                 peer_df, mutation_pc_df, max_pcs,
-                                                 dataset)
+                                                 peer_df, genotype_pc_file, 
+                                                 genotype_pc_file_label, num_geno_pcs, 
+                                                 mutation_pc_df, max_pcs, dataset)
   
   # Remove any rows that are entirely NA
   sample_dataframe <- sample_dataframe[rowSums(is.na(sample_dataframe)) != 
@@ -327,14 +367,20 @@ create_sample_dataframe <- function(aliquot_df, expression_df, tumor_purity_df,
 #' tool, per sample
 #' @param ici_columns a vector of strings indicating the column names of the tool of
 #' interest for the immune cell infiltration DF
+#' @param genotype_pc_file a file with pre-called genotype PCs from an external source
+#' (either the Broad, UCSF, or WashU). NA if not using.
+#' @param genotype_pc_file_label either "broad", "ucsf", or "washu" to indicate the 
+#' source of the file and dictate how we parse it. NA if not using.
+#' @param num_geno_pcs the number of genotype PCs we wish to include (default is 3)
 #' @param mutation_pc_df a data frame with results from running PCA on the mutation matrix
-#' @param max_pcs the maximum number of PCs to include in the sample file
+#' @param max_pcs the maximum number of mutation PCs to include in the sample file
 #' @param dataset either 'tcga', 'metabric', 'icgc', or 'cptac3' to indicate what column
 #' names to reference/ data types to include
 input_sample_specific_info <- function(input_df, aliquot_df, expression_df, 
                                        tumor_purity_df, immune_cell_infl_df,
-                                       ici_columns, peer_df, mutation_pc_df, 
-                                       max_pcs, dataset) {
+                                       ici_columns, peer_df, genotype_pc_file, 
+                                       genotype_pc_file_label, num_geno_pcs, 
+                                       mutation_pc_df, max_pcs, dataset) {
   input_dataframe_updated <- input_df
   sample_ids <- rownames(input_df)
   
@@ -358,14 +404,30 @@ input_sample_specific_info <- function(input_df, aliquot_df, expression_df,
                                                       #immune_cell_infl_df, ici_columns, dataset)
   
   # PEER FACTORS
-  input_dataframe_updated <- add_peer(input_dataframe_updated, peer_df)
+  if(!is.na(peer_df)) {
+    input_dataframe_updated <- add_peer(input_dataframe_updated, peer_df)
+  }
   
   # LIBRARY SIZES
   input_dataframe_updated <- add_library_sizes(input_dataframe_updated, expression_df)
   
   # MUTATION MATRIX PCs
-  input_dataframe_updated <- add_mutation_pcs(input_dataframe_updated, mutation_pc_df, max_pcs)
+  if(!is.na(mutation_pc_df)) {
+    input_dataframe_updated <- add_mutation_pcs(input_dataframe_updated, mutation_pc_df, max_pcs)
+  }
   
+  # PRE-CALLED GENOTYPE PCs
+  if(!is.na(genotype_pc_file)) {
+    genotype_pc_file_processed <- process_genotype_pc_file(genotype_pc_file, 
+                                                           genotype_pc_file_label, 
+                                                           num_geno_pcs, sample_ids)
+    print("Genotype PC file processed")
+    print(head(genotype_pc_file_processed))
+    input_dataframe_updated <- merge(input_dataframe_updated, genotype_pc_file_processed, 
+                                     by = 'row.names', all = TRUE) 
+    rownames(input_dataframe_updated) <- input_dataframe_updated$Row.names
+    input_dataframe_updated <- input_dataframe_updated[,setdiff(colnames(input_dataframe_updated), "Row.names")]
+  }
   
   return(input_dataframe_updated)
 }
@@ -497,7 +559,6 @@ add_total_immune_cell_percentage <- function(sample_df, immune_cell_infl_df,
       } else {return (c(NA, NA, NA))}
     }
     # Sum the fraction of all these non-tumor cell types together
-    print(head(ici_df_sub))
     total_ic_frac <- sum(as.numeric(ici_df_sub), na.rm = TRUE)
     
     #return(total_ic_frac)
@@ -691,6 +752,122 @@ add_mutation_pcs <- function(sample_df, mutation_pc_df, max_pcs) {
   
   return(sample_df)
 }
+
+
+############################################################ 
+
+#' Takes a pre-processed genotype PC file, from either the Broad, UCSF, or
+#' WashU, and reformats it to have the desired number of PCs in the correct 
+#' format to add to the patient data frame
+#' @param genotype_pc_file the file with patient IDs and associated genotype PCs
+#' @param genotype_pc_file_label either "broad", "ucsf", or "washu" to denote
+#' what the file format is
+#' @param num_pcs the number of pcs we would like to record in the patient file
+#' (default is 3)
+#' @param clinical_df a clinical DF with sample names from the TCGA
+process_genotype_pc_file <- function(genotype_pc_file, genotype_pc_file_label, 
+                                     num_pcs, sample_ids) {
+  
+  outfile <- NA
+
+  # Process each file type differently based on its format
+  if(genotype_pc_file_label == "washu") {
+    genotype_pc_file$Sample <- unlist(lapply(genotype_pc_file$Sample, function(x)
+      paste(unlist(strsplit(x, "-", fixed = TRUE))[1:4], collapse = "-")))
+    genotype_pc_file_sub <- distinct(genotype_pc_file[genotype_pc_file$Sample %fin% sample_ids, 
+                                             c("Sample", paste0("PC", 1:num_pcs))])
+    outfile <- genotype_pc_file_sub
+    
+    # Handle any duplicates (e.g., two plates for the same sample) by averaging the PCs
+    duplicates <- unlist(outfile$Sample[which(duplicated(outfile$Sample))])
+    print(duplicates)
+    for (d in duplicates) {
+      outfile_d <- outfile[outfile$Sample == d,]
+      outfile_d_colMeans <- colMeans(outfile_d[grepl("PC", colnames(outfile_d))])
+      new_row <- outfile_d[1, , drop = FALSE]
+      new_row[1,grepl("PC", colnames(new_row))] <- as.numeric(unlist(outfile_d_colMeans))
+      outfile <- outfile[outfile$Sample != d, ]
+      outfile <- rbind(outfile, new_row)
+    }
+
+    rownames(outfile) <- outfile$Sample
+    print(head(outfile))
+    outfile <- outfile[,setdiff(colnames(outfile), "Sample")]
+    
+    outfile <- add_missing_ids(outfile, sample_ids)
+    
+  } else if (genotype_pc_file_label == "ucsf") {
+    genotype_pc_file$Sample <- unlist(lapply(genotype_pc_file$Aliquot_ID, function(x)
+      paste(unlist(strsplit(x, "-", fixed = TRUE))[1:4], collapse = "-")))
+    genotype_pc_file_sub <- genotype_pc_file[genotype_pc_file$Sample %fin% sample_ids, 
+                                             c("Sample", paste0("PC", 1:num_pcs))]
+    outfile <- genotype_pc_file_sub
+    rownames(outfile) <- outfile$Sample
+    outfile <- outfile[,setdiff(colnames(outfile), "Sample")]
+    
+    outfile <- add_missing_ids(outfile, sample_ids)
+    
+  } else if (genotype_pc_file_label == "broad") {
+    # Split apart the PCs first
+    genotype_pc_file$PC1 <- unlist(lapply(genotype_pc_file$PC1:PC2:PC3, function(x) 
+      unlist(strsplit(x, ":", fixed = TRUE))[1]))
+    genotype_pc_file$PC1 <- unlist(lapply(genotype_pc_file$PC1:PC2:PC3, function(x) 
+      unlist(strsplit(x, ":", fixed = TRUE))[2]))
+    genotype_pc_file$PC1 <- unlist(lapply(genotype_pc_file$PC1:PC2:PC3, function(x) 
+      unlist(strsplit(x, ":", fixed = TRUE))[3]))
+    
+    patient_ids <- unlist(lapply(sample_ids, function(x) 
+      paste(unlist(strsplit(x, "-", fixed = TRUE))[1:3], collapse = "-")))
+    
+    genotype_pc_file_sub <- NA
+    if(num_pcs > 3) {
+      print("Error - only 3 PCs provided for Broad.")
+      genotype_pc_file_sub <- genotype_pc_file[genotype_pc_file$SampleID %fin% patient_ids, 
+                                               c("SampleID", paste0("PC", 1:3))]
+    } else {
+      genotype_pc_file_sub <- genotype_pc_file[genotype_pc_file$SampleID %fin% patient_ids, 
+                                               c("SampleID", paste0("PC", 1:num_pcs))]
+    }
+    outfile <- genotype_pc_file_sub
+    rownames(outfile) <- outfile$SampleID
+    outfile <- outfile[,setdiff(colnames(outfile), "SampleID")]
+    
+    outfile <- add_missing_ids(outfile, sample_ids)
+    
+  } else {
+    print("Error. Only implemented for WashU, UCSF, and the Broad input files. Returning NA.")
+    return(data.frame("PC1" = rep(NA, times = )))
+  }
+  
+  return(outfile)
+}
+
+#' Copies over the PC values for normal samples to the corresponding tumor sample, 
+#' if missing
+#' @param outfile a file with row names as samples with data, and columns for PCs
+#' @param sample_ids a vector of all the sample IDs
+add_missing_ids <- function(outfile, sample_ids) {
+  missing_ids <- setdiff(sample_ids, rownames(outfile))
+  #print(paste("Missing IDs:", head(missing_ids)))
+  
+  new_rows <- lapply(missing_ids, function(id) {
+    id_trim <- unlist(strsplit(id, "-", fixed = TRUE))[3]
+    # Check if there is another entry for this patient with data
+    if(TRUE %in% grepl(id_trim, rownames(outfile))) {
+      row <- outfile[grepl(id_trim, rownames(outfile)), , drop = FALSE]
+      if(nrow(row) > 1) {row <- row[1,]}
+      return(row)
+    } else {return(NA)}
+  })
+  new_df <- do.call(rbind, new_rows)
+  rownames(new_df) <- missing_ids
+
+  outfile <- rbind(outfile, new_df)
+  
+  return(outfile)
+}
+
+
 ############################################################ 
 
 #' Takes a main data frame for all sample characteristics,
@@ -700,9 +877,16 @@ add_mutation_pcs <- function(sample_df, mutation_pc_df, max_pcs) {
 #' @param partial_df a partial data frame with matching column
 #' names we'd like to merge with our main patient data frame
 merge_dataframes_by_colname <- function(main_df, partial_df) {
+  
+  # Ensure that the patients are in the same order
+  partial_df <- partial_df[order(match(rownames(partial_df), rownames(main_df))),]
+  
+  # Replace the empty columns with the new ones
   for (i in 1:ncol(partial_df)) {
     pos <- as.numeric(which(colnames(partial_df)[i] == colnames(main_df)))
     main_df[,pos] <- partial_df[,i]
   }
+  print(head(main_df))
   return(main_df)
 }
+

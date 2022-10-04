@@ -16,7 +16,9 @@ library(argparse)
 library(stringr)
 library(glmnet)
 library(cli)
-
+library(nlme)
+library(lme4)
+library(lmerTest)
 
 # Source other files needed
 source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Sara_LinearModel/"
@@ -146,6 +148,9 @@ parser$add_argument("--collinearity_diagn", default = "FALSE", type = "character
 parser$add_argument("--inclResiduals", default = "FALSE", type = "character",
                     help = "A TRUE/FALSE value indicating whether we want to include residuals in the output DF. Default is FALSE.")
 
+# Add a flag for the type of model to use (e.g. a mixed effects model, rather than a simple linear or regularized linear)
+parser$add_argument("--model_type", default = "linear", type = "character",
+                    help = "The type of model being used. Use 'mixed' to switch from linear to a mixed effects model.")
 # Add a flag for adding a regularization method
 parser$add_argument("--regularization", default = "None", type = "character",
                     help = "The name of the regularization method being used. Currently only implemented for L1 and L2. Default is None.")
@@ -339,8 +344,10 @@ mutation_targ_df <- fread(paste(main_path, paste("genetarg_mutation/", args$muta
                           header = TRUE)
 mutation_targ_df <- mutation_targ_df[,2:ncol(mutation_targ_df)]
 colnames(mutation_targ_df)[which(colnames(mutation_targ_df) == "Gene_Symbol")] <- "gene_name"
-mutation_targ_df <- mutation_targ_df[, Swissprot := unlist(lapply(mutation_targ_df$gene_name, function(x) 
-  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'uniprot_gn_id'])), collapse = ";")))]
+if(!("Swissprot" %in% colnames(mutation_targ_df))) {
+  mutation_targ_df <- mutation_targ_df[, Swissprot := unlist(lapply(mutation_targ_df$gene_name, function(x) 
+    paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'uniprot_gn_id'])), collapse = ";")))]
+}
 
 if(debug) {
   print("Mutation Targ DF")
@@ -353,7 +360,9 @@ if(debug) {
 ############################################################
 mutation_regprot_df <- fread(paste(main_path, paste("regprot_mutation/", args$mutation_regprot_df, sep = ""), sep = ""),
                              header = TRUE)
-mutation_regprot_df <- mutation_regprot_df[,5:ncol(mutation_regprot_df)]   # remove first few meaningless columns, if necessary
+if(unlist(strsplit(args$mutation_regprot_df, "_", fixed = TRUE))[1] == "iprotein") {
+  mutation_regprot_df <- mutation_regprot_df[,5:ncol(mutation_regprot_df)]   # remove first few meaningless columns, if necessary
+}
 mutation_regprot_df <- mutation_regprot_df[!duplicated(mutation_regprot_df),] # remove any duplicate rows
 
 if(debug) {
@@ -562,6 +571,7 @@ if(useNumFunctCopies) {
 #' we'll be writing from inside the function
 #' @param outfn a string with a generic output filename based on the characteristics
 #' of the given run; can be modified to write files within this function
+#' @param model_type the type of model being used (either linear, the default, or mixed)
 #' @param regularization a string with the type of regularization to be used; currently
 #' only implemented for "L2" or "None"
 #' @param covs_to_incl a vector of covariates that we want to include, or ALL if we
@@ -585,13 +595,29 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                              neighboring_cna_df, is_rank_or_quant_norm, log_expression, analysis_type, 
                              tumNormMatched, randomize, cna_bucketing, meth_bucketing, 
                              useNumFunctCopies, num_PEER, num_pcs, debug, collinearity_diagn, 
-                             outpath, outfn, regularization, covs_to_incl, removeCis, 
-                             all_genes_id_conv, incl_nextMutDriver, run_query_genes_jointly,
-                             dataset, inclResiduals) {
+                             outpath, outfn, model_type, regularization, covs_to_incl, 
+                             removeCis, all_genes_id_conv, incl_nextMutDriver, 
+                             run_query_genes_jointly, dataset, inclResiduals) {
   
   # If we are looking at each query protein individually, create a mini-table for 
   # every r_i, t_k combo that we rbind into a master table of results
   master_df <- NA
+  
+  # If we are randomizing expression, do this now per-sample
+  if(randomize) {
+    if(analysis_type == "eQTL") {
+      random_exp_df <- apply(expression_df[,2:ncol(expression_df), with = FALSE], 
+                             MARGIN = 2, sample)
+      expression_df <- cbind(expression_df[,'ensg_id'], data.table(random_exp_df))
+    }
+    else if (analysis_type == "meQTL") {
+      random_methyl_df <- apply(methylation_df[,2:(ncol(methylation_df)-1), with = FALSE], 
+                             MARGIN = 2, sample)
+      methylation_df <- cbind(methylation_df[,'Gene_Symbol'], cbind(data.table(random_methyl_df), 
+                                                                    methylation_df[,'ensg_ids']))
+    }
+    else {print(paste("Analysis type is invalid:", analysis_type))}
+  }
   
   if(!run_query_genes_jointly) {
     results_df_list <- lapply(1:protein_ids_df[, .N], function(i) {
@@ -631,15 +657,28 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                                                         all_genes_id_conv, debug)
       }
 
-      regprot_i_results_df_list <- run_linear_model_per_target_gene(downstream_target_df, methylation_df,
-                                                                    methylation_df_meQTL, starter_df, 
-                                                                    mutation_targ_df, cna_df, expression_df, 
-                                                                    log_expression, cna_bucketing, meth_bucketing, 
-                                                                    analysis_type, tumNormMatched, debug, 
-                                                                    dataset, randomize, num_PEER, num_pcs,
-                                                                    covs_to_incl, inclResiduals, removeCis,
-                                                                    collinearity_diagn, regularization,
-                                                                    run_query_genes_jointly, regprot)
+      regprot_i_results_df_list <- run_linear_model_per_target_gene(downstream_target_df = downstream_target_df, 
+                                       methylation_df = methylation_df,
+                                       methylation_df_meQTL = methylation_df_meQTL, 
+                                       starter_df = starter_df, 
+                                       mutation_targ_df = mutation_targ_df, 
+                                       cna_df = cna_df, expression_df = expression_df, 
+                                       log_expression = log_expression, 
+                                       cna_bucketing = cna_bucketing, 
+                                       meth_bucketing = meth_bucketing, 
+                                       analysis_type = analysis_type, 
+                                       tumNormMatched = tumNormMatched, 
+                                       debug = debug, dataset = dataset, 
+                                       randomize = randomize, 
+                                       num_PEER = num_PEER, num_pcs = num_pcs, 
+                                       covs_to_incl = covs_to_incl, 
+                                       inclResiduals = inclResiduals, 
+                                       removeCis = removeCis,
+                                       collinearity_diagn = collinearity_diagn, 
+                                       model_type = model_type,
+                                       regularization = regularization, 
+                                       run_query_genes_jointly = run_query_genes_jointly, 
+                                       regprot = regprot)
       
       # Now we have a list of output summary DFs for each of this regulatory protein's targets. 
       # Bind them all together.
@@ -679,7 +718,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
       regprot <- protein_ids_df$swissprot_ids[i]
       regprot_ensg <- unlist(strsplit(protein_ids_df$ensg_ids[i], ";", fixed = TRUE))
       
-      print(paste("Regulatory protein", paste(i, paste("/", protein_ids_df[, .N]))))
+      #print(paste("Regulatory protein", paste(i, paste("/", protein_ids_df[, .N]))))
       
       # Create a starter table that gets the mutation, CNA, and methylation status 
       # for this regulatory protein and bind it to the patient DF
@@ -707,8 +746,6 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                                                         all_genes_id_conv, debug)
       }
       
-      print(head(regprot_i_df))
-      print(dim(regprot_i_df))
       return(regprot_i_df)
     })
     
@@ -723,15 +760,29 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
       print(head(starter_df))
     }
     
-    regprot_results_df_list <- run_linear_model_per_target_gene(downstream_target_df, methylation_df,
-                                                                  methylation_df_meQTL, starter_df, 
-                                                                  mutation_targ_df, cna_df, expression_df, 
-                                                                  log_expression, cna_bucketing, meth_bucketing, 
-                                                                  analysis_type, tumNormMatched, debug, 
-                                                                  dataset, randomize, num_PEER, num_pcs,
-                                                                  covs_to_incl, inclResiduals, removeCis,
-                                                                  collinearity_diagn, regularization,
-                                                                run_query_genes_jointly, NA)
+    regprot_results_df_list <- run_linear_model_per_target_gene(downstream_target_df = downstream_target_df, 
+                                                                methylation_df = methylation_df,
+                                                                methylation_df_meQTL = methylation_df_meQTL, 
+                                                                starter_df = starter_df, 
+                                                                mutation_targ_df = mutation_targ_df, 
+                                                                cna_df = cna_df, expression_df = expression_df, 
+                                                                log_expression = log_expression, 
+                                                                cna_bucketing = cna_bucketing, 
+                                                                meth_bucketing = meth_bucketing, 
+                                                                analysis_type = analysis_type, 
+                                                                tumNormMatched = tumNormMatched, 
+                                                                debug = debug, dataset = dataset, 
+                                                                randomize = randomize, 
+                                                                num_PEER = num_PEER, num_pcs = num_pcs, 
+                                                                covs_to_incl = covs_to_incl, 
+                                                                inclResiduals = inclResiduals, 
+                                                                removeCis = removeCis,
+                                                                collinearity_diagn = collinearity_diagn, 
+                                                                model_type = model_type,
+                                                                regularization = regularization, 
+                                                                run_query_genes_jointly = run_query_genes_jointly, 
+                                                                regprot = NA)
+
     
     # Now we have a list of output summary DFs for each of this regulatory protein's targets. 
     # Bind them all together.
@@ -792,6 +843,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
 #' collinearity diagnostics
 #' @param removeCis a TRUE/FALSE value indicating whether or not we are eliminating 
 #' all cis pairings
+#' @param model_type the type of model being used (either linear, the default, or mixed)
 #' @param regularization a string with the type of regularization to be used; currently
 #' only implemented for "L2" or "None"
 #' @param run_query_genes_jointly a TRUE/ FALSE value indicating whether or not we 
@@ -806,7 +858,7 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
                                              analysis_type, tumNormMatched, debug, 
                                              dataset, randomize, num_PEER, num_pcs,
                                              covs_to_incl, inclResiduals, removeCis,
-                                             collinearity_diagn, regularization,
+                                             model_type, collinearity_diagn, regularization,
                                              run_query_genes_jointly, regprot) {
   
   # Loop through all the targets for this protein(s) of interest and create a table 
@@ -865,22 +917,23 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
       #fwrite(lm_input_table, paste(outpath, paste(new_fn, ".csv", sep = ""), sep = "/"))
     }
     
-    # Randomize expression across cancer and normal, across all samples
-    if (randomize) {
-      if(analysis_type == "eQTL") {lm_input_table$ExpStat_k <- sample(lm_input_table$ExpStat_k)}
-      else if (analysis_type == "meQTL") {lm_input_table$MethStat_k <- sample(lm_input_table$MethStat_k)}
-      else {print(paste("Analysis type is invalid:", analysis_type))}
-    }
+    # Randomize expression across cancer and normal, across all samples within given target gene
+    #if (randomize) {
+    #  if(analysis_type == "eQTL") {lm_input_table$ExpStat_k <- sample(lm_input_table$ExpStat_k)}
+    #  else if (analysis_type == "meQTL") {lm_input_table$MethStat_k <- sample(lm_input_table$MethStat_k)}
+    #  else {print(paste("Analysis type is invalid:", analysis_type))}
+    #}
     
     formula <- construct_formula(lm_input_table, analysis_type, num_PEER, num_pcs,
                                  cna_bucketing, meth_bucketing, covs_to_incl)
     
     lm_fit <- NA
-    if (regularization == "None") {
+    summary_table <- NA
+    
+    if ((model_type == "linear") & (regularization == "None")) {
       
-      if(debug) {
-        print(paste("Formula:", formula))
-      }
+      if(debug) {print(paste("Formula:", formula))}
+
       lm_fit <- tryCatch(
         {
           speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
@@ -893,37 +946,76 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
           return(NA)
         })
       
-    } else if (regularization == "L2" | regularization == "ridge" | 
-               regularization == "L1" | regularization == "lasso") {
+      if(!is.na(lm_fit)) {
+        summary_table <- tidy(lm_fit)
+      }
       
-      lm_input_table_new <- run_regularization_model(formula, lm_input_table, type = regularization, debug,
-                                         meth_bucketing, cna_bucketing)
-      if(!is.na(lm_input_table_new)) {
-        formula <- as.character(paste("ExpStat_k", colnames(lm_input_table_new)[2], sep = " ~ "))
-	if(ncol(lm_input_table_new) > 2) {
-          formula <- as.character(paste(formula, paste(colnames(lm_input_table_new)[3:length(colnames(lm_input_table_new))], collapse = " + "), sep = " + "))
-	}
-        if(debug) {print(formula)}
-        lm_fit <- tryCatch({
-          speedglm::speedlm(formula = formula, data = lm_input_table_new)  # Do not include library size as offset
-        }, error = function(cond) {
-          message("There was a problem with this linear model run:")
-          message(cond)
-          print(formula)
-          print(head(lm_input_table_new))
-          return(NA)
-        })
-      }  
+    } else if ((model_type == "linear") & (regularization == "L2" | regularization == "ridge" | 
+               regularization == "L1" | regularization == "lasso")) {
+
+      lm_fit <- run_regularization_model(formula, lm_input_table, type = regularization,
+                                         debug, meth_bucketing, cna_bucketing)
+      
+      summary_table <- lm_fit
+      
+      ## OLD: for cases in which we want to use LASSO as variable selection and input 
+      ## the selected variables into a new linear model
+      #if(!is.na(lm_input_table_new)) {
+      #  formula <- as.character(paste("ExpStat_k", colnames(lm_input_table_new)[2], sep = " ~ "))
+      #  if(ncol(lm_input_table_new) > 2) {
+      #    formula <- as.character(paste(formula, paste(colnames(lm_input_table_new)[3:length(colnames(lm_input_table_new))], collapse = " + "), sep = " + "))
+      #  }
+      #  if(debug) {print(formula)}
+      #  lm_fit <- tryCatch({
+      #    speedglm::speedlm(formula = formula, data = lm_input_table_new)  # Do not include library size as offset
+      #  }, error = function(cond) {
+      #    message("There was a problem with this linear model run:")
+      #    message(cond)
+      #    print(formula)
+      #    print(head(lm_input_table_new))
+      #    return(NA)
+      #  })
+      #}    
+      
+      
+      
+    } else if (model_type == "mixed") {
+      # Our random effects variable is our genotype PCs; if we are not including them,
+      # run the simple linear model instead
+      # TODO: implement for cancer type/ subtype
+      if (num_pcs == 0) {
+        print("No genotype PCs are being used in regression. Random effects variables are currently only
+              implemented for genotype PCs. Running a linear regression.")
+        lm_fit <- tryCatch(
+          {
+            speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
+            #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), data = lm_input_table)
+          }, error = function(cond) {
+            message("There was a problem with this linear model run:")
+            message(cond)
+            return(NA)
+          })
+      } else {
+        # Build a linear mixed model
+        lm_fit <- tryCatch(
+          {
+            lmer(formula = formula, data = lm_input_table, REML = TRUE)      
+          }, error = function(cond) {
+            message("There was a problem with this linear mixed model run:")
+            message(cond)
+            return(NA)
+          })
+      }
+      if(!is.na(lm_fit)) {
+        summary_table <- tidy(lm_fit)
+      }
     } else {
       print("Model only has L1, L2 or None implemented for regularization. Please provide one of these options.")
     }
     
     # Tidy the output
-    if(!is.na(lm_fit)) {print(summary(lm_fit))}
-    summary_table <- NA
-    if(!is.na(lm_fit)) {
-      summary_table <- tidy(lm_fit)
-    }    
+    #if(!is.na(lm_fit)) {print(summary(lm_fit))}
+
     if(inclResiduals & (!(is.na(summary_table)))) {
       residuals <- as.numeric(lm_input_table$ExpStat_k) - 
         as.numeric(unlist(predict.speedlm(lm_fit, newdata = lm_input_table)))
@@ -932,8 +1024,19 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
     
     # Add a column for the regulatory protein and target gene to ID them
     if(!is.na(summary_table)) {
-      if(!run_query_genes_jointly) {summary_table$R_i <- regprot}
       summary_table$T_k <- paste(targ, collapse = ";")
+      if(!run_query_genes_jointly) {
+        summary_table$R_i <- regprot
+      } else {
+        # Remove rows in which the target and the driver are the same
+        ri <- unlist(lapply(summary_table$term, function(x)
+          unlist(strsplit(x, "_", fixed = TRUE))[1]))
+        rows_to_keep <- unlist(lapply(1:length(ri), function(i) 
+          if(grepl(ri[i], summary_table[i, 'T_k'])) {return(NA)}
+          else {return(i)}))
+        rows_to_keep <- rows_to_keep[!is.na(rows_to_keep)]
+        summary_table <- summary_table[rows_to_keep,]
+      }
     }
         
     if(debug) {
@@ -1518,7 +1621,7 @@ outfn <- create_output_filename(test = test, tester_name = args$tester_name, run
                                 patient_df_name = args$patient_df, num_PEER = args$num_PEER, 
                                 num_pcs = args$num_pcs, randomize = randomize, covs_to_incl_label = args$select_args_label,
                                 patients_to_incl_label = args$patientsOfInterestLabel, removeCis = removeCis,
-                                removeMetastatic = removeMetastatic, regularization = args$regularization)
+                                model_type = args$model_type, removeMetastatic = removeMetastatic, regularization = args$regularization)
 
 if(debug) {
   print(paste("Outfile Name:", outfn))
@@ -1631,6 +1734,7 @@ if(is.na(patient_cancer_mapping)) {
                                 outpath = outpath, outfn = outfn,
                                 regularization = args$regularization,
                                 covs_to_incl = covs_to_incl,
+                                model_type = args$model_type,
                                 removeCis = removeCis,
                                 all_genes_id_conv = all_genes_id_conv,
                                 useNumFunctCopies = useNumFunctCopies,
@@ -1707,6 +1811,7 @@ if(is.na(patient_cancer_mapping)) {
                                   outpath = outpath, outfn = outfn,
                                   regularization = args$regularization,
                                   covs_to_incl = covs_to_incl,
+                                  model_type = args$model_type,
                                   removeCis = removeCis,
                                   all_genes_id_conv = all_genes_id_conv,
                                   useNumFunctCopies = useNumFunctCopies,

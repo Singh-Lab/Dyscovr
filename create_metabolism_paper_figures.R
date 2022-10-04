@@ -22,6 +22,7 @@ library('clusterProfiler')
 library("DOSE")
 library("enrichplot")
 library(ggrepel)
+library(ggsci)
 library(org.Hs.eg.db)
 keytypes(org.Hs.eg.db)
 
@@ -127,7 +128,7 @@ create_top_mutated_drivers_by_cancer_type_barplot <- function(maf, driver_gene_d
     colors <- c("#0072B5FF", "#BC3C29FF", "#20854EFF", "#E18727FF")
     names(colors) <- c("Missense_Mutation", "Nonsense_Mutation", "Nonstop_Mutation", "Splice_Site")
     mafbarplot(m_sub, n = n_drivers, fontSize = 1.5, legendfontSize = 1.25, borderCol = NA, 
-               showPct = FALSE, color = colors)
+               showPct = TRUE, color = colors)
     mtext(names(maf_list)[i], side=side, line=line, cex=cex, las=las)
   }
   
@@ -142,13 +143,18 @@ maf <- read.maf(maf_filename)
 # Remove Translation_Start_Site mutations (not using)
 maf <- subsetMaf(maf, query = "Variant_Classification %in% c('Missense_Mutation', 'Nonsense_Mutation',
                                                               'Nonstop_Mutation', 'Splice_Site')")
+# Subset to only patients of interest
+maf_file_barcodes <- as.character(unlist(maf@data$Tumor_Sample_Barcode))
+patient_ids <- unlist(lapply(maf_file_barcodes, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
+intersecting_patient_barcodes <- unique(maf_file_barcodes[which(patient_ids %in% intersecting_patients)])
+maf_sub <- subsetMaf(maf, tsb = intersecting_patient_barcodes)
 
 # Get clinical DF
 clinical_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/clinical_data_subset.csv", 
                         header = TRUE, check.names = FALSE)
 
 # Call function
-maf_list_by_subtype <- create_top_mutated_drivers_by_cancer_type_barplot(maf, driver_gene_df, 5, 
+maf_list_by_subtype <- create_top_mutated_drivers_by_cancer_type_barplot(maf_sub, driver_gene_df, 5, 
                                                                          clinical_df, "subtype", NA)
 
 
@@ -170,7 +176,7 @@ relate_sample_size_to_sig_eQTL <- function(list_of_master_dfs, sample_size_dict,
   
   # Create a data frame that will link these factors
   input_df <- data.frame("type" = names(sample_size_dict), "sample.size" = as.numeric(sample_size_dict))
-  
+
   # Get the mutation frequency of the given GOI for each cancer type/subtype
   # Import get_mut_count_matrix from maf_helper_functions.R
   total.mut.count <- unlist(lapply(1:length(list_of_maf_files), function(i) {
@@ -183,7 +189,15 @@ relate_sample_size_to_sig_eQTL <- function(list_of_master_dfs, sample_size_dict,
   total.mut.count <- as.data.frame(total.mut.count)
   total.mut.count$type <- rownames(total.mut.count)
   print(head(total.mut.count))
-
+  
+  # OPTION: use sample size to convert this to a fraction (% mutated)
+  total.mut.count$frac.mutated <- unlist(lapply(1:nrow(total.mut.count), function(i) {
+    type <- total.mut.count[i, 'type']
+    samp.size <- input_df[input_df$type == type, 'sample.size']
+    frac.mut <- total.mut.count[i, 'total.mut.count'] / samp.size
+    return(frac.mut)
+  }))
+  
   # Merge this with our input DF by type
   input_df <- merge(input_df, total.mut.count, by = "type")
   
@@ -204,9 +218,9 @@ relate_sample_size_to_sig_eQTL <- function(list_of_master_dfs, sample_size_dict,
   
   # Now, create the plot with this input DF
   p <- ggplot(input_df, aes(x = sample.size, y = num.sig.hits, color = type)) + 
-    geom_point(aes(size = total.mut.count)) + scale_color_nejm() +
+    geom_point(aes(size = frac.mutated)) + scale_color_nejm() +
     theme_minimal() + xlab("Sample Size") + ylab(paste("Num. Significant Correlations (q <", paste0(qval_thres, ")"))) +
-    labs(size = "Total Nonsyn. Mut. Count", color = "BRCA Subtype") + 
+    labs(size = paste("Frac. with Nonsyn. Mut in", goi), color = "BRCA Subtype") + 
     theme(axis.title = element_text(face = "bold", size = 14), 
           axis.text = element_text(face = "bold", size = 12),
           legend.title = element_text(face = "bold", size = 14),
@@ -253,7 +267,7 @@ subtype_file_patient_ids <- unlist(lapply(brca_subtype_file$patient, function(x)
   unlist(strsplit(x, "-", fixed = TRUE))[3]))
 brca_subtype_file_sub <- brca_subtype_file[which(subtype_file_patient_ids %in% intersecting_patients),]
 
-subtypes_of_interest <- c("LumA", "LumB", "Her2", "Basal")
+subtypes_of_interest <- c("LumA", "LumB", "Her2", "Basal", "Normal")
 list_of_sample_sizes <- lapply(subtypes_of_interest, function(st) 
   nrow(brca_subtype_file_sub[brca_subtype_file_sub$BRCA_Subtype_PAM50 == st,]))
 names(list_of_sample_sizes) <- subtypes_of_interest
@@ -670,6 +684,10 @@ create_driver_target_boxplot(expression_df_quantile_norm, mutation_regprot_df, t
 create_driver_target_boxplot(expression_df_quantile_norm, mutation_regprot_df,tp53_ensg, tp53_uniprot, pfkfb3, "violin", "TP53", "PFKFB3")
 
 
+# PART D: META-ANALYSIS FOREST PLOT <SEE PERFORM_META_ANALYSIS.R> 
+
+
+
 ##############################################################################
 ##############################################################################
 ### FIGURE 3
@@ -1055,7 +1073,7 @@ plot_pvalue_histograms_real_and_random <- function(real_master_df, random_master
   p <- ggplot(pvals_m, aes(x = value, fill = variable)) + scale_fill_nejm() +
     geom_histogram(alpha = 0.3, position = "identity", bins = 50) + 
     theme_minimal() + xlab("P-Value") + ylab("Frequency") + 
-    labs(fill = "Real or Randomized") + theme(axis.title = element_text(face = "bold", size = 14),
+    labs(fill = "") + theme(axis.title = element_text(face = "bold", size = 14),
                                               axis.text = element_text(face = "bold", size = 12),
                                               legend.text = element_text(size=12),
                                               legend.title = element_text(face = "bold", size = 14)) +
@@ -1100,6 +1118,237 @@ master_df_list <- list("TCGA" = allgenes_p53, "METABRIC" = allgenes_p53_metabric
 
 # Call function
 plot_hit_overlap_between_data_sources(master_df_list, "TP53", 0.1)
+
+
+
+
+# PART E: PLOTTING ENRICHMENT IN LI. ET AL. TARGETS
+
+# Analyzes the data from Li et al. (2019), Nature Medicine, from
+# Supplementary tables 1-4.
+# Link to Paper: https://www.nature.com/articles/s41591-019-0404-8#Sec31
+
+path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/CL Metabolic Data (Li et al. 2019)/"
+
+# Cell line annotations
+cell_line_annot <- read.csv(paste0(path, "cell_line_annotations.csv"), 
+                            header = TRUE, check.names = FALSE)
+cell_line_annot_brca <- cell_line_annot[(grepl("breast", cell_line_annot$Classifications, ignore.case = TRUE)) & 
+                                          (grepl("female", cell_line_annot$Gender)),]
+brca_cell_lines <- cell_line_annot_brca$Name
+
+# Clean metabolite data from LCMS
+metabolite_df <- read.csv(paste0(path, "clean_metabolite_data.csv"), 
+                          header = TRUE, check.names = FALSE, row.names = 1)
+metabolite_df_cl_names <- unlist(lapply(rownames(metabolite_df), function(x) 
+  unlist(strsplit(x, "_", fixed = TRUE))[1]))
+metabolite_df_brca <- metabolite_df[which(metabolite_df_cl_names %in% brca_cell_lines),]
+
+# Mutation, CNA, & methylation correlations to metabolite levels
+mut_metabol_corr <- read.csv(paste0(path, "mutation_metabolite_correlations.csv"), 
+                             header = TRUE, check.names = FALSE)
+
+
+#' For a particular given gene of interest, find metabolic targets
+#' that are predicted by their model to have mutation correlation
+#' t-statistics above or below some given threshold
+#' @param mutation_corr a mutation-metabolite correlation DF
+#' @param goi a gene whose mutation status is of interest
+#' @param t_thres a t-statistic threshold for significance
+#' @param outpath a path to write output files to 
+get_mutation_metabol_corr_for_goi <- function(mutation_corr, goi, t_thres, outpath) {
+  # Subset the mutation-correlation data frame to this GOI
+  mutation_corr_goi <-  mutation_corr[grepl(goi, mutation_corr$genes),]
+  
+  # Get the names of the metabolites that exceed the given t-statistic
+  # threshold in either direction (look both at all mutations and deleterious
+  # mutations and report both)
+  mutation_corr_goi_allMut <- mutation_corr_goi[grepl("all_mutations", mutation_corr_goi$genes),]
+  mutation_corr_goi_delMut <- mutation_corr_goi[grepl("deleterious_mutations", mutation_corr_goi$genes),]
+  
+  allMut_tvals <- as.numeric(unlist(mutation_corr_goi_allMut[,3:ncol(mutation_corr_goi_allMut)]))
+  delMut_tvals <- as.numeric(unlist(mutation_corr_goi_delMut[,3:ncol(mutation_corr_goi_delMut)]))
+  
+  print(head(allMut_tvals))
+  
+  allMut_sig_tvals <- as.numeric(unlist(which(abs(allMut_tvals) > t_thres))) + 2
+  delMut_sig_tvals <- as.numeric(unlist(which(abs(delMut_tvals) > t_thres))) + 2
+  
+  print(head(allMut_sig_tvals))
+  
+  # Report the names of the significant metabolites
+  allMut_sig_metabolites <- colnames(mutation_corr_goi)[allMut_sig_tvals]
+  delMut_sig_metabolites <- colnames(mutation_corr_goi)[delMut_sig_tvals]
+  
+  # Print these results to console
+  print(paste(goi, paste("mutation (all mutation) correlated metabolites with t-statistic threshold of", 
+                         paste(t_thres, ":"))))
+  print(allMut_sig_metabolites)
+  print(paste(goi, paste("mutation (deleterious mutation) correlated metabolites with t-statistic threshold of", 
+                         paste(t_thres, ":"))))
+  print(delMut_sig_metabolites)
+  
+  # Write these results to a file
+  allMut_df <- data.frame("Metabolite" = allMut_sig_metabolites, "t-statistic" = unlist(mutation_corr_goi_allMut[,allMut_sig_tvals]))
+  write.csv(allMut_df, paste(outpath, paste(goi, "all_mutation_top_metabolic_correlations.csv", sep = "_")))
+  delMut_df <- data.frame("Metabolite" = delMut_sig_metabolites, "t-statistic" = unlist(mutation_corr_goi_delMut[,delMut_sig_tvals]))
+  write.csv(delMut_df, paste(outpath, paste(goi, "deleterious_mutation_top_metabolic_correlations.csv", sep = "_")))
+  
+  return(allMut_df)
+}
+
+
+# Call helper function to get the correlations
+tp53_mut_df <- get_mutation_metabol_corr_for_goi(mut_metabol_corr, "TP53", 2.0, path)
+pik3ca_mut_df <- get_mutation_metabol_corr_for_goi(mut_metabol_corr, "PIK3CA", 2.0, path)
+
+
+# Use output from Recon3D metabolic network to relate top metabolites to genes of interest
+# Output file generated by Antonio, see "gene-to-metabolite-mapping" folder
+gene_to_metabol_mapping <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/gene-to-metabolite-mapping/output.tsv", 
+                                    header = TRUE, check.names = FALSE, sep = "\t")
+
+# Also get a mapping between BIGG metabolite IDs and common metabolite names, downloaded from: http://bigg.ucsd.edu/data_access
+metabolite_id_dict <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/gene-to-metabolite-mapping/bigg_models_metabolites.tsv", 
+                               header = TRUE, check.names = FALSE, sep = "\t")
+# Add the common names to the mapping
+gene_to_metabol_mapping$metabolite_list_names <- unlist(lapply(gene_to_metabol_mapping$metabolite_list, function(metabols){
+  spl_metabols <- unique(unlist(strsplit(metabols, split = ",", fixed = TRUE)))
+  names <- unlist(lapply(spl_metabols, function(x) metabolite_id_dict[metabolite_id_dict$bigg_id == x, 'name']))
+  return(paste(names, collapse = ","))
+}))
+
+#' Gets and returns a vector of ENSG IDs associated with a particular given
+#' metabolite of interest
+#' @param gene_to_metabol_mapping a two-column mapping between ENSG IDs and associated
+#' metabolites produced from Recon3D and Antonio's code
+#' @param metabolite the name of a metabolite of interest
+get_prots_assoc_w_metabol <- function(gene_to_metabol_mapping, metabolite) {
+  return(paste(unlist(gene_to_metabol_mapping[grepl(metabolite, gene_to_metabol_mapping$metabolite_list_names, ignore.case = TRUE), 'ensembl_gene_id']),
+               collapse = ","))
+}
+
+# Use this function to add the assoc. proteins of interest for each significant metabolite
+# to the table(s) above
+tp53_mut_df$Assoc.Genes <- lapply(tp53_mut_df$Metabolite, function(metabol) 
+  return(get_prots_assoc_w_metabol(gene_to_metabol_mapping, metabol)))
+pik3ca_mut_df$Assoc.Genes <- lapply(pik3ca_mut_df$Metabolite, function(metabol) 
+  return(get_prots_assoc_w_metabol(gene_to_metabol_mapping, metabol)))
+
+# Add another column with associated gene names
+tp53_mut_df$Assoc.Gene.Names <- unlist(lapply(tp53_mut_df$Assoc.Genes, function(x) {
+  ids <- unlist(strsplit(x, ",", fixed = TRUE))
+  names <- lapply(ids, function(id) {
+    return(paste(unique(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == id, 
+                                          'external_gene_name']), collapse = ";"))
+  })
+  names_char <- paste(names, collapse = ",")
+  return(names_char)
+}))
+pik3ca_mut_df$Assoc.Gene.Names <- unlist(lapply(pik3ca_mut_df$Assoc.Genes, function(x) {
+  ids <- unlist(strsplit(x, ",", fixed = TRUE))
+  names <- lapply(ids, function(id) {
+    return(paste(unique(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == id, 
+                                          'external_gene_name']), collapse = ";"))
+  })
+  names_char <- paste(names, collapse = ",")
+  return(names_char)
+}))  
+
+# Add a column that, for each protein name, annotates whether it's a significant hit
+# from the model
+tp53_signif_hits <- unlist(master_df[master_df$q.value < 0.2, 'T_k.name'])
+tp53_mut_df$Signif.Hit <- unlist(lapply(tp53_mut_df$Assoc.Gene.Names, function(x) {
+  names <- unlist(strsplit(x, ",", fixed = TRUE))
+  in_signif_hits <- unlist(lapply(names, function(n) ifelse(n %in% tp53_signif_hits, TRUE, FALSE)))
+  return(paste(in_signif_hits, collapse = ","))
+}))
+pik3ca_signif_hits <- unlist(master_df[master_df$q.value < 0.2, 'T_k.name'])
+pik3ca_mut_df$Signif.Hit <- unlist(lapply(pik3ca_mut_df$Assoc.Gene.Names, function(x) {
+  names <- unlist(strsplit(x, ",", fixed = TRUE))
+  in_signif_hits <- unlist(lapply(names, function(n) ifelse(n %in% pik3ca_signif_hits, TRUE, FALSE)))
+  return(paste(in_signif_hits, collapse = ","))
+}))
+
+print(intersect(tp53_signif_hits, unlist(strsplit(as.character(unlist(tp53_mut_df$Assoc.Gene.Names)), ",", fixed = TRUE))))
+print(intersect(pik3ca_signif_hits, unlist(strsplit(as.character(unlist(pik3ca_mut_df$Assoc.Gene.Names)), ",", fixed = TRUE))))
+
+#' Identify the significant correlations and print them
+#' @param mut_df a metabolism DF for a particular protein of interest 
+print_signif_corr <- function(mut_df) {
+  for(i in 1:nrow(mut_df)) {
+    if(grepl("TRUE", mut_df$Signif.Hit[i])) {
+      true_false_vect <- as.integer(as.logical(unlist(strsplit(mut_df$Signif.Hit[i], ",", fixed = TRUE))))
+      str <- "Mutation correlated with"
+      estimate <- mut_df$t.statistic[i]
+      if(estimate > 0) {str <- paste(str, "upregulation of")}
+      else {str <- paste(str, "downregulation of")}
+      str <- paste(str, mut_df$Metabolite[i])
+      str <- paste0(str, paste(", with t-statistic of", estimate))
+      str <- paste0(str, ". This metabolite is associated with expression of")
+      genes <- unlist(strsplit(mut_df$Assoc.Gene.Names[i], ",", fixed = TRUE))[which(true_false_vect == 1)]
+      genes <- paste(genes, collapse = ",")
+      str <- paste(str, genes)
+      str <- paste0(str, ", which is(are) significant hits from our model.")
+      print(str)
+    }
+  }
+}
+
+print_signif_corr(tp53_mut_df)
+print_signif_corr(pik3ca_mut_df)
+
+
+#' For the top hits of a given protein-of-interest, plot an 
+#' enrichment curve for whether these hits are associated with 
+#' a significantly dysregulated metabolite from this paper
+#' @param master_df a master DF produced from our model, subsetted
+#' to the given protein of interest
+#' @param mut_df genes from a metabolism DF for a particular protein of interest 
+#' @param qval_thres a qvalue threshold for significance
+#' @param tval_thres a t-value threshold that was used for inclusion of Li et al. 
+#' metabolic genes
+plot_target_assoc_w_metabol_enrichment <- function(master_df, mut_df_genes, 
+                                                   qval_thres, tval_thres) {
+  master_df_sig <- master_df[master_df$q.value < qval_thres,]
+  
+  sig_hits <- unique(unlist(master_df_sig$T_k.name))
+  
+  rank <- 1:length(sig_hits)
+  
+  cumulat_val <- 0
+  enrich_vals <- c()
+  
+  for(i in 1:length(sig_hits)) {
+    sig_hit <- sig_hits[i]
+    if(sig_hit %in% mut_df_genes) {
+      cumulat_val <- cumulat_val + 1
+    }
+    frac <- cumulat_val / i
+    enrich_vals <- c(enrich_vals, frac)
+  }
+  
+  input_df <- data.frame("Rank" = rank, "Enrich.Vals" = enrich_vals)
+  
+  p <- ggplot(data = input_df, aes(x = Rank, y = Enrich.Vals)) + geom_line(size = 2, color = "#0072B5FF") + 
+    xlab("Rank") + theme_minimal() + 
+    theme(axis.title = element_text(face = "bold", size = 14), 
+          axis.text = element_text(face = "bold", size = 12),
+          legend.title = element_text(face = "bold", size = 14),
+          legend.text = element_text(size = 12)) +
+    ylab(paste("Frac. of Hits (q <", paste0(qval_thres, paste(") that are Metabolic Reg (t >", paste0(tval_thres, ")"))))) 
+    
+  p
+}
+
+tp53_mut_df_genes <- unique(unlist(strsplit(as.character(unlist(tp53_mut_df$Assoc.Genes)), ",", fixed = TRUE)))
+tp53_mut_df_genes_overlap <- tp53_mut_df_genes[tp53_mut_df_genes %in% metabolism_gene_list_ensg]
+tp53_mut_df_genes_overlap_names <- unique(unlist(lapply(tp53_mut_df_genes_overlap, function(x) 
+  all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == x, 'external_gene_name'])))
+
+
+plot_target_assoc_w_metabol_enrichment(master_df_mut, tp53_mut_df_genes_overlap_names, 0.1, 2.0)
+
 
 
 

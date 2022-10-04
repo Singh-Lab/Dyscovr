@@ -12,6 +12,7 @@ library(meta)
 library(metasens)
 library(metafor)
 library(ggplot2)
+library(grid)
 
 
 # Path to output files
@@ -96,12 +97,12 @@ perform_meta_analysis <- function(meta_input_tab, targ) {
   print(summary(rma_model))
   
   # Make a forest plot 
-  forest(rma_model, slab = meta_input_tab$study)
+  forest(rma_model, slab = meta_input_tab$study, cex=1.15)
   
   # Add details
   text(-10, -1.5, pos=4, cex=0.75, bquote(paste("RE Model (Q = ", 
                                                 .(formatC(rma_model$QE, digits=2, format="f")), ", df = ", .(rma_model$k - rma_model$p),
-                                                ", p = ", .(formatC(ma_model$QEp, digits=2, format="f")), "; ", I^2, " = ",
+                                                ", p = ", .(formatC(rma_model$QEp, digits=2, format="f")), "; ", I^2, " = ",
                                                 .(formatC(rma_model$I2, digits=1, format="f")), "%)")))
   # Add title
   grid.text(paste(targ, "Meta-Analysis"), .5, .8, gp=gpar(cex=1.5))

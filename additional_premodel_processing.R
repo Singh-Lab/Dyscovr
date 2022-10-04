@@ -70,6 +70,8 @@ colnames(expression_df_tmm)[1] <- 'ensg_id'
 # 3. Quantile-Normalized
 expression_df_qn <- fread(paste(main_path, "Expression/expression_quantile_norm_DF.csv", sep = ""),
                           header = TRUE)
+expression_df_qn <- fread(paste(main_path, "Expression/expression_quantile_norm_DF_sklearn_TO.csv", sep = ""),
+                          header = TRUE)
 colnames(expression_df_qn)[1] <- 'ensg_id'
 
 # 4. Rank-Normalized
@@ -125,13 +127,14 @@ methylation_df_bucketed_M$Gene_Symbol <- methylation_df_M$Gene_Symbol # If neede
 # paste(unique(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'uniprot_gn_id']), collapse = ";")))
 
 ### NON-TUMOR-NORMAL MATCHED ###
-mutation_targ_df <- fread(paste(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense.csv", sep = ""), 
+mutation_targ_df <- fread(paste(main_path, "Mutation/Mutation Count Matrices/iprotein_mut_count_matrix_nonsynonymous.csv", sep = ""), 
                              header = TRUE)
-#mutation_targ_df <- fread(paste(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense_ALL.csv", sep = ""), 
+mutation_targ_df <- mutation_targ_df[,2:ncol(mutation_targ_df)]
+#mutation_targ_df <- fread(paste(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynyonymous_ALL.csv", sep = ""), 
                           #header = TRUE)
 colnames(mutation_targ_df)[1] <- 'Gene_Symbol'
-colnames(mutation_targ_df)[2:ncol(mutation_targ_df)] <- unlist(lapply(colnames(mutation_targ_df)[2:ncol(mutation_targ_df)], function(x) 
-  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-"))) # Fix the sample IDs
+#colnames(mutation_targ_df)[2:ncol(mutation_targ_df)] <- unlist(lapply(colnames(mutation_targ_df)[2:ncol(mutation_targ_df)], function(x) 
+#  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-"))) # Fix the sample IDs
 
 # Add the additional un-included genes (those with no mutations in any patient)
 allgene_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/allgene_targets.csv",
@@ -146,11 +149,6 @@ colnames(unincluded_gene_df) <- colnames(mutation_targ_df)
 unincluded_gene_df$Gene_Symbol <- unincluded_genes
 
 mutation_targ_df <- rbind(mutation_targ_df, unincluded_gene_df)
-
-# If Swissprot IDs are not already added:
-#mutation_targ_df$Swissprot <- unlist(lapply(mutation_targ_df$Gene_Symbol, function(x) 
-# paste(unique(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'uniprot_gn_id']), collapse = ";")))
-
 
 
 ############################################################
@@ -231,10 +229,10 @@ patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/pat
 ### NON-TUMOR-NORMAL MATCHED ###
 #patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm.csv", sep = ""), 
                        #header = TRUE, row.names = 1)
-patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_MN_normAge.csv", sep = ""), 
+patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_normAge.csv", sep = ""), 
                        header = TRUE, row.names = 1)
 
-patient_df_brca_blca_hnsc <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_MN_normAge_inclBRCAsubtypes.csv", sep = ""), 
+patient_df_brca_blca_hnsc <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_normAge_inclBRCAsubtypes.csv", sep = ""), 
                                       header = TRUE, row.names = 1)
 
 # If BRCA, eliminate the gender column
@@ -351,9 +349,9 @@ combine_patient_and_samp_dfs <- function(patient_df, sample_df, dataset) {
 # Call this function
 combined_pat_samp_df <- combine_patient_and_samp_dfs(patient_df, sample_df, 'tcga')
 
-# Remove rows that are entirely NA
+# Remove rows/ columns that are entirely NA
 combined_pat_samp_df <- combined_pat_samp_df[rowSums(is.na(combined_pat_samp_df)) != ncol(combined_pat_samp_df),]
-  
+combined_pat_samp_df <- combined_pat_samp_df[,colSums(is.na(combined_pat_samp_df)) != nrow(combined_pat_samp_df)]
 
 # Write the results to a file
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_total_frac_tmm_ntnm.csv", sep = ""))
@@ -431,9 +429,9 @@ methylation_patients <- get_unique_patients(colnames(methylation_df)[2:ncol(meth
 exp_samp_ids <- unlist(lapply(colnames(expression_df)[2:ncol(expression_df)], function(x)
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
 expression_patients <- get_unique_patients(exp_samp_ids)  # 738; 7424
-mutation_targ_patients <- unlist(get_unique_patients(colnames(mutation_targ_df)[2:ncol(mutation_targ_df)])) # 978; 10002
+mutation_targ_patients <- unlist(get_unique_patients(colnames(mutation_targ_df)[2:(ncol(mutation_targ_df)-1)])) # 978; 10002; #674
 mutation_regprot_patients <- unique(unlist(lapply(mutation_regprot_df$Patient, function(x) 
-  unlist(strsplit(x, ";", fixed = TRUE)))))   # 619; 6732 -- ignore this (6875 with nonsense)
+  unlist(strsplit(x, ";", fixed = TRUE)))))   # 615; 6732 -- ignore this (6875 with nonsense)
 
 # If needed
 #patient_sample_df <- as.data.frame(patient_sample_df)
@@ -442,13 +440,13 @@ mutation_regprot_patients <- unique(unlist(lapply(mutation_regprot_df$Patient, f
 
 clin_samp_ids <- unlist(lapply(rownames(patient_sample_df), function(x)
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
-clinical_patients <- get_unique_patients(clin_samp_ids)  # 739; 7745
+clinical_patients <- get_unique_patients(clin_samp_ids)  # 613; 7745
 
 intersecting_patients <- intersect(cna_patients, 
                                    intersect(methylation_patients,
                                              intersect(expression_patients,
                                                        intersect(mutation_targ_patients, clinical_patients))))
-print(length(intersecting_patients)) # 664 in BRCA; 4545 PC
+print(length(intersecting_patients)) # 664 in BRCA; 4545 PC (605 using UCSF genotype PCs, 604 if using WashU genotype PCs)
 
 #' Given a list of intersecting patient IDs (XXXX, e.g. A0WY), it subsets a 
 #' given data frame with column names that contain sample IDs (XXXX-XXX, e.g. A0WY-01A)
@@ -551,6 +549,10 @@ mutation_regprot_df_sub$Patient <- unlist(lapply(mutation_regprot_df_sub$Patient
 methylation_df_sub$ensg_ids <- unlist(lapply(methylation_df_sub$Gene_Symbol, function(x) 
   paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x,'ensembl_gene_id'])), collapse = ";")))
 
+# Add Swissprot IDs to mutation DF
+mutation_targ_df_sub$Swissprot <- unlist(lapply(mutation_targ_df_sub$Gene_Symbol, function(x) 
+  paste(unique(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'uniprot_gn_id']), collapse = ";")))
+
 # Re-write these all to to files
 write.csv(cna_df_sub, paste(main_path, "Linear Model/Tumor_Only/CNV/CNA_AllGenes_CancerOnly_IntersectPatients.csv", sep = ""))
 write.csv(methylation_df_sub, paste(main_path, "Linear Model/Tumor_Only/Methylation/methylation_M_CancerOnly_IntersectPatients.csv", sep = ""))
@@ -620,10 +622,11 @@ recombine_into_df_and_write(ibindingpos_prots_nucacids, ibindingpos_prots_nucaci
 #' @param regprot_df a regulatory mutation data frame for a given specificity/ mutation type
 #' @param mut_freq_thres a mutation frequency threshold (e.g. 5%) for which to include the 
 #' given gene
+#' @param spec_label a specificity label (e.g. "i-protein", "i-domain", or "i-bindingpos")
 #' @param patient_ids a set of unique patient/ sample IDs for the given cohort
 #' @param driver_df if not NA, use known driver DF to limit to only proteins with known drivers
 #' @param all_genes_id_conv a gene ID conversion file from bioMart
-create_regulatory_prot_input_df <- function(regprot_df, mut_freq_thres, patient_ids, 
+create_regulatory_prot_input_df <- function(regprot_df, mut_freq_thres, spec_label, patient_ids, 
                                             driver_df, all_genes_id_conv) {
   
   # Calculate the minimum number of mutated samples needed to keep a given gene
@@ -631,18 +634,32 @@ create_regulatory_prot_input_df <- function(regprot_df, mut_freq_thres, patient_
   print(mut_count_thres)
   
   # Subset the regprot data frame using this
-  regprot_df_rows <- lapply(1:nrow(regprot_df), function(i) {
-    patients <- unlist(strsplit(as.character(unlist(regprot_df[i, 'Patient'])), ";", fixed = TRUE))
-    # Limit to just patients in the intersecting set
-    patients_justID <- unlist(lapply(patients, function(x) unlist(strsplit(x, "-", fixed = TRUE))[1]))
-    patients <- patients[which(patients_justID %in% patient_ids)]
-    if (length(patients) > mut_count_thres) {return(regprot_df[i,])}
-    else {return(NA)}
-  })
-  regprot_df_rows <- regprot_df_rows[!is.na(regprot_df_rows)]
+  if(spec_label == "i-protein") {
+    regprots <- unlist(lapply(1:nrow(regprot_df), function(i) {
+      patients <- unlist(strsplit(as.character(unlist(regprot_df[i, 'Patient'])), ";", fixed = TRUE))
+      # Limit to just patients in the intersecting set
+      patients_justID <- unlist(lapply(patients, function(x) unlist(strsplit(x, "-", fixed = TRUE))[1]))
+      patients_final <- patients[which(patients_justID %in% patient_ids)]
+      if (length(patients_final) > mut_count_thres) {return(regprot_df[i, 'Swissprot'])}
+      else {return(NA)}
+    }))
+  } else {
+    regprots <- unlist(lapply(1:length(unique(regprot_df$Swissprot)), function(i) {
+      regprot <- unique(regprot_df$Swissprot)[i]
+      patients <- unlist(regprot_df[regprot_df$Swissprot == regprot, 'Patient'])
+      # Limit to just patients in the intersecting set
+      patients_justID <- unlist(lapply(patients, function(x) unlist(strsplit(x, "-", fixed = TRUE))[1]))
+      patients_final <- unique(patients[which(patients_justID %in% patient_ids)])
+      if (length(patients_final) > mut_count_thres) {return(regprot)}
+      else {return(NA)}
+    }))
+  }
+  
+  regprots <- unique(regprots[!is.na(regprots)])
+  print(head(regprots))
   
   # Extract the ENSG and Swissprot IDs
-  uniprot_ids <- unique(unlist(lapply(regprot_df_rows, function(x) x$Swissprot)))
+  uniprot_ids <- regprots
   ensg_ids <- unlist(lapply(uniprot_ids, function(x) 
     paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == x, 
                                    'ensembl_gene_id']), collapse = ";")))
@@ -658,12 +675,14 @@ create_regulatory_prot_input_df <- function(regprot_df, mut_freq_thres, patient_
 }
 
 # Call function
-regprot_input_df_all_5perc <- create_regulatory_prot_input_df(mutation_regprot_df, 0.05, 
+regprot_input_df_all_5perc <- create_regulatory_prot_input_df(mutation_regprot_df, 0.05, "i-protein",
                                                               intersecting_patients, NA,
                                                               all_genes_id_conv)
-regprot_input_df_driver_5perc <- create_regulatory_prot_input_df(mutation_regprot_df, 0.05, 
+regprot_input_df_driver_5perc <- create_regulatory_prot_input_df(mutation_regprot_df, 0.05, "i-protein",
                                                               intersecting_patients, driver_gene_df,
                                                               all_genes_id_conv)
+
+intersecting_patients <- read.table(paste(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt", sep = ""))[,1]
 
 # Limit just to particular subtypes
 patient_set_lumA <- intersect(read.table(paste0(main_path, "Patient Subsets/Luminal.A_patient_ids.txt"), header = TRUE)[,1], intersecting_patients)
@@ -671,13 +690,15 @@ patient_set_lumB <- intersect(read.table(paste0(main_path, "Patient Subsets/Lumi
 patient_set_basal <- intersect(read.table(paste0(main_path, "Patient Subsets/Basal_patient_ids.txt"), header = TRUE)[,1], intersecting_patients)
 patient_set_her2 <- intersect(read.table(paste0(main_path, "Patient Subsets/HER2_patient_ids.txt"), header = TRUE)[,1], intersecting_patients)
 
+driver_gene_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/GRCh38_driver_gene_list.tsv", 
+                      sep = "\t", header = TRUE, comment.char = "#", skip = 10)
 
 regprot_input_df_all_5perc_missense_lumA <- create_regulatory_prot_input_df(mutation_regprot_df_missense, 0.05, 
-                                                                            patient_set_lumA, NA,
+                                                                            "i-protein", patient_set_lumA, NA,
                                                                             all_genes_id_conv)
 
 # Write to files
-write.csv(regprot_input_df_all_5perc, paste0(prot_path, "Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_drivers_missense.csv"))
+write.csv(regprot_input_df_all_5perc, paste0(main_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_drivers_missense.csv"))
 
 
 ############################################################

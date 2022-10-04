@@ -294,7 +294,7 @@ create_num_sig_hits_barplot <- function(list_of_master_dfs, q_thres, list_of_sil
       geom_bar(position = "dodge", width = 0.95, stat = "identity", show.legend = FALSE, color = "black") + 
       scale_fill_manual(values = c("#BC3C29FF", "#0072B5FF", "gray")) + #scale_color_nejm() +
       xlab("Gene") + ylab(paste0("\n", paste0("Number of hits (q < ", paste0(q_thres, ")")))) +
-      theme_minimal() +
+      #theme_minimal() +
       theme(axis.text = element_text(face="bold", size = 16), 
             axis.title=element_text(size=18, face="bold"), panel.grid.major = element_blank(),
             panel.background = element_rect(fill = 'white'))
@@ -637,11 +637,13 @@ pathway_tp53 <- "04115"
 pathway_breastcancer <- "05224"
 pathway_cancerCarbonMetabolism <- "05230"
 pathway_cancerCholineMetabolism <- "05231"
+pathway_pi3k_akt1 <- "04151"
 
 visualize_pathway(master_df_corrected, pathway_tp53, "cancerRelated_metabolicTargs")
 visualize_pathway(master_df_corrected, pathway_breastcancer, "cancerRelated_metabolicTargs")
 visualize_pathway(master_df_corrected, pathway_cancerCarbonMetabolism, "cancerRelated_metabolicTargs")
 visualize_pathway(master_df_corrected, pathway_cancerCholineMetabolism, "cancerRelated_metabolicTargs")
+visualize_pathway(master_df_corrected, pathway_pi3k_akt1, "topDrivers_allGeneTargs")
 
 
 ############################################################
@@ -669,12 +671,55 @@ terms_counts_df <- data.frame('term' = terms, 'freq' = terms_counts)
 pie(terms_counts_df$freq, labels = terms_counts_df$term, main = "Categories of Significant Covariates (All Tests)")
 
 
+############################################################
+############################################################
+#### FOR ANALYSES WITH MULTIPLE REGULATORY PROTEINS OF 
+#### INTEREST, CREATE PIE GRAPHS SHOWING THE FREQUENCY OF
+#### HITS FOR EACH DRIVER IN THE TOP N% OF HITS
+############################################################
+############################################################
+#' Creates pie charts of number of hits in the top n % for 
+#' each driver gene/ regulatory protein (R_i) of interest
+#' @param master_df output master DF with target gene names and q-values
+#' @param tophit_thres a percentage or q-value threshold (e.g. 0.05) within which to 
+#' consider a hit "significant" or important enough for inclusion in pie chart
+#' @param perc_or_qval whether the threshold is a percentage or a q-value
+#' @param all_genes_id_conv a conversion table to convert R_i uniprot IDs to 
+#' intelligible gene names
+create_driver_pie <- function(master_df, tophit_thres, perc_or_qval, all_genes_id_conv) {
+  if(perc_or_qval == "perc") {
+    # Get the top n% of hits
+    master_df_topn <- master_df[1:(tophit_thres*nrow(master_df)),]
+    print(paste("Q-Value at", paste(tophit_thres, paste("threshold:", master_df[tophit_thres*nrow(master_df), 'q.value']))))
+  } else if (perc_or_qval == "qval") {
+    # Get the n hits below the qvalue threshold
+    master_df_topn <- master_df[master_df$q.value < tophit_thres,]
+    print(paste("Number of hits below the q-value threshold:", nrow(master_df_topn)))
+  } else {
+    print("The only possible thresholding options are perc or qval. Please try again.")
+    return(NA)
+  }
+  
+  # Get the unique drivers, and create a frequency table of the number of 
+  # times that each driver appears
+  unique_drivers <- unique(master_df_topn$term)
+  
+  freq.table <- as.data.frame(lapply(unique_drivers, function(x)
+    nrow(master_df_topn[master_df_topn$term == x,])))
+  unique_driver_names <- unlist(lapply(unique_drivers, function(d) {
+    driver_uniprot <- unlist(strsplit(d, "_", fixed = TRUE))[1]
+    driver_gn <- unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == driver_uniprot, 
+                                   'external_gene_name'])
+    return(driver_gn)
+  }))
+  names(freq.table) <- unique_driver_names
+  
+  pie(as.integer(freq.table[1,]), labels = colnames(freq.table))
+  
+}
 
 
-
-
-
-
+create_driver_pie(master_df, 0.05, all_genes_id_conv)
 
 
 

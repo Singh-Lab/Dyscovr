@@ -1,7 +1,7 @@
 ############################################################
 # Helper functions for the running and processing of 
 # Batch CD-Search
-# Written By: Sara Camilli, August 2020
+# Written By: Sara Geraghty, August 2020
 ############################################################
 
 # Link to Batch CD-Search: https://www.ncbi.nlm.nih.gov/Structure/bwrpsb/bwrpsb.cgi
@@ -18,8 +18,8 @@
 #' @param dataset either "tcga", "metabric", "icgc", or "cptac3"
 prep_cdsearch_files <- function(proteome, label, dataset) {
   
-  path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Proteome/BRCA/"
-  #path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Proteome/Pan-Cancer/"
+  #path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Proteome/BRCA/"
+  path_cdsearch <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Proteome/Pan-Cancer/"
   
   # Split the proteome into sub-proteomes for Batch CD-Search if needed
   if (length(proteome) > 3000) {
@@ -85,8 +85,8 @@ split_into_subproteomes <- function(proteome) {
 #' missense mutations, silent mutations, or both ('full', 'missense', or 'silent')
 #' @param dataset either "tcga", "metabric", "icgc", or "cptac3"
 get_cdsearch_res <- function(label, dataset) {
-  path = "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/CD-Batch Results"
-  #path = "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/CD-Batch Results"
+  #path = "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/CD-Batch Results"
+  path = "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/CD-Batch Results"
   
   all_files <- list.files(path)
   subset_files <- all_files[unlist(lapply(all_files, FUN = function(x) {startsWith(x, label)}))]
@@ -105,6 +105,7 @@ get_cdsearch_res <- function(label, dataset) {
       cd_search_res_df <- rbind(cd_search_res_df, res_df)
     }
   }
+  cd_search_res_df <- distinct(cd_search_res_df)
   print(cd_search_res_df)
   return(cd_search_res_df)
 

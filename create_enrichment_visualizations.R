@@ -600,6 +600,82 @@ stringdb_enrichment_tp53 <- get_stringdb_enrichment(allgenes_p53_panCts_inclBRCA
 stringdb_enrichment_pik3ca <- get_stringdb_enrichment(allgenes_pik3ca_panCts_inclBRCAsubtypes, 0.2, NA)
 
 
+############################################################
+############################################################
+#### CALCULATE ENRICHMENT USING NETWORK CONFIDENCE SCORES
+#### EMPIRICAL P-VALUES
+############################################################
+############################################################
+#' Use STRING network and associated confidence scores to generate a 
+#' distribution of scores for the given GOI. See where each significant 
+#' target falls on this distribution and use that to perform a hypothesis 
+#' test and generate a p-value, which is returned.
+#' @param string_nw a STRING network downloaded from the STRING website
+#' @param goi the Uniprot/Swissprot ID for a given driver of interest
+#' @param goi_name the Hugo symbol/ gene name for the given driver of interest
+#' @param master_df an output data frame with results for the given GOI
+#' @param qval_thres a q-value threshold for signficance (e.g. 0.1)
+#' @param num_trials the number of times to draw from the confidences to generate
+#' a distribution (e.g. 100)
+generate_empirical_p_string <- function(string_nw, goi, goi_name, master_df, 
+                                        qval_thres, num_trials) {
+  # Subset the data frame to only the given GOI
+  master_df_goi <- NA
+  if("R_i" %in% colnames(master_df)) {
+    master_df_goi <- master_df[grepl(goi, master_df$R_i),]
+  } else {
+    master_df_goi <- master_df[grepl(goi, master_df$term),]
+  }
+  
+  # Subset the data frame using the q-value threshold
+  master_df_goi_sub <- master_df_goi[master_df_goi$q.value < qval_thres,]
+  
+  # Subset the STRING network to only the given GOI
+  string_nw_goi <- string_nw[(string_nw$node1 == goi_name),]  # will already be subsetted by our max # of interactions
+  
+  # Get the number of significant hits for this GOI
+  num_sig_hits <- nrow(master_df_goi_sub)
+  
+  # We will draw this number of hits a given number of times to generate a distribution
+  distr_vals <- unlist(lapply(1:num_trials, function(i) {
+    v <- mean(sample(string_nw_goi$combined_score, size = num_sig_hits, replace = TRUE))
+    return(v)
+  }))
+  
+  print(hist(distr_vals))
+  
+  # Now, get the confidences for each of our actual hits
+  real_conf_scores <- unlist(lapply(master_df_goi_sub$T_k.name, function(x) 
+    string_nw_goi[string_nw_goi$node2 == x, 'combined_score']))
+  real_conf_scores_mean <- mean(real_conf_scores)
+  
+  # Plot where we fall on this distribution
+  abline(v = real_conf_scores_mean)
+  
+  # Perform a simple one-sample t-test (assume that we have a random sample
+  # of values from a theoretical pool of genes that are called significant by 
+  # our model for having "real" relationships to our GOI). We compare this against 
+  # the distribution of confidences for EVERY gene in relationship to our GOI. 
+  # Is the mean confidences for our "real" targets greater than the general mean
+  # confidence score for our GOI?
+  ttest_res <- t.test(real_conf_scores, mu = mean(distr_vals), alternative = "greater")
+  print(ttest_res)
+  
+  return(ttest_res$p.value)
+}
+
+# Import the String network file
+string_nw <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Network_Data/string_interactions.csv",
+                      header = TRUE, check.names = FALSE)
+colnames(string_nw)[1] <- "node1"
+
+# Limit to given GOI
+goi <- "TP53"
+# goi <- "PIK3CA"
+
+# Visualize the scores for this GOI
+string_nw_goi <- string_nw_goi[order(string_nw_goi$combined_score),]
+
 
 ############################################################
 ############################################################
