@@ -126,28 +126,30 @@ visualize_pval_distrib <- function(results_table) {
 }
 
 # Create specific filenames
-if(!useNumFunctCopies) {
-  fn_mut <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  fn_cna <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  
-  # Call this function & save output
-  tryCatch({
-    png(fn_mut, width = 450, height = 350)
-    visualize_pval_distrib(master_df_mut)
-    dev.off()
+if("p.value" %fin% colnames(master_df_mut)) {
+  if(!useNumFunctCopies) {
+    fn_mut <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    fn_cna <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
     
-    png(fn_cna, width = 450, height = 350)
-    visualize_pval_distrib(master_df_cna)
-    dev.off()
-  }, error = function(cond) {print(cond)})
-} else {
-  fn_fnc <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  # Call this function & save output
-  tryCatch({
-    png(fn_fnc, width = 450, height = 350)
-    visualize_pval_distrib(master_df_fnc)
-    dev.off()
-  }, error = function(cond) {print(cond)})
+    # Call this function & save output
+    tryCatch({
+      png(fn_mut, width = 450, height = 350)
+      visualize_pval_distrib(master_df_mut)
+      dev.off()
+      
+      png(fn_cna, width = 450, height = 350)
+      visualize_pval_distrib(master_df_cna)
+      dev.off()
+    }, error = function(cond) {print(cond)})
+  } else {
+    fn_fnc <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    # Call this function & save output
+    tryCatch({
+      png(fn_fnc, width = 450, height = 350)
+      visualize_pval_distrib(master_df_fnc)
+      dev.off()
+    }, error = function(cond) {print(cond)})
+  }
 }
 
 
@@ -227,24 +229,25 @@ mh_correct <- function(results_table, fn_qvalvis, fn_qvalsum) {
 }
 
 # Call this function
-if(!useNumFunctCopies) {
-  fn_mut_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  fn_cna_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  fn_mut_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  fn_cna_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  
-  tryCatch({
-    master_df_mut_corrected <- mh_correct(master_df_mut, fn_mut_qvalvis, fn_mut_qvalsum)
-    master_df_cna_corrected <- mh_correct(master_df_cna, fn_cna_qvalvis, fn_cna_qvalsum)
-  }, error = function(cond) {print(cond)})
-} else {
-  fn_fnc_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  fn_fnc_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  tryCatch({
-    master_df_fnc_corrected <- mh_correct(master_df_fnc, fn_fnc_qvalvis, fn_fnc_qvalsum)
-  }, error = function(cond) {print(cond)})
+if("p.value" %fin% colnames(master_df_mut)) {
+  if(!useNumFunctCopies) {
+    fn_mut_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    fn_cna_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    fn_mut_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    fn_cna_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    
+    tryCatch({
+      master_df_mut_corrected <- mh_correct(master_df_mut, fn_mut_qvalvis, fn_mut_qvalsum)
+      master_df_cna_corrected <- mh_correct(master_df_cna, fn_cna_qvalvis, fn_cna_qvalsum)
+    }, error = function(cond) {print(cond)})
+  } else {
+    fn_fnc_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    fn_fnc_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    tryCatch({
+      master_df_fnc_corrected <- mh_correct(master_df_fnc, fn_fnc_qvalvis, fn_fnc_qvalsum)
+    }, error = function(cond) {print(cond)})
+  }
 }
-
 
 ############################################################
 ############################################################

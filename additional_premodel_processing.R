@@ -72,6 +72,8 @@ expression_df_qn <- fread(paste(main_path, "Expression/expression_quantile_norm_
                           header = TRUE)
 expression_df_qn <- fread(paste(main_path, "Expression/expression_quantile_norm_DF_sklearn_TO.csv", sep = ""),
                           header = TRUE)
+expression_df_qn <- fread(paste(main_path, "Expression/ALL_CT_expression_quantile_normalized_sklearn.csv", sep = ""),
+                          header = TRUE)
 colnames(expression_df_qn)[1] <- 'ensg_id'
 
 # 4. Rank-Normalized
@@ -232,7 +234,7 @@ patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/pat
 patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_normAge.csv", sep = ""), 
                        header = TRUE, row.names = 1)
 
-patient_df_brca_blca_hnsc <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_normAge_inclBRCAsubtypes.csv", sep = ""), 
+patient_df_brca_blca_hnsc <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_normAge_inclBRCA.BLCA.HNSCsubtypes.csv", sep = ""), 
                                       header = TRUE, row.names = 1)
 
 # If BRCA, eliminate the gender column
@@ -446,7 +448,7 @@ intersecting_patients <- intersect(cna_patients,
                                    intersect(methylation_patients,
                                              intersect(expression_patients,
                                                        intersect(mutation_targ_patients, clinical_patients))))
-print(length(intersecting_patients)) # 664 in BRCA; 4545 PC (605 using UCSF genotype PCs, 604 if using WashU genotype PCs)
+print(length(intersecting_patients)) # 664 in BRCA; 4545 PC (605 using UCSF genotype PCs, 604 if using WashU genotype PCs for BRCA; 3915 if using WashU PCs P-C)
 
 #' Given a list of intersecting patient IDs (XXXX, e.g. A0WY), it subsets a 
 #' given data frame with column names that contain sample IDs (XXXX-XXX, e.g. A0WY-01A)
@@ -618,7 +620,8 @@ recombine_into_df_and_write(ibindingpos_prots_nucacids, ibindingpos_prots_nucaci
 
 
 #' Make regulatory input data frame using a mutational threshold (e.g. >=5%), with an option
-#' to limit to known driver genes
+#' to limit to known driver genes and to check if these drivers are connected by STRING
+#' with a confidence exceeding a given threshold (in this case, keep the more highly mutated of the pair)
 #' @param regprot_df a regulatory mutation data frame for a given specificity/ mutation type
 #' @param mut_freq_thres a mutation frequency threshold (e.g. 5%) for which to include the 
 #' given gene
@@ -626,8 +629,11 @@ recombine_into_df_and_write(ibindingpos_prots_nucacids, ibindingpos_prots_nucaci
 #' @param patient_ids a set of unique patient/ sample IDs for the given cohort
 #' @param driver_df if not NA, use known driver DF to limit to only proteins with known drivers
 #' @param all_genes_id_conv a gene ID conversion file from bioMart
+#' @param string_db OPT: a STRING network with confidence scores between sets of genes
+#' @param string_conf_thres OPT: a confidence threshold above which drivers are considered
+#' to be closely related (and only the more highly mutated one is maintained)
 create_regulatory_prot_input_df <- function(regprot_df, mut_freq_thres, spec_label, patient_ids, 
-                                            driver_df, all_genes_id_conv) {
+                                            driver_df, all_genes_id_conv, string_db, string_conf_thres) {
   
   # Calculate the minimum number of mutated samples needed to keep a given gene
   mut_count_thres <- mut_freq_thres * length(patient_ids)
@@ -669,10 +675,29 @@ create_regulatory_prot_input_df <- function(regprot_df, mut_freq_thres, spec_lab
   # If driver_df is not NA, then we want to limit to only driver genes
   if(!is.na(driver_df)) {
     output_df <- output_df[which(ensg_ids %fin% driver_df$ensembl_gene_id),]
+    
+    # An optional filter to remove drivers that are closely related to one another
+    if(!is.na(string_db)) {
+      output_df <- filter_string_relatives(output_df, string_db, string_conf_thres)
+    }
   }
   
   return(output_df)
 }
+
+
+#' Helper function to see if each pairwise set of driver genes are related to one another
+#' in the STRING network with a confidence that exceeds the given threshold. Returns
+#' the subsetted data frame
+#' @param output_df a putative output data frame with columns for swissprot and ensg ids
+#' @param string_db a table with STRING relationships and associated confidence scores
+#' @param string_conf_thres a confidence threshold above which we eliminate the less 
+#' mutated partner in a relationship
+filter_string_relatives <- function(output_df, string_db, string_conf_thres) {
+  
+}
+
+
 
 # Call function
 regprot_input_df_all_5perc <- create_regulatory_prot_input_df(mutation_regprot_df, 0.05, "i-protein",
@@ -692,6 +717,9 @@ patient_set_her2 <- intersect(read.table(paste0(main_path, "Patient Subsets/HER2
 
 driver_gene_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/GRCh38_driver_gene_list.tsv", 
                       sep = "\t", header = TRUE, comment.char = "#", skip = 10)
+
+# STRING network and confidence threshold
+
 
 regprot_input_df_all_5perc_missense_lumA <- create_regulatory_prot_input_df(mutation_regprot_df_missense, 0.05, 
                                                                             "i-protein", patient_set_lumA, NA,
@@ -996,4 +1024,25 @@ write(g1_noMut_pats_lt20pamp, paste0(main_path, paste0("Patient Subsets/", paste
 write(g2_noMut_pats_lt20pamp, paste0(main_path, paste0("Patient Subsets/", paste0("LT20PAmp.", paste0(gene2, ".NoMut_patient_ids.txt")))))
 
 
+############################################################
+############################################################
+# 9. MERGE PAN-CANCER EXPRESSION DFs INTO ONE
+############################################################
+############################################################
 
+expression_dfs <- list.files(paste0(main_path, "Expression/"), 
+                             pattern = "_expression_quantile_normalized_sklearn.csv")
+
+merged_expression_df <- NA
+
+for(i in 1:length(expression_dfs)) {
+  expression_df <- distinct(fread(paste0(main_path, paste0("Expression/", expression_dfs[i])), 
+                         header = TRUE))
+  colnames(expression_df)[1] <- "ensg_id"
+  if(i > 1) {
+    merged_expression_df <- merge(merged_expression_df, expression_df, 
+                                  by = "ensg_id", all = TRUE)
+  } else {merged_expression_df <- expression_df}
+}
+
+write.csv(merged_expression_df, paste0(main_path, "Expression/ALL_CT_expression_quantile_normalized_sklearn.csv"))

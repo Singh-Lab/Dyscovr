@@ -14,16 +14,18 @@ library(data.table)
 library(speedglm)
 library(argparse)
 library(stringr)
-library(glmnet)
-library(cli)
-library(nlme)
-library(lme4)
-library(lmerTest)
+#library(glmnet)
+#library(cli)
+#library(nlme)
+#library(lme4)
+#library(lmerTest)
+library(dqrng)
 
 # Source other files needed
 source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Sara_LinearModel/"
-source(paste(source_path, "linear_model_helper_functions.R", sep = ""))
 source(paste(source_path, "general_important_functions.R", sep = ""))
+source(paste(source_path, "linear_model_helper_functions.R", sep = ""))
+source(paste(source_path, "run_regularized_models2.R", sep = ""))
 
 
 ############################################################
@@ -154,6 +156,10 @@ parser$add_argument("--model_type", default = "linear", type = "character",
 # Add a flag for adding a regularization method
 parser$add_argument("--regularization", default = "None", type = "character",
                     help = "The name of the regularization method being used. Currently only implemented for L1 and L2. Default is None.")
+# If we are using a regularized model (L1 or L2), select the method to evaluate significance.
+parser$add_argument("--signif_eval_type", default = "randomization_predictors", type = "character",
+                    help = "If regularization is not None, uses this flag to determine method of evaluating significance. Takes either randomization_perTarg, randomization_perSamp, randomization_predictors, subsampling, or selectiveInference. Default is randomization_predictors.")
+
 
 # Add a flag for keeping only trans pairings
 parser$add_argument("--removeCis", default = "TRUE", type = "character",
@@ -297,7 +303,7 @@ if(debug) {
   print(head(expression_df))
 }
 
-# Determine what type of expression this is from the filename
+# Determine what type of expression this is from the file name
 is_rank_or_quant_norm <- FALSE
 if(grepl("rank", args$expression_df) | grepl("quantile", args$expression_df)) {is_rank_or_quant_norm <- TRUE}
 
@@ -574,6 +580,8 @@ if(useNumFunctCopies) {
 #' @param model_type the type of model being used (either linear, the default, or mixed)
 #' @param regularization a string with the type of regularization to be used; currently
 #' only implemented for "L2" or "None"
+#' @param signif_eval_type if regularization is not "None", uses the given type of method
+#' to evaluate significance (either some form of "randomization", "subsampling", or "selectiveInference")
 #' @param covs_to_incl a vector of covariates that we want to include, or ALL if we
 #' want to include all implemented covariates
 #' @param removeCis a TRUE/FALSE value indicating whether or not we are eliminating 
@@ -595,7 +603,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                              neighboring_cna_df, is_rank_or_quant_norm, log_expression, analysis_type, 
                              tumNormMatched, randomize, cna_bucketing, meth_bucketing, 
                              useNumFunctCopies, num_PEER, num_pcs, debug, collinearity_diagn, 
-                             outpath, outfn, model_type, regularization, covs_to_incl, 
+                             outpath, outfn, model_type, regularization, signif_eval_type, covs_to_incl, 
                              removeCis, all_genes_id_conv, incl_nextMutDriver, 
                              run_query_genes_jointly, dataset, inclResiduals) {
   
@@ -607,12 +615,12 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
   if(randomize) {
     if(analysis_type == "eQTL") {
       random_exp_df <- apply(expression_df[,2:ncol(expression_df), with = FALSE], 
-                             MARGIN = 2, sample)
+                             MARGIN = 2, dqsample)
       expression_df <- cbind(expression_df[,'ensg_id'], data.table(random_exp_df))
     }
     else if (analysis_type == "meQTL") {
       random_methyl_df <- apply(methylation_df[,2:(ncol(methylation_df)-1), with = FALSE], 
-                             MARGIN = 2, sample)
+                             MARGIN = 2, dqsample)
       methylation_df <- cbind(methylation_df[,'Gene_Symbol'], cbind(data.table(random_methyl_df), 
                                                                     methylation_df[,'ensg_ids']))
     }
@@ -677,6 +685,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                                        collinearity_diagn = collinearity_diagn, 
                                        model_type = model_type,
                                        regularization = regularization, 
+                                       signif_eval_type = signif_eval_type,
                                        run_query_genes_jointly = run_query_genes_jointly, 
                                        regprot = regprot)
       
@@ -741,10 +750,10 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
       setnames(regprot_i_df, "MethStat_i", paste0(regprot, "_MethStat_i"))
       
       # If remove cis is TRUE, limit the downstream target DF to only trans pairings
-      if(removeCis) {
-        downstream_target_df <- subset_to_trans_targets(regprot_ensg, downstream_target_df,
-                                                        all_genes_id_conv, debug)
-      }
+      #if(removeCis) {
+      #  downstream_target_df <- subset_to_trans_targets(regprot_ensg, downstream_target_df,
+      #                                                  all_genes_id_conv, debug)
+      #}
       
       return(regprot_i_df)
     })
@@ -758,6 +767,27 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
     if(debug) {
       print("Starter DF, with Regprot Inputs")
       print(head(starter_df))
+    }
+    
+    shuffled_input_dfs <- NA
+    # If we are doing a regularized regression model with a randomization approach to 
+    # generating a p-value, we want to pre-shuffle the input data frame per-driver and save 
+    # these DFs as a list
+    if((model_type == "linear") & (regularization != "None") & (signif_eval_type == "randomization_predictors")) {
+      num_randomizations <- 100
+      swissprot_ids <- protein_ids_df$swissprot_ids
+      driver_indices <- lapply(swissprot_ids, function(s) which(grepl(s, colnames(starter_df))))
+      remaining_indices <- setdiff(1:ncol(starter_df), unlist(driver_indices))
+      non_driver_starter_df <- starter_df[, remaining_indices]
+      shuffled_input_dfs <- lapply(1:num_randomizations, function(i) {
+        indiv_driver_shuffled_df <- lapply(1:length(driver_indices), function(j) {
+          driver_i <- driver_indices[[j]]
+          shuffled_cols <- starter_df[dqsample(1:nrow(starter_df)), driver_i]
+          return(shuffled_cols)
+        })
+        shuffled_df <- do.call("cbind", c(indiv_driver_shuffled_df, non_driver_starter_df))
+        return(shuffled_df)
+      })
     }
     
     regprot_results_df_list <- run_linear_model_per_target_gene(downstream_target_df = downstream_target_df, 
@@ -780,6 +810,8 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                                                                 collinearity_diagn = collinearity_diagn, 
                                                                 model_type = model_type,
                                                                 regularization = regularization, 
+                                                                signif_eval_type = signif_eval_type,
+                                                                shuffled_input_dfs = shuffled_input_dfs,
                                                                 run_query_genes_jointly = run_query_genes_jointly, 
                                                                 regprot = NA)
 
@@ -846,6 +878,10 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
 #' @param model_type the type of model being used (either linear, the default, or mixed)
 #' @param regularization a string with the type of regularization to be used; currently
 #' only implemented for "L2" or "None"
+#' @param signif_eval_type if regularization is not "None", uses the given type of method
+#' to evaluate significance (either some form of "randomization", "subsampling", or "selectiveInference")
+#' @param shuffled_input_dfs either 'NA' if our signif_eval_type is NOT randomization_predictors, or
+#' a list of shuffled starter DFs 
 #' @param run_query_genes_jointly a TRUE/ FALSE value indicating whether or not we 
 #' want to run all query regulatory proteins jointly in the same model, or separately
 #' (one model per query-target pair)
@@ -859,6 +895,7 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
                                              dataset, randomize, num_PEER, num_pcs,
                                              covs_to_incl, inclResiduals, removeCis,
                                              model_type, collinearity_diagn, regularization,
+                                             signif_eval_type, shuffled_input_dfs, 
                                              run_query_genes_jointly, regprot) {
   
   # Loop through all the targets for this protein(s) of interest and create a table 
@@ -901,7 +938,12 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
     if (is.na(lm_input_table)) {return(NA)}
     if(lm_input_table[, .N] == 0) {return(NA)}
     
-    # If a row has NA, remove that whole row and predict without it
+    # First, remove any columns that are entirely NA (e.g., a given driver did not 
+    # have CNA or methylation data reported)
+    lm_input_table <- lm_input_table[, which(unlist(lapply(lm_input_table, function(x)
+      !all(is.na(x))))), with = FALSE]
+    
+    # Then, if a row has NA, remove that whole row and predict without it
     #lm_input_table <- na.exclude(lm_input_table)
     lm_input_table <- na.omit(lm_input_table)
     
@@ -953,8 +995,20 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
     } else if ((model_type == "linear") & (regularization == "L2" | regularization == "ridge" | 
                regularization == "L1" | regularization == "lasso")) {
 
-      lm_fit <- run_regularization_model(formula, lm_input_table, type = regularization,
-                                         debug, meth_bucketing, cna_bucketing)
+      if ((signif_eval_type == "randomization_perTarg") | (signif_eval_type == "randomization_perSamp")) {
+        expression_df_sub <- cbind(expression_df$ensg_id, expression_df[,colnames(expression_df) %fin% 
+                                                                          lm_input_table$sample_id, with = FALSE])
+        colnames(expression_df_sub)[1] <- "ensg_id"
+        lm_fit <- run_regularization_model(formula, lm_input_table, type = regularization,
+                                           debug, meth_bucketing, cna_bucketing, signif_eval_type,
+                                           expression_df = expression_df_sub, shuffled_input_dfs = shuffled_input_dfs,
+                                           ensg = targ_ensg)
+      } else  {
+        lm_fit <- run_regularization_model(formula, lm_input_table, type = regularization,
+                                           debug, meth_bucketing, cna_bucketing, signif_eval_type,
+                                           expression_df = NA, shuffled_input_dfs = shuffled_input_dfs,
+                                           ensg = targ_ensg)
+      }
       
       summary_table <- lm_fit
       
@@ -976,8 +1030,6 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
       #    return(NA)
       #  })
       #}    
-      
-      
       
     } else if (model_type == "mixed") {
       # Our random effects variable is our genotype PCs; if we are not including them,
@@ -1028,6 +1080,8 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
       if(!run_query_genes_jointly) {
         summary_table$R_i <- regprot
       } else {
+        #print(head(summary_table))
+        #print(dim(summary_table))
         # Remove rows in which the target and the driver are the same
         ri <- unlist(lapply(summary_table$term, function(x)
           unlist(strsplit(x, "_", fixed = TRUE))[1]))
@@ -1621,7 +1675,8 @@ outfn <- create_output_filename(test = test, tester_name = args$tester_name, run
                                 patient_df_name = args$patient_df, num_PEER = args$num_PEER, 
                                 num_pcs = args$num_pcs, randomize = randomize, covs_to_incl_label = args$select_args_label,
                                 patients_to_incl_label = args$patientsOfInterestLabel, removeCis = removeCis,
-                                model_type = args$model_type, removeMetastatic = removeMetastatic, regularization = args$regularization)
+                                model_type = args$model_type, removeMetastatic = removeMetastatic, 
+                                regularization = args$regularization, signif_eval_type = args$signif_eval_type)
 
 if(debug) {
   print(paste("Outfile Name:", outfn))
@@ -1733,6 +1788,7 @@ if(is.na(patient_cancer_mapping)) {
                                 collinearity_diagn = collinearity_diagn,
                                 outpath = outpath, outfn = outfn,
                                 regularization = args$regularization,
+                                signif_eval_type = args$signif_eval_type,
                                 covs_to_incl = covs_to_incl,
                                 model_type = args$model_type,
                                 removeCis = removeCis,
@@ -1810,6 +1866,7 @@ if(is.na(patient_cancer_mapping)) {
                                   collinearity_diagn = collinearity_diagn,
                                   outpath = outpath, outfn = outfn,
                                   regularization = args$regularization,
+                                  signif_eval_type = args$signif_eval_type,
                                   covs_to_incl = covs_to_incl,
                                   model_type = args$model_type,
                                   removeCis = removeCis,

@@ -7,10 +7,7 @@
 # model (from linear_model.R or linear_model.R) while it is running.
 
 library(stringr)
-library(caret)
-library(glmnet)
-library(gglasso)
-library(selectiveInference)
+library(data.table)
 
 ############################################################
 
@@ -371,7 +368,6 @@ get_tnm_fc <- function(df, sample) {
   return(logfc)
 }
 
-
 ############################################################
 #' Create the appropriate output file path (add the cancer type, the regulatory protein group 
 #' or tester name, tumor-normal matched or tumor only, and the analysis type (eQTL or meQTL)
@@ -448,11 +444,13 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
 #' metastatic samples from the analysis
 #' @param regularization either "None", "L1" or "Lasso", or "L2" or "Ridge" to indicate
 #' if regularization was performed
+#' @param signif_eval_type if regularization is not "None", provides additional info on how
+#' we generated significance metrics
 create_output_filename <- function(test, tester_name, run_name, targets_name, expression_df_name,
                                    cna_bucketing, mutation_regprot_df_name, meth_bucketing,
                                    meth_type, patient_df_name, num_PEER, num_pcs, randomize,
                                    covs_to_incl_label, patients_to_incl_label, model_type, removeCis, 
-                                   removeMetastatic, regularization) {
+                                   removeMetastatic, regularization, signif_eval_type) {
   outfn <- "res"
   
   # Add the name of the patient population of interest, if there is one
@@ -501,7 +499,15 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   
   # If we have regularized in some way, denote this
   if(!(regularization == "None")) {
-    if (regularization %in% c("L1", "Lasso")) {outfn <- paste(outfn, "L1", sep = "_")}
+    if (regularization %in% c("L1", "Lasso")) {
+      if(signif_eval_type == "randomization") {outfn <- paste(outfn, "L1rand", sep = "_")}
+      else if(signif_eval_type == "subsampling") {outfn <- paste(outfn, "L1subsamp", sep = "_")}
+      else if (signif_eval_type == "selectiveInference") {{outfn <- paste(outfn, "L1si", sep = "_")}}
+      else {
+        print("Error; unrecognized argument for method of evaluating LASSO significance.")
+        outfn <- paste(outfn, "L1", sep = "_")
+      }
+    }
     if (regularization %in% c("L2", "Ridge")) {outfn <- paste(outfn, "L2", sep = "_")}
   }
   
@@ -519,279 +525,7 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   return(outfn)
 }
 
-############################################################
-#' If we are doing a regularized version of our model, run the details here
-#' using functions from glmnet package
-#' @param formula the string version of the formula we would like to use for our
-#' regression model
-#' @param lm_input_table the input table with values corresponding to all 
-#' variables in the formula
-#' @param type a string indicating the type of regularization (ridge or lasso)
-#' @param debug a TRUE/ FALSE value indicating whether or not we are in debug mode
-#' @param meth_bucketing a TRUE/FALSE value indicating whether or not methylation 
-#' was bucketed; only used in the case of group lasso
-#' @param cna_bucketing a TRUE/FALSE value indicating whether or not CNA was
-#' bucketed; only used in the case of group lasso
-run_regularization_model <- function(formula, lm_input_table, type, debug, 
-                                     meth_bucketing, cna_bucketing) {
-  
-  lm_input_table <- as.data.frame(lm_input_table)
-  
-  # Get the data of interest using the formula
-  spl_formula <- unlist(strsplit(formula, " ~ ", fixed = TRUE))
-  y_var <- trimws(spl_formula[1], which = "both")
-  y_data <- as.matrix(lm_input_table[,colnames(lm_input_table) == y_var])
-  x_vars <- unlist(strsplit(trimws(spl_formula[2], which = "both"), " + ", fixed = TRUE))
-  x_data <- as.matrix(lm_input_table[,colnames(lm_input_table) %fin% x_vars])
-  
-  # Do standard scaling preprocessing, using preProcess function from the caret package
-  #pre_proc_val <- preProcess(x_data, method = c("center", "scale"))
-  #x_data <- predict(pre_proc_val, x_data)
-  #summary(x_data)
-  #print(head(lm_input_table))
-  #print(y_data)
-  #print(x_data)
-  
-  # Use a cross validation glmnet to get the best lambda value; alpha = 0 
-  # indicates that we are doing L2-regularization
-  lambdas <- 10^seq(2, -3, by = -.1)
-  best_model <- NA
-  optimal_lambda <- NA
-  
-  # Ridge regression
-  if((type == "ridge") | (type == "L2")) {
-    tryCatch({
-      ridge.cv <- cv.glmnet(x_data, y_data, alpha = 0, lambda = lambdas)
-      optimal_lambda <- ridge.cv$lambda.min
-      if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
-      # Run the model with the best lambda
-      best_model <- glmnet(x_data, y_data, alpha = 0, family = "gaussian", 
-                           lambda = optimal_lambda, standardize = FALSE)
-    }, error = function(cond) {best_model <- NA})
-   
-  # Lasso
-  } else if((type == "lasso") | (type == "L1")) {
-    tryCatch({
-      
-      # Use a group lasso using the gglasso package, to account
-      # for the dummy variables (bucketed variables)
-      v.group <- get_groups_for_variables(x_vars, meth_bucketing, cna_bucketing)
-      
-      # Get the optimal lambda using cross-validation
-      #lasso.cv <- cv.glmnet(x_data, y_data, alpha = 1, lambda = lambdas, 
-                            #standardize = TRUE, nfolds = 5)
-      # Default number of folds is 5
-      lasso.cv <- cv.gglasso(x_data, y_data, group = v.group, lambda = lambdas, 
-                             loss = "ls")
-      optimal_lambda <- lasso.cv$lambda.min
-      if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
-      
-      # Run the model with the best lambda
-      #best_model <- glmnet(x_data, y_data, alpha = 1, family = "gaussian",
-      #lambda = optimal_lambda, standardize = FALSE, intercept = FALSE)
-      best_model <- gglasso(x_data, y_data, lambda = optimal_lambda, 
-                            group = v.group, loss = "ls")
-      
-      # Get p-values for LASSO using the selectiveInference package in R
-      # The -1 when getting the Beta is to remove the intercept Beta
-      # Need to divide lambda by n because glmnet uses a different objective function 
-      # than selectiveInference
-      betas <- coef(best_model, x = x_data, y = y_data, s = (lambda / nrow(x_data)), exact = TRUE)[-1]
-      pvals_and_intervals <- fixedLassoInf(x_data, y_data, beta = betas, family = "gaussian",
-                                           lambda = optimal_lambda)
-      pvals <- pvals_and_intervals$pv
-      intervals <- pvals_and_intervals$ci
-      sds <- pvals_and_intervals$sd
-      
-      # Get the p-values for everything, assigning 1 to those variables that were not selected
-      pvals_full <- NA
-      intervals_full <- NA
-      sds_full <- NA
-      index <- 1
-      for(i in 1:length(betas)) {
-        if(b == 0) {
-          pvals_full[i] <- 1
-          intervals_full <- NA
-          sds_full <- NA
-        }
-        else {
-          pvals_full[i] <- pvals[index]
-          intervals_full[i] <- paste0(intervals[index, 1], intervals[index, 2], collapse = ":")
-          sds_full <- sds[i]
-          index <- index + 1
-        }
-      }
-      
-      # Construct an output DF using all the measures we are interested in
-      best_model <- as.data.frame(best_model$beta)
-      colnames(best_model) <- c("estimate")
-      best_model$term <- rownames(best_model)
-      best_model$p.value <- pvals_full
-      best_model$sds <- sds_full
-      best_model$conf.int <- intervals_full
-      
-      
-    }, error = function(cond) {best_model <- NA})
 
-    
-  } else {
-    print(paste("Only implemented for ridge or lasso;", 
-                paste(type, "is not implemented. Proceeding with ridge.")))
-    tryCatch({
-      ridge.cv <- cv.glmnet(x_data, y_data, alpha = 0, lambda = lambdas)
-      optimal_lambda <- ridge.cv$lambda.min
-      if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
-    }, error = function(cond) {best_model <- NA})
-    
-    # Run the model with the best lambda
-    best_model <- glmnet(x_data, y_data, alpha = 0, lambda = optimal_lambda)
-  }
-  
-  #if(debug) {
-    #print("Summary of Best Regularized Model")
-    #print(summary(best_model))
-  #}
-  #best_model <- tidy(best_model)
-  
-  # Option to return an input data frame that will then be 
-  # put back into a multiple linear regression model with LASSO-selected x variables
-  #input_df <- run_regularization_output_in_lm(best_model, x_data, y_data)
-  #return(input_df)
-  
-  
-  return(best_model)
-}
-
-# NOTE: getting an object not found error for formula_new; adjusted according to this post: https://stackoverflow.com/questions/8218196/object-not-found-error-when-passing-model-formula-to-another-function
-
-#' Evaluation metrics function from plural sight guide (R-squared and RMSE)
-#' https://www.pluralsight.com/guides/linear-lasso-and-ridge-regression-with-r
-#' @param model a regression model
-#' @param df the input DF for the regression
-#' @param predications the results from stat's "predict" function for the model & input DF
-#' @param target the target or y variable
-eval_metrics <- function(model, df, predictions, target){
-  resids = df[,target] - predictions
-  resids2 = resids**2
-  N = length(predictions)
-  r2 = as.character(round(summary(model)$r.squared, 2))
-  adj_r2 = as.character(round(summary(model)$adj.r.squared, 2))
-  print(paste("R-squared:", adj_r2)) #Adjusted R-squared
-  print(paste("RMSE:", as.character(round(sqrt(sum(resids2)/N), 2)))) #RMSE
-}
-
-
-#' Helper function to get the categorical variables that we have bucketed (e.g. one-hot
-#' encoded) for group lasso, and assign them to groups. Returns a vector of group
-#' assignments for all variables in x_data.
-#' @param x_vars a vector of the names of the x variables (covariates)
-#' @param meth_bucketing a TRUE/FALSE value indicating whether or not methylation 
-#' was bucketed
-#' @param cna_bucketing a TRUE/FALSE value indicating whether or not CNA was
-#' bucketed
-get_groups_for_variables <- function(x_vars, meth_bucketing, cna_bucketing) {
-  
-  # Obtain the bucketed, categorical variables
-  bucketed_vars <- c("Tot_Mut_b","Tumor_purity_b", "Tot_IC_Frac_b", "Cancer_type_b")
-  #if(meth_bucketing) {
-  #  bucketed_vars <- c(bucketed_vars, "MethStat_k")
-  #  if(analysis_type == "eQTL") {bucketed_vars <- c(bucketed_vars, "MethStat_i")}
-  #}
-  #if(!((cna_bucketing == "rawCNA") | (grepl("just", cna_bucketing)))) {
-  #  bucketed_vars <- c(bucketed_vars, "CNAStat_k", "CNAStat_i")
-  #}
-  
-  # If we'd like for all driver covariates to be selected together in group lasso (e.g. for driver X,
-  # X_MutStat_i, X_CNAStat_i, and X_MethStat_i would be a group), implement that here
-  unique_driver_ids <- unique(unlist(lapply(x_vars, function(x) {
-    if(grepl("MutStat_i|CNAStat_i|MethStat_i", x)) {
-      id <- unlist(strsplit(x, "_", fixed = TRUE))[1]
-      return(id)
-    } else {return(NA)}
-  })))
-  unique_driver_ids <- unique_driver_ids[!is.na(unique_driver_ids)]
-  bucketed_vars <- c(bucketed_vars, unique_driver_ids)
-  
-  # Assign these variables to numerical groups (non-bucketed variables are given
-  # their own group number)
-  grp_index <- 1
-  curr_grp <- ""
-  group_assignments <- c()
-  
-  for(i in 1:length(x_vars)) {
-    x <- unlist(strsplit(x_vars[i], "_", fixed = TRUE))[1]
-    # This is a bucketed variable
-    if(TRUE %in% unlist(lapply(bucketed_vars, function(var) ifelse(grepl(x, var), TRUE, FALSE)))) {
-      # If it's a bucketed variable, but not in the current group, advance the
-      # group index
-      if ((curr_grp != x) & (curr_grp != "")) {
-        grp_index <- grp_index + 1
-      } 
-      # Change the group assignment and assign the group index
-      curr_grp <- x
-      group_assignments <- c(group_assignments, grp_index)
-    } else {
-      # Advance and assign the group index
-      grp_index <- grp_index + 1
-      group_assignments <- c(group_assignments, grp_index)
-      curr_grp <- x
-    }
-  }
-  #print(x_vars)
-  print(group_assignments)
-  
-  return(group_assignments)
-}
-
-
-#' If we want to re-run the output from LASSO using a simple, multiple linear 
-#' regression model, create a new input DF that has only the covariates selected
-#' by LASSO
-#' Concept adapted from: https://stats.stackexchange.com/questions/410173/lasso-regression-p-values-and-coefficients
-#' @param best_model the model output from glmnet or gglasso
-#' @param x_data the columns of the input data frame for the full set of 
-#' x-variables
-#' @param y_data the column of the input data frame corresponding to the
-#' outcome variable
-run_regularization_output_in_lm <- function(best_model, x_data, y_data) {
-  # Adjust the input DF to pipe the selected covariates back into a LM to get p-values
-  x_data_sub <- NA
-  if(!is.na(best_model)) {
-    # Get the non-zero covariates from the the model (selected by group lasso)
-    covs <- as.matrix(coef(best_model))
-    keep_x <- rownames(covs)[covs != 0]
-    keep_x <- keep_x[!keep_x == "(Intercept)"]
-    # Add these to the standard model coefficients, using unique to ensure no duplicates
-    std_coeff <- unlist(lapply(rownames(covs), function(x) ifelse(grepl("MutStat_i|CNAStat_i|MethStat_i", x), NA, x)))
-    std_coeff <- std_coeff[!is.na(std_coeff) & !std_coeff == "(Intercept)"]
-    if(debug) {
-      print("Std. Coefficients")
-      print(head(std_coeff))
-    }
-    keep_x <- unique(c(keep_x, std_coeff))
-    # Subset the input data frame to reflect the standard covariates and the selected drivers covs
-    x_data_sub <- as.data.frame(x_data[, colnames(x_data) %fin% keep_x])
-    if(ncol(x_data_sub) == 1) {colnames(x_data_sub) <- as.character(keep_x)}
-    
-    if(debug) {
-      print("X Data, subsetted")
-      print(head(x_data_sub))
-    }
-  }
-  
-  input_df <- NA
-  
-  if(!(is.null(colnames(x_data_sub)) | is.na(best_model))) {
-    input_df <- as.data.frame(cbind(y_data, x_data_sub))
-    names(input_df)[1] <- "ExpStat_k"
-    if(debug) {
-      print("New input data frame, post-lasso regression")
-      print(head(input_df))
-    }
-  } 
-  return(input_df)
-}
-  
 ############################################################
 #' A function to combine the collinearity diagnostic statistics,
 #' specifically the tolerance, VIF, eigenvalue, and condition index

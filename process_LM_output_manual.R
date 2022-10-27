@@ -683,26 +683,36 @@ pie(terms_counts_df$freq, labels = terms_counts_df$term, main = "Categories of S
 #' @param master_df output master DF with target gene names and q-values
 #' @param tophit_thres a percentage or q-value threshold (e.g. 0.05) within which to 
 #' consider a hit "significant" or important enough for inclusion in pie chart
-#' @param perc_or_qval whether the threshold is a percentage or a q-value
+#' @param perc_or_qval_or_ss whether the threshold is a percentage or a q-value or a stability score
 #' @param all_genes_id_conv a conversion table to convert R_i uniprot IDs to 
 #' intelligible gene names
-create_driver_pie <- function(master_df, tophit_thres, perc_or_qval, all_genes_id_conv) {
-  if(perc_or_qval == "perc") {
+create_driver_pie <- function(master_df, tophit_thres, perc_or_qval_or_ss, all_genes_id_conv) {
+  if(perc_or_qval_or_ss == "perc") {
     # Get the top n% of hits
     master_df_topn <- master_df[1:(tophit_thres*nrow(master_df)),]
-    print(paste("Q-Value at", paste(tophit_thres, paste("threshold:", master_df[tophit_thres*nrow(master_df), 'q.value']))))
-  } else if (perc_or_qval == "qval") {
+    if('q.value' %in% colnames(master_df)) {
+      print(paste("Q-Value at", paste(tophit_thres, paste("threshold:", master_df[tophit_thres*nrow(master_df), 'q.value']))))
+    }
+    if('stability.score' %in% colnames(master_df)) {
+      print(paste("Stability score at", paste(tophit_thres, paste("threshold:", master_df[tophit_thres*nrow(master_df), 'stability.score']))))
+    }
+  } else if (perc_or_qval_or_ss == "qval") {
     # Get the n hits below the qvalue threshold
     master_df_topn <- master_df[master_df$q.value < tophit_thres,]
     print(paste("Number of hits below the q-value threshold:", nrow(master_df_topn)))
+  } else if (perc_or_qval_or_ss == "ss") {
+    # Get the n hits greater than or equal to the stability score threshold
+    master_df_topn <- master_df[master_df$stability.score >= tophit_thres,]
+    print(paste("Number of hits above or equal to threshold:", nrow(master_df_topn)))
   } else {
     print("The only possible thresholding options are perc or qval. Please try again.")
     return(NA)
   }
-  
+
   # Get the unique drivers, and create a frequency table of the number of 
   # times that each driver appears
   unique_drivers <- unique(master_df_topn$term)
+  unique_drivers <- unique_drivers[!is.na(unique_drivers)]
   
   freq.table <- as.data.frame(lapply(unique_drivers, function(x)
     nrow(master_df_topn[master_df_topn$term == x,])))
