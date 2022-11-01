@@ -25,7 +25,7 @@ library(dqrng)
 source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Sara_LinearModel/"
 source(paste(source_path, "general_important_functions.R", sep = ""))
 source(paste(source_path, "linear_model_helper_functions.R", sep = ""))
-source(paste(source_path, "run_regularized_models2.R", sep = ""))
+source(paste(source_path, "run_regularized_models.R", sep = ""))
 
 
 ############################################################
@@ -778,11 +778,11 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
       swissprot_ids <- protein_ids_df$swissprot_ids
       driver_indices <- lapply(swissprot_ids, function(s) which(grepl(s, colnames(starter_df))))
       remaining_indices <- setdiff(1:ncol(starter_df), unlist(driver_indices))
-      non_driver_starter_df <- starter_df[, remaining_indices]
+      non_driver_starter_df <- starter_df[, remaining_indices, with = FALSE]
       shuffled_input_dfs <- lapply(1:num_randomizations, function(i) {
         indiv_driver_shuffled_df <- lapply(1:length(driver_indices), function(j) {
           driver_i <- driver_indices[[j]]
-          shuffled_cols <- starter_df[dqsample(1:nrow(starter_df)), driver_i]
+          shuffled_cols <- starter_df[dqsample(1:nrow(starter_df)), driver_i, with = FALSE]
           return(shuffled_cols)
         })
         shuffled_df <- do.call("cbind", c(indiv_driver_shuffled_df, non_driver_starter_df))
@@ -994,22 +994,18 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
       
     } else if ((model_type == "linear") & (regularization == "L2" | regularization == "ridge" | 
                regularization == "L1" | regularization == "lasso")) {
-
-      if ((signif_eval_type == "randomization_perTarg") | (signif_eval_type == "randomization_perSamp")) {
-        expression_df_sub <- cbind(expression_df$ensg_id, expression_df[,colnames(expression_df) %fin% 
-                                                                          lm_input_table$sample_id, with = FALSE])
-        colnames(expression_df_sub)[1] <- "ensg_id"
-        lm_fit <- run_regularization_model(formula, lm_input_table, type = regularization,
-                                           debug, meth_bucketing, cna_bucketing, signif_eval_type,
-                                           expression_df = expression_df_sub, shuffled_input_dfs = shuffled_input_dfs,
-                                           ensg = targ_ensg)
-      } else  {
-        lm_fit <- run_regularization_model(formula, lm_input_table, type = regularization,
-                                           debug, meth_bucketing, cna_bucketing, signif_eval_type,
-                                           expression_df = NA, shuffled_input_dfs = shuffled_input_dfs,
-                                           ensg = targ_ensg)
-      }
       
+      expression_df_s <- NA
+      if ((signif_eval_type == "randomization_perTarg") | (signif_eval_type == "randomization_perSamp")) {
+        expression_df_s <- cbind(expression_df$ensg_id, expression_df[,colnames(expression_df) %fin% 
+                                                                          lm_input_table$sample_id, with = FALSE])
+        colnames(expression_df_s)[1] <- "ensg_id"
+      } 
+      lm_fit <- run_regularization_model(formula = formula, lm_input_table = lm_input_table, 
+                                         type = regularization, debug = debug, meth_bucketing = meth_bucketing, 
+                                         cna_bucketing = cna_bucketing, signif_eval_type = signif_eval_type,
+                                         expression_df = expression_df_s, shuffled_input_dfs = shuffled_input_dfs,
+                                         ensg = targ_ensg)
       summary_table <- lm_fit
       
       ## OLD: for cases in which we want to use LASSO as variable selection and input 

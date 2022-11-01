@@ -103,9 +103,9 @@ run_regularization_model <- function(formula, lm_input_table, type, debug,
         best_model <- eval_signif_selectiveInference(best_model, x_data, y_data,
                                                      optimal_lambda)
       } else if(grepl("randomization", signif_eval_type)) {
-        best_model <- eval_signif_randomization(best_model, x_data, y_data, v.group, 
-                                                lambdas, debug, expression_df, 
-                                                shuffled_input_dfs, ensg)
+        best_model <- eval_signif_randomization(best_model, lm_input_table$sample_id, x_data, 
+                                                x_vars, y_data, v.group, lambdas, debug, 
+                                                expression_df, shuffled_input_dfs, ensg)
         
       } else if(signif_eval_type == "subsampling") {
         best_model <- eval_signif_subsampling(best_model, x_data, y_data, 
@@ -347,7 +347,9 @@ eval_signif_selectiveInference <- function(best_model, x_data, y_data, optimal_l
 #' that this Beta is not significantly different from a null Beta, e.g. that which
 #' is generated when there should absolutely be no correlation between x and y.
 #' @param best_model the LASSO model output from gglasso or glmnet
+#' @param sample_ids the sample IDs, in the order of the LM input table
 #' @param x_data the x-data matrix
+#' @param x_vars x-variables from the formula
 #' @param y_data the y-data matrix
 #' @param v.group a vector of groups within the group LASSO framework 
 #' @param lambdas a vector of lambda possibilities for cross-validation
@@ -362,15 +364,15 @@ eval_signif_selectiveInference <- function(best_model, x_data, y_data, optimal_l
 #' per sample or per target gene
 #' @param num_randomizations the number of times we will randomize our y-data 
 #' in order to generate our null distributions for each x
-eval_signif_randomization <- function(best_model, x_data, y_data, v.group, lambdas, 
+eval_signif_randomization <- function(best_model, sample_ids, x_data, x_vars, y_data, v.group, lambdas, 
                                       debug, expression_df, shuffled_input_dfs, ensg, 
                                       per_samp = TRUE, num_randomizations = 100) {
   
   # Do the randomization per-target a given number of times and get a 
   # num_randomizations x ncol(x_data) table of random Betas 
   if(!is.na(shuffled_input_dfs)) {
-    random_beta_df <- get_predictor_randomized_beta_df(shuffled_input_dfs, x_data, y_data,
-                                                       v.group, lambdas, num_randomizations)
+    random_beta_df <- get_predictor_randomized_beta_df(shuffled_input_dfs, sample_ids, 
+                                                       x_data, x_vars, y_data, v.group, lambdas)
   } else {
     if(!per_samp) {
       random_beta_df <- get_per_tg_randomized_beta_df(x_data, y_data, v.group, 
@@ -530,20 +532,28 @@ get_per_samp_randomized_beta_df <- function(x_data, v.group, lambdas,
 
 #' Helper function to get per-driver/ predictor randomized Beta data frame
 #' @param shuffled_input_dfs the shuffled x-data matrices
+#' @param sample_ids the sample IDs, to subset the shuffled dfs
 #' @param x_data the x-data matrix (has the real target-level features)
+#' @param x_vars the x-variables from the formula
 #' @param y_data the y-data matrix
 #' @param v.group a vector of groups within the group LASSO framework 
 #' @param lambdas a vector of lambda possibilities for cross-validation
-get_predictor_randomized_beta_df <- function(shuffled_input_dfs, x_data, y_data, 
-                                             v.group, lambdas) {
+get_predictor_randomized_beta_df <- function(shuffled_input_dfs, sample_ids, 
+                                             x_data, x_vars, y_data, v.group, lambdas) {
   # Keep only the non-driver columns of the original input DF
   cols_to_keep <- setdiff(colnames(x_data), colnames(shuffled_input_dfs[[1]]))
-  x_data_sub <- x_data[,cols_to_keep, with = FALSE]
-  
+  x_data_sub <- x_data[,which(colnames(x_data) %fin% cols_to_keep)]
+
   output_rows <- lapply(shuffled_input_dfs, function(input_df) {
     #print(paste(i, paste("/", num_randomizations)))
-    
+    input_df <- input_df[input_df$sample_id %fin% sample_ids, colnames(input_df) != "sample_id", with = FALSE]
+    input_df <- input_df[,colnames(input_df) %fin% x_vars, with = FALSE]
     x_data_full <- cbind(as.matrix(input_df), x_data_sub)
+    #print(head(x_data_full))
+    rows_na <- which(rowSums(is.na(x_data_full)) > 0)
+    rows_keep <- setdiff(1:nrow(x_data_full), rows_na)
+    x_data_full <- as.matrix(x_data_full[rows_keep,])
+    y_data <- as.matrix(y_data[rows_keep,])
     lasso.cv <- cv.gglasso(x_data_full, y_data, group = v.group, lambda = lambdas, 
                            loss = "ls")
     optimal_lambda <- lasso.cv$lambda.min

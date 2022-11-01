@@ -500,7 +500,11 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   # If we have regularized in some way, denote this
   if(!(regularization == "None")) {
     if (regularization %in% c("L1", "Lasso")) {
-      if(signif_eval_type == "randomization") {outfn <- paste(outfn, "L1rand", sep = "_")}
+      if(grepl("randomization", signif_eval_type)) {
+        if(signif_eval_type == "randomization_predictors") {
+          outfn <- paste(outfn, "L1rand_pred", sep = "_")
+        } else {outfn <- paste(outfn, "L1rand", sep = "_")}
+      }
       else if(signif_eval_type == "subsampling") {outfn <- paste(outfn, "L1subsamp", sep = "_")}
       else if (signif_eval_type == "selectiveInference") {{outfn <- paste(outfn, "L1si", sep = "_")}}
       else {
