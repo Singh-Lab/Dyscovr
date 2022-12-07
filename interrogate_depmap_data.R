@@ -279,7 +279,13 @@ signif_hits_rnai_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Pro
 #signif_hits_expression_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Expression_21Q4_Public_subsetted.csv",
                                         #header = TRUE, check.names = FALSE)
 # For all genes
+signif_hits_crispr_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/CRISPR_(DepMap_22Q2_Public+Score,_Chronos)_allGenes_BRCA.csv",
+                                    header = TRUE, check.names = FALSE)
+signif_hits_rnai_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/RNAi_(Achilles+DRIVE+Marcotte,_DEMETER2)_allGenes_BRCA.csv",
+                                  header = TRUE, check.names = FALSE)
+
 signif_hits_expression_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Expression_22Q1_Public.csv", header = TRUE, check.names = FALSE)
+
 
 # Get the mutations for TP53 & PIK3CA among these cell lines
 tp53_pik3ca_mutations <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Mutation_21Q4_Public_P53_PIK3CA.csv",
@@ -334,6 +340,7 @@ adjust_depmap_df <- function(signif_hits_df, mutation_df, cna_df, genes_of_inter
   
   # Adjust column names
   colnames(signif_hits_df_melt)[which(colnames(signif_hits_df_melt) == "variable")] <- "gene"
+  colnames(signif_hits_df_melt)[1] <- "depmap_id"
   
   # Make the "value" column numeric, the "gene" column a character
   signif_hits_df_melt$value <- as.numeric(unlist(signif_hits_df_melt$value))
@@ -658,8 +665,10 @@ wilcox_of_targs <- function(expression_df, goi) {
     print(paste("Wilcoxon p-value:", pval))
     pvals <- c(pvals, pval)
     
-    if(mean(exp_mut) > mean(exp_noMut)) {print("Upregulation")}
-    else {print("Downregulation")}
+    if((length(exp_mut) != 0) & (length(exp_noMut) != 0)) {
+      if(mean(exp_mut, na.rm = TRUE) > mean(exp_noMut, na.rm = TRUE)) {print("Upregulation")}
+      else {print("Downregulation")}
+    }
   }
   return(list("Targets" = targs, "P.value" = pvals))
 }
@@ -711,6 +720,7 @@ depmap_lm <- function(depmap_table, mut_or_cna, gene_name) {
         lm_res_tidy$Gene <- gene
         master_lm_res <- rbind(master_lm_res, lm_res_tidy)
     }
+    master_lm_res <- master_lm_res[master_lm_res$term != "(Intercept)",]
     print(master_lm_res)
     
     betas <- master_lm_res$estimate
@@ -721,18 +731,35 @@ depmap_lm <- function(depmap_table, mut_or_cna, gene_name) {
         return(-log(x, base = 10)))))
     # Add differential dependency
     plt_input$diffDep <- "NONE"
-    plt_input$diffDep[plt_input$Betas > 0 & plt_input$p.val < 0.05] <- "MORE DEP."
-    plt_input$diffDep[plt_input$Betas < 0 & plt_input$p.val < 0.05] <- "LESS DEP."
+    #plt_input$diffDep[plt_input$Betas > 0 & plt_input$p.val < 0.1] <- "LESS DEP."
+    #plt_input$diffDep[plt_input$Betas < 0 & plt_input$p.val < 0.1] <- "MORE DEP."
+    plt_input$diffDep[plt_input$Betas > 0] <- "LESS DEP."
+    plt_input$diffDep[plt_input$Betas < 0] <- "MORE DEP."
 
     plt_input$diffDepLabel <- NA
     plt_input$diffDepLabel[plt_input$diffDep != "NONE"] <- plt_input$Gene[plt_input$diffDep != "NONE"]
     
     print(plt_input)
-    
-    plt <- ggplot(plt_input, aes(x = Betas, y = Neg.Log_p.val, col = diffDep, label = diffDepLabel)) + geom_point() +
-        geom_hline(yintercept = -log10(0.05), col="red") + theme_minimal() +
-        geom_text_repel() + scale_color_manual(values=c("blue", "black", "red")) +
+    print(length(unique(plt_input$diffDep)))
+    if(length(unique(plt_input$diffDep == 3))) {
+      plt <- ggplot(plt_input, aes(x = Betas, y = Neg.Log_p.val, col = diffDep, label = diffDepLabel)) + 
+        geom_point() + theme_minimal() +
+        #geom_hline(yintercept = -log10(0.1), col="red") + 
+        geom_text_repel() + scale_color_manual(values=c("blue", "red", "black")) +
         ggtitle(paste(gene_name, mut_or_cna))
+    } else if (length(unique(plt_input$diffDep == 2))) {
+      plt <- ggplot(plt_input, aes(x = Betas, y = Neg.Log_p.val, col = diffDep, label = diffDepLabel)) + 
+        geom_point() + theme_minimal() +
+        #geom_hline(yintercept = -log10(0.1), col="red")  +
+        geom_text_repel() + scale_color_manual(values=c("blue", "black")) +
+        ggtitle(paste(gene_name, mut_or_cna))
+    } else {
+      plt <- ggplot(plt_input, aes(x = Betas, y = Neg.Log_p.val, col = "black", label = diffDepLabel)) + 
+        geom_point() + theme_minimal() +
+        #geom_hline(yintercept = -log10(0.1), col="red") + 
+        geom_text_repel() + ggtitle(paste(gene_name, mut_or_cna))
+    }
+
     print(plt)
 }
 

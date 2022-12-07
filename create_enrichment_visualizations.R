@@ -34,7 +34,7 @@ all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Proje
 ############################################################
 ############################################################
 #' Use a one-sided Fisher's exact test/ Hypergeometric test or a Kolmogorov-Smirnov
-#' test to test for enrichment statistically
+#' test to test for statistical enrichment
 #' @param master_df a master DF produced from run_linear_model() that has q-values
 #' @param known_targs a vector of known targets for a gene of interest (master
 #' DF should already be subsetted to just this gene); ex. ChIP-eat targets, HumanBase
@@ -83,7 +83,7 @@ compute_statistical_enrichment <- function(master_df, known_targs, type) {
     ranks_of_targs <- ranks_of_targs[!(is.infinite(ranks_of_targs) | (is.na(ranks_of_targs)))]
     #print(TRUE %in% duplicated(ranks_of_targs))
     
-    # Perform the K-S test, two-sided with the uniform distribution
+    # Perform the K-S test, with the uniform distribution
     ks_res <- ks.test(ranks_of_targs, uniform, alternative = "greater")
     
     print(ks_res)
@@ -610,7 +610,8 @@ stringdb_enrichment_pik3ca <- get_stringdb_enrichment(allgenes_pik3ca_panCts_inc
 #' distribution of scores for the given GOI. See where each significant 
 #' target falls on this distribution and use that to perform a hypothesis 
 #' test and generate a p-value, which is returned.
-#' @param string_nw a STRING network downloaded from the STRING website
+#' @param string_nw a STRING network downloaded from the STRING website, or processed
+#' using the STRINGdb package
 #' @param goi the Uniprot/Swissprot ID for a given driver of interest
 #' @param goi_name the Hugo symbol/ gene name for the given driver of interest
 #' @param master_df an output data frame with results for the given GOI
@@ -631,50 +632,124 @@ generate_empirical_p_string <- function(string_nw, goi, goi_name, master_df,
   master_df_goi_sub <- master_df_goi[master_df_goi$q.value < qval_thres,]
   
   # Subset the STRING network to only the given GOI
-  string_nw_goi <- string_nw[(string_nw$node1 == goi_name),]  # will already be subsetted by our max # of interactions
-  
+  #string_nw_goi <- string_nw[((string_nw$node1 == goi_name) | (string_nw$node2 == goi_name)),]  # will already be subsetted by our max # of interactions
+
   # Get the number of significant hits for this GOI
   num_sig_hits <- nrow(master_df_goi_sub)
-  
+  print(paste("Num. Significant Hits:", num_sig_hits))
+
   # We will draw this number of hits a given number of times to generate a distribution
-  distr_vals <- unlist(lapply(1:num_trials, function(i) {
-    v <- mean(sample(string_nw_goi$combined_score, size = num_sig_hits, replace = TRUE))
-    return(v)
+  if(num_sig_hits > 0) {
+    distr_vals <- unlist(lapply(1:num_trials, function(i) {
+      v <- mean(sample(string_nw$combined_score, size = num_sig_hits, replace = TRUE))
+      return(v)
+    }))
+    hist(distr_vals, main = "", xlab = paste("\nRandomized STRING Conf. Scores for", 
+                                              paste0(goi_name, paste0("\nSamp. Size = # Hits at q<", 
+                                                                 paste0(qval_thres, paste0(", # Trials = ", num_trials))))),
+         ylab = "Frequency Across Trials", col = "lightblue") #xlim = c(min(distr_vals), max(distr_vals)))
+    
+    # Now, get the confidences for each of our actual hits
+    real_conf_scores <- unlist(lapply(master_df_goi_sub$T_k.name, function(x) {
+      print(x)
+      #as.numeric(string_nw_goi[(string_nw_goi$node2 == x) | (string_nw_goi$node1 == x), 
+      #'combined_score'])}))
+      as.numeric(string_nw[(string_nw$from_name == x) | (string_nw$to_name == x), 
+                           'combined_score'])}))
+    
+    real_conf_scores_mean <- mean(real_conf_scores)
+    print(real_conf_scores_mean)
+    
+    # Plot where we fall on this distribution
+    abline(v = real_conf_scores_mean, col = "red")
+    
+    # Perform a simple one-sample t-test (assume that we have a random sample
+    # of values from a theoretical pool of genes that are called significant by 
+    # our model for having "real" relationships to our GOI). We compare this against 
+    # the distribution of confidences for EVERY gene in relationship to our GOI. 
+    # Is the mean confidences for our "real" targets greater than the general mean
+    # confidence score for our GOI?
+    ttest_res <- t.test(real_conf_scores, mu = mean(distr_vals), alternative = "greater")
+    print(ttest_res)
+    
+    # Add p-value to histogram
+    x_val <- real_conf_scores_mean
+    if(real_conf_scores_mean > max(distr_vals)) {x_val <- max(distr_vals) - 50}
+    text(x = x_val, y  = round(num_trials/4.5), cex=0.8,
+         labels = paste0("One-sided t-test p = ", round(ttest_res$p.value, digits = 4)))
+    text(x = x_val, y  = round(num_trials/4.5)-10, cex=0.8,
+         labels = paste0("Mean of Real Conf. Vals ", round(real_conf_scores_mean, digits = 4)))
+    
+    return(ttest_res$p.value)
+  }
+  else {
+    print("No significant hits for the given GOI at the given significance threshold.")
+    return(NA)
+  }
+}
+
+
+#' Process STRINGdb network to get interactions for the given GOI with the combined score
+#' @param goi the gene name of the GOI
+#' @param all_genes_id_conv a gene ID conversion file from BioMart
+process_stringdb_network_for_goi <- function(goi, all_genes_id_conv) {
+  # Download the STRINGdb network
+  options(download.file.method="libcurl")
+  string_db <- STRINGdb$new(version = "11.5", species = 9606, score_threshold = 0, 
+                            input_directory = "")
+  gene = string_db$mp(tolower(goi))
+  
+  # Get the neighbors for a given gene
+  neighbors <- string_db$get_neighbors(tolower(goi))
+  interactions <- string_db$get_interactions(c(gene, neighbors))
+  
+  # Subset interactions that only include gene of interest
+  interactions$from <- unlist(lapply(interactions$from, function(x)
+    unlist(strsplit(x, ".", fixed = TRUE))[2]))
+  interactions$to <- unlist(lapply(interactions$to, function(x)
+    unlist(strsplit(x, ".", fixed = TRUE))[2]))
+  ensp <- unique(all_genes_id_conv[all_genes_id_conv$external_gene_name == goi, 
+                                   'ensembl_peptide_id'])
+  interactions <- interactions[(interactions$from %in% ensp) | 
+                                 (interactions$to %in% ensp),]
+  # Add additional gene symbols
+  interactions$from_name <- unlist(lapply(interactions$from, function(x) {
+    new_id <- unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_peptide_id == x, 
+                                              'external_gene_name']))
+    if(length(new_id) > 1) {new_id <- new_id[1]}
+    if (length(new_id) == 0) {new_id <- NA}
+    return(new_id)
+  }))
+  interactions$to_name <- unlist(lapply(interactions$to, function(x) {
+    new_id <- unique(unlist(all_genes_id_conv[all_genes_id_conv$ensembl_peptide_id == x, 
+                                              'external_gene_name']))
+    if(length(new_id) > 1) {new_id <- new_id[1]}
+    if (length(new_id) == 0) {new_id <- NA}
+    return(new_id)
   }))
   
-  print(hist(distr_vals))
-  
-  # Now, get the confidences for each of our actual hits
-  real_conf_scores <- unlist(lapply(master_df_goi_sub$T_k.name, function(x) 
-    string_nw_goi[string_nw_goi$node2 == x, 'combined_score']))
-  real_conf_scores_mean <- mean(real_conf_scores)
-  
-  # Plot where we fall on this distribution
-  abline(v = real_conf_scores_mean)
-  
-  # Perform a simple one-sample t-test (assume that we have a random sample
-  # of values from a theoretical pool of genes that are called significant by 
-  # our model for having "real" relationships to our GOI). We compare this against 
-  # the distribution of confidences for EVERY gene in relationship to our GOI. 
-  # Is the mean confidences for our "real" targets greater than the general mean
-  # confidence score for our GOI?
-  ttest_res <- t.test(real_conf_scores, mu = mean(distr_vals), alternative = "greater")
-  print(ttest_res)
-  
-  return(ttest_res$p.value)
+  return(na.omit(distinct(interactions)))
 }
 
 # Import the String network file
-string_nw <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Network_Data/string_interactions.csv",
-                      header = TRUE, check.names = FALSE)
+string_nw <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/STRING/string_interactions.tsv",
+                      header = TRUE, sep = "\t", check.names = FALSE)
 colnames(string_nw)[1] <- "node1"
 
 # Limit to given GOI
-goi <- "TP53"
-# goi <- "PIK3CA"
+goi <- "P04637"
+goi_name <- "TP53"
 
-# Visualize the scores for this GOI
-string_nw_goi <- string_nw_goi[order(string_nw_goi$combined_score),]
+# goi_name <- "PIK3CA"
+
+# Alternatively, get and process the STRING db network
+interactions <- process_stringdb_network_for_goi(goi, all_genes_id_conv)
+
+# Call function
+#generate_empirical_p_string(string_nw, goi, goi_name, allgenes_topDrivers_0.025_ucsf_noLasso,
+                           # 0.2, 1000)
+generate_empirical_p_string(interactions, goi, goi_name, allgenes_topDrivers_0.025_ucsf_noLasso,
+                            0.2, 1000)
 
 
 ############################################################
@@ -686,7 +761,7 @@ string_nw_goi <- string_nw_goi[order(string_nw_goi$combined_score),]
 ### CANCER GENE SETS ###
 # Import a table containing a compiled list of known cancer genes
 known_cancer_genes_table <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/GRCh38_driver_gene_list.tsv", sep = "\t",
-                                       header = TRUE, check.names = FALSE, comment.char = "#")
+                                       header = TRUE, check.names = FALSE, comment.char = "#", skip = 10)
 known_cancer_genes <- known_cancer_genes_table$primary_gene_names
 vogelstein_genes <- known_cancer_genes_table[grepl("V", known_cancer_genes_table$cancer_driver_status), 'primary_gene_names']
 curated_cancer_genes <- known_cancer_genes_table[grepl("V|K|L|B", known_cancer_genes_table$cancer_driver_status), 'primary_gene_names']

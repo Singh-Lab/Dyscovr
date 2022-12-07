@@ -59,14 +59,16 @@ get_pfam_domains <- function(maf, n) {
 #' tumor samples (not normal).
 #' @param maf a MAF file that has been read in by maftools
 get_mut_count_matrix <- function(maf) {
-  #mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = NULL)
+  #mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = NULL, removeNonMutated = FALSE)
+  #mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = "Missense_Mutation")
   #mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = c("Missense_Mutation", 
-                                                              #"Nonsense_Mutation"))
+                                                              #"Nonsense_Mutation"), , removeNonMutated = FALSE)
   mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = c("Missense_Mutation", 
                                                               "Nonsense_Mutation",
                                                               "Nonstop_Mutation",
-                                                              "Splice_Site"))
-  #mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = "Missense_Mutation")
+                                                              "Splice_Site"), removeNonMutated = FALSE)
+  #mut_count_matrix <- mutCountMatrix(maf = maf, countOnly = "Silent", 
+  #includeSyn = TRUE, removeNonMutated = FALSE)
   #print(mut_count_matrix)
   return(mut_count_matrix)
 }
@@ -74,6 +76,11 @@ get_mut_count_matrix <- function(maf) {
 # As an aside--add rows of 0's to this matrix for genes that are not included
 allgene_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/allgene_targets.csv", 
                             header = TRUE, row.names = 1, check.names = FALSE)
+
+intersecting_patients_brca <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Linear Model/Tumor_Only/intersecting_ids.txt", 
+                                         header = TRUE, row.names = 1, check.names = FALSE)[,1]
+intersecting_patients_pc <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Linear Model/Tumor_Only/intersecting_ids.txt", 
+                                         header = FALSE, check.names = FALSE)[,1]
 
 #' Function to add genes with no mutations across any sample to the mutation count matrix
 #' @param mut_count_matrix a maftools-produced mutation count matrix
@@ -109,7 +116,7 @@ add_missing_patients_to_mut_count_mat <- function(mut_count_matrix, intersecting
     unlist(strsplit(x, "-", fixed = TRUE))[1])))
   new_pat_df <- data.frame(matrix(nrow = nrow(mut_count_matrix), ncol = length(missing_patients)))
   new_pat_df[is.na(new_pat_df)] <- 0
-  colnames(new_pat_df) <- paste(missing_patients, "-01A")
+  colnames(new_pat_df) <- paste0(missing_patients, "-01A")
   
   new_mut_count_mat <- cbind(mut_count_matrix, new_pat_df)
   return(new_mut_count_mat)
@@ -118,7 +125,8 @@ add_missing_patients_to_mut_count_mat <- function(mut_count_matrix, intersecting
 mut_count_matrix_full <- add_missing_genes_to_mut_count_mat(mut_count_matrix, allgene_targets)
 mut_count_matrix_full <- add_missing_patients_to_mut_count_mat(mut_count_matrix_full, intersecting_patients)
 
-write.csv(mut_count_matrix_full, paste0(path, "Saved Output Data Files/BRCA/Mutation/Mutation Count Matrices/mut_count_matrix_nonMutantGenesAdded.csv"))
+write.csv(mut_count_matrix_full, paste0(path, "Saved Output Data Files/BRCA/Mutation/Mutation Count Matrices/mut_count_matrix_nonsyn_nonMutantGenesAdded.csv"))
+write.csv(mut_count_matrix_full, paste0(path, "Saved Output Data Files/Pan-Cancer/Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous_ALL_inclNonmut.csv"))
 
 
 ############################################################

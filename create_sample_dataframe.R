@@ -12,6 +12,7 @@
     # Entries: 0 or 1 values
 
 library(TCGAbiolinks)
+library(dplyr)
 
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/cBioPortal/METABRIC/"

@@ -41,10 +41,11 @@ BiocManager::install("EnsDb.Hsapiens.v86")
 
 library("STRINGdb")
 library(igraph)
-library(EnsDb.Hsapiens.v86)
+library("EnsDb.Hsapiens.v86")
 # keytypes(EnsDb.Hsapiens.v86)  # list all supported keytypes
 
-string_db <- STRINGdb$new(version="11.5", species=9606, score_threshold=0, input_directory="")
+string_db <- STRINGdb$new(version="11.5", species=9606, score_threshold=0, 
+                          input_directory="", protocol = "http")
 
 # NOTE: STRINGdb also offers a way to compute enrichment in a given gene set in GO, KEGG, REACTOME, 
 # PubMed, UniProt Keywords, and PFAM/INTROPRO/SMART domains

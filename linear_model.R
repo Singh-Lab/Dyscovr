@@ -5,27 +5,33 @@
 
 #!/usr/bin/env Rscript
 
-#library(biomaRt)
-library(parallel)
-library(rlang)
-library(dplyr)
-library(broom)
-library(data.table)
-library(speedglm)
-library(argparse)
-library(stringr)
-#library(glmnet)
-#library(cli)
-#library(nlme)
-#library(lme4)
-#library(lmerTest)
-library(dqrng)
+# Set the library path
+library.path <- .libPaths()
+#library.path <- "C:/Users/sarae/AppData/Local/R/win-library/4.1"
+#library.path <- "C:/Program Files/R/R-4.1.1/library"
+#print(library.path)
+
+#library(biomaRt, lib.loc = library.path)
+library(parallel, lib.loc = library.path)
+library(rlang, lib.loc = library.path)
+library(dplyr, lib.loc = library.path)
+library(broom, lib.loc = library.path)
+library(data.table, lib.loc = library.path)
+library(speedglm, lib.loc = library.path)
+library(argparse, lib.loc = library.path)
+library(stringr, lib.loc = library.path)
+#library(glmnet, lib.loc = library.path)
+#library(cli, lib.loc = library.path)
+#library(nlme, lib.loc = library.path)
+#library(lme4, lib.loc = library.path)
+#library(lmerTest, lib.loc = library.path)
+library(dqrng, lib.loc = library.path)
 
 # Source other files needed
 source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Sara_LinearModel/"
-source(paste(source_path, "general_important_functions.R", sep = ""))
-source(paste(source_path, "linear_model_helper_functions.R", sep = ""))
-source(paste(source_path, "run_regularized_models.R", sep = ""))
+source(paste(source_path, "/general_important_functions.R", sep = ""))
+source(paste(source_path, "/linear_model_helper_functions.R", sep = ""))
+source(paste(source_path, "/run_regularized_models.R", sep = ""))
 
 
 ############################################################
@@ -159,6 +165,9 @@ parser$add_argument("--regularization", default = "None", type = "character",
 # If we are using a regularized model (L1 or L2), select the method to evaluate significance.
 parser$add_argument("--signif_eval_type", default = "randomization_predictors", type = "character",
                     help = "If regularization is not None, uses this flag to determine method of evaluating significance. Takes either randomization_perTarg, randomization_perSamp, randomization_predictors, subsampling, or selectiveInference. Default is randomization_predictors.")
+# If we are using a regularized model (L1 or L2), and a randomization method for evaluating significance, provide the number of randomizations. Default is 100.
+parser$add_argument("--num_randomizations", default = 100, type = "integer",
+                    help = "If regularization is not None, and signif_eval_type is some form of randomization, the number of randomizations is provided here.")
 
 
 # Add a flag for keeping only trans pairings
@@ -185,6 +194,11 @@ parser$add_argument("--select_args_label", default = "", type = "character",
 # Parse the given arguments
 tryCatch({
   args <- parser$parse_args()
+  #if(length(commandArgs(trailingOnly = TRUE)) > 0) {
+  #  args <- commandArgs(trailingOnly = TRUE)
+  #} else {
+  #  args <- parser$parse_args()
+  #}
 }, error = function(cond) {
   print(cond)
   print(traceback())
@@ -227,7 +241,6 @@ inclResiduals <- str2bool(args$inclResiduals)
 ############################################################
 # Set the paths
 input_file_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/"
-
 
 if(args$cancerType == "BRCA") {
   prot_path <- paste(input_file_path, "BRCA/", sep = "")
@@ -582,6 +595,7 @@ if(useNumFunctCopies) {
 #' only implemented for "L2" or "None"
 #' @param signif_eval_type if regularization is not "None", uses the given type of method
 #' to evaluate significance (either some form of "randomization", "subsampling", or "selectiveInference")
+#' @param num_randomizations the number of randomizations, if our signif_eval_type is some form of randomization
 #' @param covs_to_incl a vector of covariates that we want to include, or ALL if we
 #' want to include all implemented covariates
 #' @param removeCis a TRUE/FALSE value indicating whether or not we are eliminating 
@@ -603,8 +617,8 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                              neighboring_cna_df, is_rank_or_quant_norm, log_expression, analysis_type, 
                              tumNormMatched, randomize, cna_bucketing, meth_bucketing, 
                              useNumFunctCopies, num_PEER, num_pcs, debug, collinearity_diagn, 
-                             outpath, outfn, model_type, regularization, signif_eval_type, covs_to_incl, 
-                             removeCis, all_genes_id_conv, incl_nextMutDriver, 
+                             outpath, outfn, model_type, regularization, signif_eval_type, num_randomizations,
+                             covs_to_incl, removeCis, all_genes_id_conv, incl_nextMutDriver, 
                              run_query_genes_jointly, dataset, inclResiduals) {
   
   # If we are looking at each query protein individually, create a mini-table for 
@@ -665,7 +679,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                                                         all_genes_id_conv, debug)
       }
 
-      regprot_i_results_df_list <- run_linear_model_per_target_gene(downstream_target_df = downstream_target_df, 
+      regprot_i_results_df <- run_linear_model_per_target_gene(downstream_target_df = downstream_target_df, 
                                        methylation_df = methylation_df,
                                        methylation_df_meQTL = methylation_df_meQTL, 
                                        starter_df = starter_df, 
@@ -686,21 +700,24 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                                        model_type = model_type,
                                        regularization = regularization, 
                                        signif_eval_type = signif_eval_type,
+                                       num_randomizations = num_randomizations,
                                        run_query_genes_jointly = run_query_genes_jointly, 
                                        regprot = regprot)
       
+      # OLD: prior to parallelization
       # Now we have a list of output summary DFs for each of this regulatory protein's targets. 
       # Bind them all together.
       #return(do.call("rbind", regprot_i_results_df_list))
-      regprot_i_results_df_list <- regprot_i_results_df_list[!is.na(regprot_i_results_df_list)]
-      regprot_i_results_df <- as.data.table(rbindlist(regprot_i_results_df_list, fill = TRUE))
+      #regprot_i_results_df_list <- regprot_i_results_df_list[!is.na(regprot_i_results_df_list)]
+      #regprot_i_results_df <- as.data.table(rbindlist(regprot_i_results_df_list, fill = TRUE))
+      
       
       if(debug) {
         print("Combined Results DF")
         print(head(regprot_i_results_df))
       }
       
-      return(regprot_i_results_df)
+      return(as.data.table(regprot_i_results_df))
     })
     
     # Now we have a list of the results tables, one table per regulatory protein, 
@@ -774,7 +791,6 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
     # generating a p-value, we want to pre-shuffle the input data frame per-driver and save 
     # these DFs as a list
     if((model_type == "linear") & (regularization != "None") & (signif_eval_type == "randomization_predictors")) {
-      num_randomizations <- 100
       swissprot_ids <- protein_ids_df$swissprot_ids
       driver_indices <- lapply(swissprot_ids, function(s) which(grepl(s, colnames(starter_df))))
       remaining_indices <- setdiff(1:ncol(starter_df), unlist(driver_indices))
@@ -790,7 +806,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
       })
     }
     
-    regprot_results_df_list <- run_linear_model_per_target_gene(downstream_target_df = downstream_target_df, 
+    regprot_results_df <- run_linear_model_per_target_gene(downstream_target_df = downstream_target_df, 
                                                                 methylation_df = methylation_df,
                                                                 methylation_df_meQTL = methylation_df_meQTL, 
                                                                 starter_df = starter_df, 
@@ -811,16 +827,20 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
                                                                 model_type = model_type,
                                                                 regularization = regularization, 
                                                                 signif_eval_type = signif_eval_type,
+                                                                num_randomizations = num_randomizations,
                                                                 shuffled_input_dfs = shuffled_input_dfs,
                                                                 run_query_genes_jointly = run_query_genes_jointly, 
                                                                 regprot = NA)
 
     
+    # OLD: prior to parallelization
     # Now we have a list of output summary DFs for each of this regulatory protein's targets. 
     # Bind them all together.
     #return(do.call("rbind", regprot_i_results_df_list))
-    regprot_results_df_list <- regprot_results_df_list[!is.na(regprot_results_df_list)]
-    master_df <- as.data.table(rbindlist(regprot_results_df_list, fill = TRUE))
+    #regprot_results_df_list <- regprot_results_df_list[!is.na(regprot_results_df_list)]
+    #master_df <- as.data.table(rbindlist(regprot_results_df_list, fill = TRUE))
+    
+    master_df <- as.data.table(regprot_results_df)
     
   }
         
@@ -880,6 +900,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
 #' only implemented for "L2" or "None"
 #' @param signif_eval_type if regularization is not "None", uses the given type of method
 #' to evaluate significance (either some form of "randomization", "subsampling", or "selectiveInference")
+#' @param num_randomizations the number of randomizations, if our signif_eval_type is some form of randomization
 #' @param shuffled_input_dfs either 'NA' if our signif_eval_type is NOT randomization_predictors, or
 #' a list of shuffled starter DFs 
 #' @param run_query_genes_jointly a TRUE/ FALSE value indicating whether or not we 
@@ -895,31 +916,37 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
                                              dataset, randomize, num_PEER, num_pcs,
                                              covs_to_incl, inclResiduals, removeCis,
                                              model_type, collinearity_diagn, regularization,
-                                             signif_eval_type, shuffled_input_dfs, 
+                                             signif_eval_type, num_randomizations, shuffled_input_dfs, 
                                              run_query_genes_jointly, regprot) {
   
-  # Loop through all the targets for this protein(s) of interest and create a table 
-  # for each of them from this starter DF
-  results_df_list <- lapply(1:downstream_target_df[, .N], function(k) {
+  # Create a file to log our optimal lambda values
+  file.create("optimal_lambdas_real.txt")
+  
+  # Set the methylation DF depending on whether methylation is our outcome variable
+  methylation_df_targ <- methylation_df
+  if(!is.null(methylation_df_meQTL)) {
+    if(!is.na(methylation_df_meQTL)) {
+      methylation_df_targ <- methylation_df_meQTL
+    }
+  } 
+  
+  # Use multithreading to run these jobs in parallel
+  num_groups <- 6
+  parallel_cluster <- makeCluster(6, type = "SOCK", methods = FALSE)
+  
+  # Tell R that we want to use these processes to do calculations
+  setDefaultCluster(parallel_cluster)
+  registerDoParallel(parallel_cluster)
+  
+  list_of_rows <- split(downstream_target_df, row(downstream_target_df))
+  
+  results_df <- foreach(currentRow = list_of_rows, .combine = rbind) %dopar% {
     
     # Get the target t_k's Swissprot & ENSG IDs
-    targ <- unlist(strsplit(downstream_target_df$swissprot[k], ";", fixed = TRUE))
-    targ_ensg <- unlist(strsplit(downstream_target_df$ensg[k], ";", fixed = TRUE))
+    targ <- unlist(strsplit(downstream_target_df$swissprot, ";", fixed = TRUE))
+    targ_ensg <- unlist(strsplit(downstream_target_df$ensg, ";", fixed = TRUE))
     
-    print(paste("Target gene", paste(k, paste("/", downstream_target_df[, .N]))))
-    
-    # OPT: Filter outlier expression for each group (mutated, unmutated) using 
-    # a standard (1.5 x IQR) + Q3 schema
-    #starter_df <- filter_expression_df(expression_df, starter_df, targ_ensg)
-    
-    #if(length(intersect(targ_ensg, regprot_ensg)) == 0) {
-    # Create a full input table to the linear model for this target
-    methylation_df_targ <- methylation_df
-    if(!is.null(methylation_df_meQTL)) {
-      if(!is.na(methylation_df_meQTL)) {
-        methylation_df_targ <- methylation_df_meQTL
-      }
-    } 
+    #print(paste("Target gene", paste(k, paste("/", downstream_target_df[, .N]))))
     
     lm_input_table <- fill_targ_inputs(starter_df = starter_df, targ_k = targ, 
                                        targ_k_ensg = targ_ensg, 
@@ -932,8 +959,8 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
                                        analysis_type = analysis_type,
                                        tumNormMatched = tumNormMatched, 
                                        debug = debug, dataset = dataset)
-      
-      
+    
+    
     if(length(lm_input_table) == 0) {return(NA)}
     if (is.na(lm_input_table)) {return(NA)}
     if(lm_input_table[, .N] == 0) {return(NA)}
@@ -959,13 +986,6 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
       #fwrite(lm_input_table, paste(outpath, paste(new_fn, ".csv", sep = ""), sep = "/"))
     }
     
-    # Randomize expression across cancer and normal, across all samples within given target gene
-    #if (randomize) {
-    #  if(analysis_type == "eQTL") {lm_input_table$ExpStat_k <- sample(lm_input_table$ExpStat_k)}
-    #  else if (analysis_type == "meQTL") {lm_input_table$MethStat_k <- sample(lm_input_table$MethStat_k)}
-    #  else {print(paste("Analysis type is invalid:", analysis_type))}
-    #}
-    
     formula <- construct_formula(lm_input_table, analysis_type, num_PEER, num_pcs,
                                  cna_bucketing, meth_bucketing, covs_to_incl)
     
@@ -975,7 +995,7 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
     if ((model_type == "linear") & (regularization == "None")) {
       
       if(debug) {print(paste("Formula:", formula))}
-
+      
       lm_fit <- tryCatch(
         {
           speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
@@ -993,19 +1013,20 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
       }
       
     } else if ((model_type == "linear") & (regularization == "L2" | regularization == "ridge" | 
-               regularization == "L1" | regularization == "lasso")) {
+                                           regularization == "L1" | regularization == "lasso")) {
       
       expression_df_s <- NA
       if ((signif_eval_type == "randomization_perTarg") | (signif_eval_type == "randomization_perSamp")) {
         expression_df_s <- cbind(expression_df$ensg_id, expression_df[,colnames(expression_df) %fin% 
-                                                                          lm_input_table$sample_id, with = FALSE])
+                                                                        lm_input_table$sample_id, with = FALSE])
         colnames(expression_df_s)[1] <- "ensg_id"
       } 
+      # Create a file to hold the lambda values
       lm_fit <- run_regularization_model(formula = formula, lm_input_table = lm_input_table, 
                                          type = regularization, debug = debug, meth_bucketing = meth_bucketing, 
                                          cna_bucketing = cna_bucketing, signif_eval_type = signif_eval_type,
                                          expression_df = expression_df_s, shuffled_input_dfs = shuffled_input_dfs,
-                                         ensg = targ_ensg)
+                                         ensg = targ_ensg, num_randomizations = num_randomizations)
       summary_table <- lm_fit
       
       ## OLD: for cases in which we want to use LASSO as variable selection and input 
@@ -1063,7 +1084,7 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
     
     # Tidy the output
     #if(!is.na(lm_fit)) {print(summary(lm_fit))}
-
+    
     if(inclResiduals & (!(is.na(summary_table)))) {
       residuals <- as.numeric(lm_input_table$ExpStat_k) - 
         as.numeric(unlist(predict.speedlm(lm_fit, newdata = lm_input_table)))
@@ -1088,7 +1109,7 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
         summary_table <- summary_table[rows_to_keep,]
       }
     }
-        
+    
     if(debug) {
       print("Summary Table")
       print(head(summary_table))
@@ -1108,13 +1129,17 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
     
     # Remove the memory from the input tables
     rm(lm_input_table)
-    gc()
+    #gc()
     
-    # Return this summary table
-    return(summary_table)
-  })
+    # Make sure that the summary table for this gene is returned
+    summary_table <- summary_table
+
+  }
   
-  return(results_df_list)
+  # tell R that we don't need the processes anymore
+  stopCluster(parallel_cluster)
+  
+  return(results_df)
 }
 
 ############################################################
@@ -1785,6 +1810,7 @@ if(is.na(patient_cancer_mapping)) {
                                 outpath = outpath, outfn = outfn,
                                 regularization = args$regularization,
                                 signif_eval_type = args$signif_eval_type,
+                                num_randomizations= args$num_randomizations,
                                 covs_to_incl = covs_to_incl,
                                 model_type = args$model_type,
                                 removeCis = removeCis,
@@ -1863,6 +1889,7 @@ if(is.na(patient_cancer_mapping)) {
                                   outpath = outpath, outfn = outfn,
                                   regularization = args$regularization,
                                   signif_eval_type = args$signif_eval_type,
+                                  num_randomizations= args$num_randomizations,
                                   covs_to_incl = covs_to_incl,
                                   model_type = args$model_type,
                                   removeCis = removeCis,

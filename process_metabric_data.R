@@ -38,6 +38,11 @@ maf_file_df <- maf_file_df_unfilt[maf_file_df_unfilt$Tumor_Sample_Barcode %fin% 
 maf_file_df_missense <- maf_file_df[maf_file_df$Variant_Classification == "Missense_Mutation",]
 maf_file_df_misAndNon <- maf_file_df[(maf_file_df$Variant_Classification == "Missense_Mutation") | 
                                        (maf_file_df$Variant_Classification == "Nonsense_Mutation"),]
+maf_file_df_nonsynonymous <- maf_file_df[(maf_file_df$Variant_Classification == "Missense_Mutation") | 
+                                           (maf_file_df$Variant_Classification == "Nonsense_Mutation") |
+                                           (maf_file_df$Variant_Classification == "Splice_Site") |
+                                           (maf_file_df$Variant_Classification == "Nonstop_Mutation"),]
+  
 maf_missense <- read.maf(maf_file_df_missense)
 maf_misAndNon <- read.maf(maf_file_df_misAndNon)
 mut_count_matrix_misAndNon <- get_mut_count_matrix(maf_misAndNon)
@@ -314,7 +319,7 @@ intersecting_patients <- intersect(cna_ids,
                                    intersect(methylation_ids_log2,
                                              intersect(expression_ids,
                                                        intersect(mutation_count_mat_ids_missense, patient_sample_ids))))
-print(length(intersecting_patients)) # 826 patients
+print(length(intersecting_patients)) # 826 patients; 837 for nonsynonymous; 
 
 write.table(intersecting_patients, "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/cBioPortal/METABRIC/intersecting_ids.txt",
             quote = FALSE, row.names = FALSE)

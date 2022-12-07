@@ -3416,9 +3416,41 @@ eig <- eigen(s)
 plot(eig$vectors[,1], eig$vectors[,2], xlab="PC 1", ylab="PC 2")
 
 
-############################################################
-### SAVE PCA RESULTS TO FILES
-############################################################
-
-
+get_per_samp_randomized_beta_df <- function(x_data, v.group, lambdas, 
+                                            shuffled_input_dfs, ensg, 
+                                            num_randomizations) {
+  
+  # Do the randomization per-target a given number of times and get a 
+  # num_randomizations x ncol(x_data) table of random Betas
+  output_rows <- lapply(1:num_randomizations, function(i) {
+    #print(paste(i, paste("/", num_randomizations)))
+    index <- which(grepl(ensg, expression_df$ensg_id))
+    y_data_rand <- unlist(apply(expression_df[,2:ncol(expression_df), with = FALSE], 
+                                MARGIN = 2,  function(x) dqrng::dqsample(x))[index,])
+    y_data_rand[is.na(y_data_rand)] <- 0
+    y_data_rand <- t(as.matrix(y_data_rand))
+    #if(debug) {print(head(y_data_rand))}
+    #if(debug) {print(dim(y_data_rand))}
+    optimal_lambda <- NA
+    
+    if(length(lambdas) == 1) {
+      optimal_lambda <- lambdas
+    } else {
+      lasso.cv <- cv.gglasso(x_data, y_data_rand, group = v.group, lambda = lambdas, 
+                             loss = "ls")
+      optimal_lambda <- lasso.cv$lambda.min
+    }
+    
+    # Run the model with the best lambda
+    rand_model <- gglasso(x_data, y_data_rand, lambda = optimal_lambda, 
+                          group = v.group, loss = "ls")
+    betas_rand <- t(data.table(as.numeric(rand_model$beta)))
+    colnames(betas_rand) <- colnames(x_data)
+    return(betas_rand)
+  })
+  
+  random_beta_df <- rbindlist(lapply(output_rows, as.data.table), use.names = TRUE)
+  
+  return(random_beta_df)
+}
 

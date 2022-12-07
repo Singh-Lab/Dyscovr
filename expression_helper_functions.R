@@ -39,7 +39,7 @@ methylation_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Methylation
                            header = TRUE, row.names = 1, check.names = FALSE)
 mutation_targ_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_nonsense_CancerOnly_IntersectPatients.csv", sep = ""), 
                              header = TRUE, row.names = 1, check.names = FALSE)
-mutation_regprot_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Regprot_Mutation/iprotein_results_missense_nonsense_CancerOnly_IntersectPatients.csv", sep = ""), 
+mutation_regprot_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Regprot_Mutation/iprotein_results_nonsynonymous_CancerOnly_IntersectPatients.csv", sep = ""), 
                                 header = TRUE, row.names = 1, check.names = FALSE)
 cna_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/CNV/CNA_AllGenes_CancerOnly_IntersectPatients.csv", sep = ""), 
                    header = TRUE, row.names = 1, check.names = FALSE)

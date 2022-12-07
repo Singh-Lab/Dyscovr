@@ -6,8 +6,8 @@
 # This file contains a set of helper functions that will be called by the linear
 # model (from linear_model.R or linear_model.R) while it is running.
 
-library(stringr)
-library(data.table)
+library(stringr, lib.loc = library.path)
+library(data.table, lib.loc = library.path)
 
 ############################################################
 

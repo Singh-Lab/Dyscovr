@@ -117,9 +117,9 @@ fix_expression_df <- function(expression_df, mutation_df, goi) {
     if(id %in% mutation_df$Tumor_Sample_Barcode) {return(1)}
     else {return(0)}
   }))
-  exp_df_m[,4] <- status
+  exp_df_m[,ncol(exp_df_m)+1] <- status
   lab <- paste0(goi, "_Mut")
-  colnames(exp_df_m)[4] <- lab
+  colnames(exp_df_m)[ncol(exp_df_m)] <- lab
   
   return(exp_df_m)
 }
@@ -131,6 +131,8 @@ cptac_brca_fpkm_data_complete_pik3ca <- fix_expression_df(cptac_brca_fpkm_data_c
 
 cptac_brca_fpkm_data_complete_tp53$TP53_Mut <- as.factor(cptac_brca_fpkm_data_complete_tp53$TP53_Mut)
 cptac_brca_fpkm_data_complete_pik3ca$PIK3CA_Mut <- as.factor(cptac_brca_fpkm_data_complete_pik3ca$PIK3CA_Mut)
+
+# cptac_brca_fpkm_data_complete_targs[,3:10] <- apply(cptac_brca_fpkm_data_complete_targs[,3:10], MARGIN = 2, as.factor)
 
 
 # Plot boxplot of each gene's expression across CPTAC samples, by gene of interest mutation status
@@ -213,6 +215,32 @@ wilcox_of_targs <- function(cptac_df, goi, label) {
     colname <- paste(goi, "Mut", sep = "_")
     exp_mut <- as.numeric(cptac_df[(cptac_df$Hugo_Symbol == t) & (cptac_df[,colname] == 1), label])
     exp_noMut <- as.numeric(cptac_df[(cptac_df$Hugo_Symbol == t) & (cptac_df[,colname] == 0), label])
+    
+    wilcox_res <- wilcox.test(exp_mut, exp_noMut)   # use default two-sided alternative
+    
+    pval <- wilcox_res$p.value
+    print(paste("Wilcoxon p-value:", pval))
+    pvals <- c(pvals, pval)
+    
+    if(mean(exp_mut) > mean(exp_noMut)) {print("Upregulation")}
+    else {print("Downregulation")}
+  }
+  return(list("Targets" = targs, "P.value" = pvals))
+}
+
+wilcox_of_targs2 <- function(cptac_df, cptac_df_full, goi, label) {
+  
+  targs <- unique(cptac_df$Hugo_Symbol)
+  pvals <- c()
+  
+  for (t in targs) {
+    print(paste("Target:", t))
+    
+    colname <- paste(goi, "Mut", sep = "_")
+    pat_mut <- cptac_df[cptac_df[,colname] == 1, 'Patient_ID']
+    pat_nomut <- cptac_df[cptac_df[,colname] == 0, 'Patient_ID']
+    exp_mut <- as.numeric(cptac_df_full[(cptac_df_full$Hugo_Symbol == t), colnames(cptac_df_full) %in% pat_mut])
+    exp_noMut <- as.numeric(cptac_df_full[(cptac_df_full$Hugo_Symbol == t), colnames(cptac_df_full) %in% pat_nomut])
     
     wilcox_res <- wilcox.test(exp_mut, exp_noMut)   # use default two-sided alternative
     

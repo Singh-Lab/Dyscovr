@@ -8,7 +8,7 @@
 
 ############################################################
 #' Use a faster %in% function
-library(fastmatch)
+library(fastmatch, lib.loc = library.path)
 `%fin%` <- function(x, table) {
   stopifnot(require(fastmatch))
   fmatch(x, table, nomatch = 0L) > 0L
@@ -24,7 +24,6 @@ quickdf <- function(l) {
   return(l)
 }
 ############################################################
-
 
 ############################################################
 # Get all the genes in the human genome and write list to a file

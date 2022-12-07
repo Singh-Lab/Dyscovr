@@ -13,7 +13,7 @@ library(metasens)
 library(metafor)
 library(ggplot2)
 library(grid)
-
+library(TCGAbiolinks)
 
 # Path to output files
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
@@ -55,6 +55,9 @@ create_meta_input_tab <- function(list_of_master_dfs, vect_of_n, targ) {
     x[x$T_k.name == targ, 'statistic']) 
   meta_input_tab$std.error <- lapply(list_of_master_dfs, function(x) 
     x[x$T_k.name == targ, 'std.error']) 
+  
+  meta_input_tab$beta <- as.numeric(meta_input_tab$beta)
+  meta_input_tab <- na.omit(meta_input_tab)
   
   return(meta_input_tab)
 }

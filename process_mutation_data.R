@@ -286,7 +286,7 @@ proteome_subset_missense_symb <- get_proteome_subset(proteome, maf_symbols_misse
 length(unique(proteome_subset_missense))  # check the number of protein sequences remaining
   # The length of this subset: BRCA - 8569 (8912 for missense + nonsense, 9023 for nonsynonymous), TCGA (ALL) - 17899 (18062 for missense + nonsense, 18088 for nonsynonymous)
   # 4139 for BRCA for silent, 17174 for Pan-Cancer for silent
-  # 160 for METABRIC BRCA missense, 162 for METABRIC BRCA missense + nonsense
+  # 160 for METABRIC BRCA missense, 162 for METABRIC BRCA missense + nonsense, 161 for nonsynonymous, 153 for silent
 
 # Write proteome subset to a FASTA
 write.fasta(proteome_subset_missense, names = names(proteome_subset_missense), as.string = TRUE, 
@@ -363,7 +363,7 @@ length(intersecting_domain_acc_missense)
   # BRCA is 1137 intersecting domains (1151 for missense + nonsense, 884 for silent, 1156 for nonsynon.); TCGA (ALL) is 1453 domains (1437 for missense + nonsense, 1438 for nonsyn, 1419 for silent)
   # NUC ACIDS ONLY: BRCA is 218 intersecting domains, TCGA (ALL) is 279
 
-  # METABRIC has 131 intersecting domains for missense, 131 for missense + nonsense
+  # METABRIC has 131 intersecting domains for missense, 131 for missense + nonsense, 132 for nonysynonymous, 131 for silent
 
 ############################################################
 # I-PROTEIN: SUBSET PROTEOME TO KEEP ONLY PROTEINS WITH EITHER:
@@ -467,7 +467,7 @@ length(unique(domains_missense_iprotein_sub$Accession))
   # All Ligands: BRCA: 1865 (1910 missense + nonsense, 1188 silent, 1881 nonsynon.); TCGA (ALL): 2767 (2749 missense + nonsense, 2613 nonsyn, 2553 silent)
   # Nucleic Acids Only: BRCA: 257; TCGA (ALL): 324
 
-  # METABRIC BRCA: 133 missense (133 missense + nonsense)
+  # METABRIC BRCA: 133 missense (133 missense + nonsense, 137 nonsyn., 135 silent)
 
 # Write this table to a CSV
 write.csv(domains_missense_iprotein_sub, file = paste(path, "Saved Output Data Files/BRCA/Mutation/iprotein_results_missense.csv", sep = ""))
@@ -507,7 +507,7 @@ length(protein_ids_missense_iprotein)
 # All Ligands: BRCA: 6118 (6360 with missense + nonsense, 2945 silent, 6383 nonsyn.); TCGA (ALL): 11,939 (11,989 with missense + nonsense, 11,912 with nonsyn, 11,491 silent)
 # Nuc. Acids Only: BRCA: 1914; TCGA (ALL): 3,644
 
-# METABRIC BRCA: 121 missense (122 for missense + nonsense)
+# METABRIC BRCA: 121 missense (122 for missense + nonsense, 122 for nonsyn., 117 silent)
 
 # Write unique protein IDs to a file
 write.csv(protein_ids_missense_iprotein, file = paste(path, "Saved Output Data Files/BRCA/Mutation/protein_ids_missense_iprotein.csv", sep = ""))

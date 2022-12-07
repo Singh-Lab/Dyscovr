@@ -15,11 +15,9 @@ library(TCGAbiolinks)
   # 1. Combine patient and sample DFs into one
   # 2. Limit methylation (non-tumor-normal matched) to only cancer files
   # 3. For non-tumor-normal matched data, limiting to only overlapping samples
-  # 4. Creating an regulatory protein data frame for each level of specificity (I-Protein, I-Domain,
-      # and I-Binding Position) in the form of matched Uniprot and ENSG ID inputs
-  # 5. Construct a data frame of targets for a given regulatory protein of interest (for model
+  # 4. Construct a data frame of targets for a given regulatory protein of interest (for model
       # testing purposes)
-  # 6. Find samples that have both an amplification and mutation, or deletion and mutation, in the same gene
+  # 5. Find samples that have both an amplification and mutation, or deletion and mutation, in the same gene
 
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/cBioPortal/METABRIC/"
@@ -567,171 +565,10 @@ write.csv(patient_sample_df_sub, paste(main_path, "Linear Model/Tumor_Only/Patie
 write.table(intersecting_patients, paste(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt", sep = ""))
 intersecting_patients <- read.table(paste(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt", sep = ""))[,1]
 
-############################################################
-############################################################
-# 4. MAKE REGULATORY PROTEIN INPUT DATAFRAMES
-############################################################
-############################################################
-prot_path <- paste(main_path, "Mutation/", sep = "")
-
-iprotein_prots <- as.character(unlist(fread(paste(prot_path, "swissprot_ids_missense_iprotein.csv", sep = ""), header = TRUE)[,2]))
-iprotein_prots_nucacids <- as.character(unlist(fread(paste(prot_path, "swissprot_ids_missense_iprotein_nucacids.csv", sep = ""), header = TRUE)[,2]))
-
-idomain_prots <- as.character(unlist(fread(paste(prot_path, "swissprot_ids_missense_idomain.csv", sep = ""), header = TRUE)[,2]))  # all ligands
-idomain_prots_nucacids <- as.character(unlist(fread(paste(prot_path, "swissprot_ids_missense_idomain_nucacids.csv", sep = ""), header = TRUE)[,2]))  # DNA/RNA-binding only
-
-ibindingpos_prots <- as.character(unlist(fread(paste(prot_path, "swissprot_ids_missense_ibindingpos.csv", sep = ""), header = TRUE)[,2]))  # all ligands
-ibindingpos_prots_nucacids <- as.character(unlist(fread(paste(prot_path, "swissprot_ids_missense_ibindingpos_nucacids.csv", sep = ""), header = TRUE)[,2]))  # DNA/RNA-binding only
-
-#' Converts protein uniprot IDs to ensembl IDs
-#' @param protein_ids a vector of uniprot IDs to be converted
-convert_to_ensembl <- function(protein_ids) {
-  return(unlist(lapply(protein_ids, function(x) 
-    paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == x, 'ensembl_gene_id']), collapse = ";"))))
-}
-iprotein_prots_ensg <- convert_to_ensembl(iprotein_prots)
-iprotein_prots_nucacids_ensg <- convert_to_ensembl(iprotein_prots_nucacids)
-idomain_prots_ensg <- convert_to_ensembl(idomain_prots)
-idomain_prots_nucacids_ensg <- convert_to_ensembl(idomain_prots_nucacids)
-ibindingpos_prots_ensg <- convert_to_ensembl(ibindingpos_prots)
-ibindingpos_prots_nucacids_ensg <- convert_to_ensembl(ibindingpos_prots_nucacids)
-
-
-#' Combines uniprot and ENSG IDs into a protein IDs data frame, which it writes to a CSV
-#' @param protein_ids a vector of uniprot IDs for regulatory proteins
-#' @param protein_ids_ensembl a vector of ENSG IDs for regulatory proteins
-#' @param label the level of specificity in question ("iprotein", "idomain", etc.)
-#' @param prot_path a path for where to write the output data frame
-recombine_into_df_and_write <- function(protein_ids, protein_ids_ensembl, label, prot_path) {
-  protein_ids_df <- data.frame("swissprot_ids" = protein_ids, "ensg_ids" = protein_ids_ensembl)
-  # Remove any that do not have ENSG IDs
-  protein_ids_df <- protein_ids_df[!protein_ids_df$ensg_ids == "",]
-  # Write this as a CSV file for later use
-  write.csv(protein_ids_df, paste(prot_path, paste("Files for Linear Model/", paste(label, "protein_ids_df.csv", sep = "_"), sep = ""), sep = ""))
-}
-
-recombine_into_df_and_write(iprotein_prots, iprotein_prots_ensg, "iprotein", prot_path)
-recombine_into_df_and_write(iprotein_prots_nucacids, iprotein_prots_nucacids_ensg, "iprotein_nucacids", prot_path)
-recombine_into_df_and_write(idomain_prots, idomain_prots_ensg, "idomain", prot_path)
-recombine_into_df_and_write(idomain_prots_nucacids, idomain_prots_nucacids_ensg, "idomain_nucacids", prot_path)
-recombine_into_df_and_write(ibindingpos_prots, ibindingpos_prots_ensg, "ibindingpos", prot_path)
-recombine_into_df_and_write(ibindingpos_prots_nucacids, ibindingpos_prots_nucacids_ensg, "ibindingpos_nucacids", prot_path)
-
-
-
-#' Make regulatory input data frame using a mutational threshold (e.g. >=5%), with an option
-#' to limit to known driver genes and to check if these drivers are connected by STRING
-#' with a confidence exceeding a given threshold (in this case, keep the more highly mutated of the pair)
-#' @param regprot_df a regulatory mutation data frame for a given specificity/ mutation type
-#' @param mut_freq_thres a mutation frequency threshold (e.g. 5%) for which to include the 
-#' given gene
-#' @param spec_label a specificity label (e.g. "i-protein", "i-domain", or "i-bindingpos")
-#' @param patient_ids a set of unique patient/ sample IDs for the given cohort
-#' @param driver_df if not NA, use known driver DF to limit to only proteins with known drivers
-#' @param all_genes_id_conv a gene ID conversion file from bioMart
-#' @param string_db OPT: a STRING network with confidence scores between sets of genes
-#' @param string_conf_thres OPT: a confidence threshold above which drivers are considered
-#' to be closely related (and only the more highly mutated one is maintained)
-create_regulatory_prot_input_df <- function(regprot_df, mut_freq_thres, spec_label, patient_ids, 
-                                            driver_df, all_genes_id_conv, string_db, string_conf_thres) {
-  
-  # Calculate the minimum number of mutated samples needed to keep a given gene
-  mut_count_thres <- mut_freq_thres * length(patient_ids)
-  print(mut_count_thres)
-  
-  # Subset the regprot data frame using this
-  if(spec_label == "i-protein") {
-    regprots <- unlist(lapply(1:nrow(regprot_df), function(i) {
-      patients <- unlist(strsplit(as.character(unlist(regprot_df[i, 'Patient'])), ";", fixed = TRUE))
-      # Limit to just patients in the intersecting set
-      patients_justID <- unlist(lapply(patients, function(x) unlist(strsplit(x, "-", fixed = TRUE))[1]))
-      patients_final <- patients[which(patients_justID %in% patient_ids)]
-      if (length(patients_final) > mut_count_thres) {return(regprot_df[i, 'Swissprot'])}
-      else {return(NA)}
-    }))
-  } else {
-    regprots <- unlist(lapply(1:length(unique(regprot_df$Swissprot)), function(i) {
-      regprot <- unique(regprot_df$Swissprot)[i]
-      patients <- unlist(regprot_df[regprot_df$Swissprot == regprot, 'Patient'])
-      # Limit to just patients in the intersecting set
-      patients_justID <- unlist(lapply(patients, function(x) unlist(strsplit(x, "-", fixed = TRUE))[1]))
-      patients_final <- unique(patients[which(patients_justID %in% patient_ids)])
-      if (length(patients_final) > mut_count_thres) {return(regprot)}
-      else {return(NA)}
-    }))
-  }
-  
-  regprots <- unique(regprots[!is.na(regprots)])
-  print(head(regprots))
-  
-  # Extract the ENSG and Swissprot IDs
-  uniprot_ids <- regprots
-  ensg_ids <- unlist(lapply(uniprot_ids, function(x) 
-    paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == x, 
-                                   'ensembl_gene_id']), collapse = ";")))
-  
-  output_df <- data.frame("swissprot_ids" = uniprot_ids, "ensg_ids" = ensg_ids)
-  
-  # If driver_df is not NA, then we want to limit to only driver genes
-  if(!is.na(driver_df)) {
-    output_df <- output_df[which(ensg_ids %fin% driver_df$ensembl_gene_id),]
-    
-    # An optional filter to remove drivers that are closely related to one another
-    if(!is.na(string_db)) {
-      output_df <- filter_string_relatives(output_df, string_db, string_conf_thres)
-    }
-  }
-  
-  return(output_df)
-}
-
-
-#' Helper function to see if each pairwise set of driver genes are related to one another
-#' in the STRING network with a confidence that exceeds the given threshold. Returns
-#' the subsetted data frame
-#' @param output_df a putative output data frame with columns for swissprot and ensg ids
-#' @param string_db a table with STRING relationships and associated confidence scores
-#' @param string_conf_thres a confidence threshold above which we eliminate the less 
-#' mutated partner in a relationship
-filter_string_relatives <- function(output_df, string_db, string_conf_thres) {
-  
-}
-
-
-
-# Call function
-regprot_input_df_all_5perc <- create_regulatory_prot_input_df(mutation_regprot_df, 0.05, "i-protein",
-                                                              intersecting_patients, NA,
-                                                              all_genes_id_conv)
-regprot_input_df_driver_5perc <- create_regulatory_prot_input_df(mutation_regprot_df, 0.05, "i-protein",
-                                                              intersecting_patients, driver_gene_df,
-                                                              all_genes_id_conv)
-
-intersecting_patients <- read.table(paste(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt", sep = ""))[,1]
-
-# Limit just to particular subtypes
-patient_set_lumA <- intersect(read.table(paste0(main_path, "Patient Subsets/Luminal.A_patient_ids.txt"), header = TRUE)[,1], intersecting_patients)
-patient_set_lumB <- intersect(read.table(paste0(main_path, "Patient Subsets/Luminal.B_patient_ids.txt"), header = TRUE)[,1], intersecting_patients)
-patient_set_basal <- intersect(read.table(paste0(main_path, "Patient Subsets/Basal_patient_ids.txt"), header = TRUE)[,1], intersecting_patients)
-patient_set_her2 <- intersect(read.table(paste0(main_path, "Patient Subsets/HER2_patient_ids.txt"), header = TRUE)[,1], intersecting_patients)
-
-driver_gene_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/GRCh38_driver_gene_list.tsv", 
-                      sep = "\t", header = TRUE, comment.char = "#", skip = 10)
-
-# STRING network and confidence threshold
-
-
-regprot_input_df_all_5perc_missense_lumA <- create_regulatory_prot_input_df(mutation_regprot_df_missense, 0.05, 
-                                                                            "i-protein", patient_set_lumA, NA,
-                                                                            all_genes_id_conv)
-
-# Write to files
-write.csv(regprot_input_df_all_5perc, paste0(main_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_drivers_missense.csv"))
-
 
 ############################################################
 ############################################################
-# 5. MAKE TESTER TARGETS DATAFRAME FOR GIVEN REG. PROTEIN
+# 4. MAKE TESTER TARGETS DATAFRAME FOR GIVEN REG. PROTEIN
 ############################################################
 ############################################################
 sample_protein_uniprot <- "P04637" 
