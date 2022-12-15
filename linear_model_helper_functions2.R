@@ -502,7 +502,7 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   
   # If we have regularized in some way, denote this
   if(!(regularization == "None")) {
-    if (regularization %in% c("L1", "Lasso")) {
+    if (regularization %in% c("L1", "lasso")) {
       if(grepl("randomization", signif_eval_type)) {
         if(signif_eval_type == "randomization_predictors") {
           outfn <- paste(outfn, "L1rand_pred", sep = "_")
@@ -515,7 +515,9 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
         outfn <- paste(outfn, "L1", sep = "_")
       }
     }
-    if (regularization %in% c("L2", "Ridge")) {outfn <- paste(outfn, "L2", sep = "_")}
+    if (regularization %in% c("L2", "ridge")) {outfn <- paste(outfn, "L2", sep = "_")}
+    if (regularization == "bayesian.bgl") {outfn <- paste(outfn, "bayesian.bgl", sep = "_")}
+    if (regularization == "bayesian.bglss") {outfn <- paste(outfn, "bayesian.bglss", sep = "")}
   }
   
   # If we've restricted the number of covariates, add that label

@@ -374,23 +374,23 @@ create_heat_map <- function(results_table) {
   # return(data.frame(gene = rownames(matrix)[hm$rowInd]))
 }
 
-if(!(test & runRegprotsJointly)) {
-  fn_mut <- paste(output_vis_path, paste("BetaHeatmap_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  fn_cna <- paste(output_vis_path, paste("BetaHeatmap_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+#if(!(test & runRegprotsJointly)) {
+#  fn_mut <- paste(output_vis_path, paste("BetaHeatmap_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+#  fn_cna <- paste(output_vis_path, paste("BetaHeatmap_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
   
-  tryCatch({
+#  tryCatch({
     # Call this function
-    png(fn_mut, width = 450, height = 450)
-    create_heat_map(master_df_mut_corrected)
-    dev.off()
+#    png(fn_mut, width = 450, height = 450)
+#    create_heat_map(master_df_mut_corrected)
+#    dev.off()
     
 
-    png(fn_cna, width = 450, height = 450)
-    create_heat_map(master_df_cna_corrected)
-    dev.off()
-  }, error = function(cond) {print(cond)})
+#    png(fn_cna, width = 450, height = 450)
+#    create_heat_map(master_df_cna_corrected)
+#    dev.off()
+#  }, error = function(cond) {print(cond)})
 
-}
+#}
 
 ############################################################
 ############################################################
@@ -450,31 +450,31 @@ compute_and_print_spearman <- function(results_table, ri_1, ri_2) {
 }
 
 
-if(!(test & runRegprotsJointly)) {
-  fn_mut <- paste(output_vis_path, paste("Spearman_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  fn_cna <- paste(output_vis_path, paste("Spearman_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+#if(!(test & runRegprotsJointly)) {
+#  fn_mut <- paste(output_vis_path, paste("Spearman_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+#  fn_cna <- paste(output_vis_path, paste("Spearman_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
   
-  regprots <- unique(master_df_mut_corrected$R_i.name)
-  if (length(regprots) == 2) {
-    r1 <- regprots[1]
-    r2 <- regprots[2]
+#  regprots <- unique(master_df_mut_corrected$R_i.name)
+#  if (length(regprots) == 2) {
+#    r1 <- regprots[1]
+#    r2 <- regprots[2]
     
-    tryCatch({
+#    tryCatch({
       # Call this function
-      png(fn_mut, width = 350, height = 450)
-      compute_and_print_spearman(master_df_mut_corrected, r1, r2)
-      dev.off()
+#      png(fn_mut, width = 350, height = 450)
+#      compute_and_print_spearman(master_df_mut_corrected, r1, r2)
+#      dev.off()
       
-      png(fn_cna, width = 450, height = 450)
-      compute_and_print_spearman(master_df_cna_corrected, r1, r2)
-      dev.off()
-    }, error = function(cond) {print(cond)})
+#      png(fn_cna, width = 450, height = 450)
+#      compute_and_print_spearman(master_df_cna_corrected, r1, r2)
+#      dev.off()
+#    }, error = function(cond) {print(cond)})
 
-  }
-  else {
-    print("Greater than 2 regulatory proteins of interest. Cannot calculate a pairwise spearman.")
-  }
-}
+#  }
+#  else {
+#    print("Greater than 2 regulatory proteins of interest. Cannot calculate a pairwise spearman.")
+#  }
+#}
 
 ############################################################
 ############################################################
@@ -757,29 +757,3 @@ annotate_master_w_tfcancer <- function(master_df_sig, tfcancer_df) {
 #### NOTE: ANOTHER OPTION IS TO COPY THE TOP HIT GENES INTO GENEONTOLOGY: http://geneontology.org/
 
 
-############################################################
-#### ASIDE: DETERMINE WHAT COVARIATES ARE IMPORTANT
-############################################################
-
-# Read back a master DF
-master_df <- fread(paste(main_path, "Linear Model/TP53/Non-Tumor-Normal Matched/iprotein_output_results_TP53_alltargs_TMM_bucketCNA_iprot_iciTotFrac_uncorrected.csv", sep = ""), 
-                   header = TRUE)
-
-# Remove the (Intercept) terms
-master_df <- master_df[master_df$term != "(Intercept)",]
-
-# Of the top X remaining tests, get what the terms are and plot the proportions
-x <- 500
-master_df_topx <- master_df[1:x,]
-terms <- unique(master_df_topx$term)
-terms_counts <- unlist(lapply(terms, function(x) nrow(master_df_topx[master_df_topx$term == x,])))
-terms_counts_df <- data.frame('term' = terms, 'freq' = terms_counts)
-pie(terms_counts_df$freq, labels = terms_counts_df$term, main = paste("Most Significant Covariates (Top", paste(x, "from All Tests)")))
-
-
-# Get the proportions of all the tests with p-value <0.05
-master_df_sig <- master_df[master_df$p.value < 0.05,]
-terms <- unique(master_df_sig$term)
-terms_counts <- unlist(lapply(terms, function(x) nrow(master_df_sig[master_df_sig$term == x,])))
-terms_counts_df <- data.frame('term' = terms, 'freq' = terms_counts)
-pie(terms_counts_df$freq, labels = terms_counts_df$term, main = "Categories of Significant Covariates (All Tests)")

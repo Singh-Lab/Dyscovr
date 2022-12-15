@@ -2,10 +2,9 @@
 ### Run Bayesian Models
 ### Written By: Amey Pasarkar, Fall 2022; Modified by Sara Geraghty
 ############################################################
-library(rstudioapi)
+#library(rstudioapi)
 library(gglasso)
 library(statmod)
-library(Rfast)
 library(mvtnorm)
 library(MCMCpack)
 library(SuppDists)
@@ -48,14 +47,14 @@ library(truncnorm)
 #' Note: X MUST BE SCALED AND CENTERED. use function X <- scale(X) to do so
 #' @param Y vector of response variable. Y must be centered. use Y<-Y-mean(Y) to do so
 #' @param groups vector of length p. Describes which group each regressor belongs to.
+#' @param scale a TRUE/FALSE value indicating whether or not X and Y should be scaled and centered
 #' @param niterations how long to run the Gibbs sampler
 #' @param burnin how many of the first iterations to throw out (effectively by when do you expect model to converge)
-#' @param scale a TRUE/FALSE value indicating whether or not X and Y should be scaled and centered
-runBGL <- function(X, Y, groups, niterations=10000, burnin=5000, scale){
+runBGL <- function(X, Y, groups, scale, niterations=10000, burnin=5000){
   
   if(scale) {
     X <- scale(X)
-    Y <- Y-mean(Y)
+    Y <- Y - mean(Y)
   }
 
   n <- nrow(X)
@@ -106,10 +105,11 @@ runBGL <- function(X, Y, groups, niterations=10000, burnin=5000, scale){
     Xg_not_ALL[[g]] <- nX[,which(groups!=g)] 
   }
   # Gibbs
+  print("made it to Gibbs sampling")
   for (M in 1:niterations)  {
-    if(M %% 1000 == 0){
-      print(M)
-    }
+    #if(M %% 1000 == 0){
+      #print(M)
+    #}
     #Full Conditional Posteriors  
     gam       <- c()
     beta.p    <- c()
@@ -189,7 +189,7 @@ selectGroups <- function(posteriorBeta, groups){
   for(i in 1:length(betas)){
     g <- groups[i]
     quantiles <- quantile(posteriorBeta[,i], probs=c(0.01, 0.99))
-    print(quantiles)
+    #print(quantiles)
     if(quantiles[['1%']]<0 && quantiles[['99%']]>0){
       group_counts[g] <- group_counts[g]+1
     }
@@ -269,6 +269,7 @@ getConfidence <- function(posteriorBeta, groups){
 #' @param group_sizes vector of length #number of groups. Describes the size of each group
 #' This assumes that all columns of a group are together. I.e. if you say group_sizes=c(2,3,3), 
 #' group membership would be (1,1,2,2,2,3,3,3)
+#' @param scale a TRUE/FALSE value indicating whether or not X and Y should be scaled and centered
 #' @param niterations how long to run the Gibbs sampler
 #' @param burnin how many of the first iterations to throw out (effectively by when 
 #' do you expect model to converge)
@@ -276,9 +277,14 @@ getConfidence <- function(posteriorBeta, groups){
 #' Set nfolds=0 if you do not want to do hyperparameter tuning (still tends to perform well)
 #' Note: Other options for running BGLSS include using a pre-specified lambda from CVglasso
 #   This would always do worse, so I only test two types of hyperparameter settings
-runBGLSS <- function(X, Y, group_sizes, niterations=10000, burnin=5000, nfolds=3){
+runBGLSS <- function(X, Y, group_sizes, scale, niterations=10000, burnin=5000, nfolds=3){
 
   set.seed(1)
+  
+  if(scale) {
+    X <- scale(X)
+    Y <- Y - mean(Y)
+  }
   
   #Create folds
   if(nfolds!=0){
@@ -293,7 +299,7 @@ runBGLSS <- function(X, Y, group_sizes, niterations=10000, burnin=5000, nfolds=3
     for(modeltype in 1:2){
       error <- 0
       for(i in 1:nfolds){
-        print(i)
+        #print(i)
         testIndexes <- which(folds==i,arr.ind=TRUE)
         testX <- X[testIndexes, ]
         trainX <- X[-testIndexes, ]
@@ -528,7 +534,7 @@ fitlambdaEM <- function (Y, X, num_update = 100, niter = 100, group_size, a = 1,
     tau2_each_update = array(0, dim = c(ngroup, niter))
     for (iter in 1:niter) {
       if (verbose == TRUE) {
-        print(iter)
+        #print(iter)
       }
       for (i in 1:ngroup) {
         bmk = c()

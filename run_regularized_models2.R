@@ -24,7 +24,7 @@ library(dqrng, lib.loc = library.path)
 #' regression model
 #' @param lm_input_table the input table with values corresponding to all 
 #' variables in the formula
-#' @param type a string indicating the type of regularization (ridge or lasso)
+#' @param type a string indicating the type of regularization (ridge, lasso, or bayesian)
 #' @param debug a TRUE/ FALSE value indicating whether or not we are in debug mode
 #' @param meth_bucketing a TRUE/FALSE value indicating whether or not methylation 
 #' was bucketed; only used in the case of group lasso
@@ -79,16 +79,20 @@ run_regularization_model <- function(formula, lm_input_table, type, debug,
       #if(debug) {print(paste("Optimal Lambda:", optimal_lambda))}
       # Run the model with the best lambda
       best_model <- glmnet(x_data, y_data, alpha = 0, family = "gaussian", 
-                           lambda = optimal_lambda, standardize = FALSE)
+                           lambda = optimal_lambda)
     }, error = function(cond) {best_model <- NA})
     
     # Lasso
   } else if((type == "lasso") | (type == "L1")) {
     tryCatch({
       
+      # Scale and center the x and y data
+      x_data <- scale.default(x_data, center = TRUE, scale = TRUE)
+      y_data <- y_data - mean(y_data)
+      
       # Use a group lasso using the gglasso package, to account
       # for the dummy variables (bucketed variables)
-      v.group <- get_groups_for_variables(x_vars, meth_bucketing, cna_bucketing)
+      v.group <- v.group <- get_groups_for_variables(x_vars, meth_bucketing, cna_bucketing, "label_per_var")
       
       # Get the optimal lambda using cross-validation
       #lasso.cv <- cv.glmnet(x_data, y_data, alpha = 1, lambda = lambdas, 
@@ -106,7 +110,7 @@ run_regularization_model <- function(formula, lm_input_table, type, debug,
       #best_model <- glmnet(x_data, y_data, alpha = 1, family = "gaussian",
       #lambda = optimal_lambda, standardize = FALSE, intercept = FALSE)
       best_model <- gglasso(x_data, y_data, lambda = optimal_lambda, 
-                            group = v.group, loss = "ls")
+                            group = v.group, loss = "ls", intercept = FALSE)
       
       # Get a p-value or some form of significance measure for these results,
       # as specified in the argument
@@ -153,6 +157,47 @@ run_regularization_model <- function(formula, lm_input_table, type, debug,
     })
     
     
+  # Bayesian Lasso
+  } else if (type %in% c("bayesian.bgl", "bayesian.bglss")) {
+    
+    x_data <- scale.default(x_data, center = TRUE, scale = TRUE)
+
+    print("X data")
+    print(head(x_data))
+    
+    # Y data needs to be a vector
+    y_data <- as.numeric(unlist(y_data))
+    y_data <- y_data - mean(y_data)
+    print("Y data")
+    print(y_data)
+
+    
+    # Use a group lasso using the gglasso package, to account
+    # for the dummy variables (bucketed variables)
+    v.group <- NA
+    if(type == "bayesian.bglss") {
+      v.group <- get_groups_for_variables(x_vars, meth_bucketing, cna_bucketing, "group_sizes")
+    } else {v.group <- get_groups_for_variables(x_vars, meth_bucketing, cna_bucketing, "label_per_var")}
+    print("v.group")
+    print(v.group)
+    
+    
+    # Call external Bayesian functions from run_bayesian_lasso.R
+    if(type == "bayesian.bgl") {
+      bgl_res <- runBGL(x_data, y_data, groups = v.group, scale = FALSE)
+      print("bgl_res")
+      print(bgl_res$Sparse_Beta)
+      best_model <- data.table("term" = colnames(x_data), "estimate" = bgl_res$Sparse_Beta, 
+                                  "p.value" = bgl_res$Confidence)
+      print("best model")
+      print(head(best_model))
+    } else {
+      bglss_res <- runBGLSS(x_data, y_data, group_sizes = v.group, scale = FALSE)
+      best_model <- data.table("term" = colnames(x_data), "estimate" = bglss_res$pos_median, 
+                                  "p.value" = bglss_res$Confidence)
+    }
+      
+    
   } else {
     print(paste("Only implemented for ridge or lasso;", 
                 paste(type, "is not implemented. Proceeding with ridge.")))
@@ -167,8 +212,8 @@ run_regularization_model <- function(formula, lm_input_table, type, debug,
   }
   
   #if(debug) {
-  #print("Summary of Best Regularized Model")
-  #print(summary(best_model))
+    #print("Summary of Best Regularized Model")
+    #print(summary(best_model))
   #}
   #best_model <- tidy(best_model)
   
@@ -208,7 +253,12 @@ eval_metrics <- function(model, df, predictions, target){
 #' was bucketed
 #' @param cna_bucketing a TRUE/FALSE value indicating whether or not CNA was
 #' bucketed
-get_groups_for_variables <- function(x_vars, meth_bucketing, cna_bucketing) {
+#' @param type_of_grouping either "label_per_var" or "group_sizes"; label_per_var 
+#' indicates that we return a vector of the length of X_vars, with a number for each 
+#' position indicating that variables group membership; group_sizes indicates that
+#' we give a vector of the size of each group, assuming that group members are 
+#' contiguous in the X data input
+get_groups_for_variables <- function(x_vars, meth_bucketing, cna_bucketing, type_of_grouping) {
   
   # Obtain the bucketed, categorical variables
   bucketed_vars <- c("Tot_Mut_b","Tumor_purity_b", "Tot_IC_Frac_b", "Cancer_type_b")
@@ -255,6 +305,12 @@ get_groups_for_variables <- function(x_vars, meth_bucketing, cna_bucketing) {
       group_assignments <- c(group_assignments, grp_index)
       curr_grp <- x
     }
+  }
+  
+  if(type_of_grouping == "group_sizes") {
+    unique_groups <- unique(group_assignments)
+    new_group_assignments <- sapply(unique_groups, function(g) length(group_assignments[group_assignments == g]))
+    return(new_group_assignments)
   }
   #print(x_vars)
   #print(group_assignments)

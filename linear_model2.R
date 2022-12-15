@@ -32,9 +32,10 @@ library(doParallel, lib.loc = library.path)
 
 # Source other files needed
 source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Sara_LinearModel/"
-source(paste(source_path, "/general_important_functions2.R", sep = ""))
-source(paste(source_path, "/linear_model_helper_functions2.R", sep = ""))
-source(paste(source_path, "/run_regularized_models2.R", sep = ""))
+source(paste(source_path, "general_important_functions2.R", sep = "/"))
+source(paste(source_path, "linear_model_helper_functions2.R", sep = "/"))
+source(paste(source_path, "run_regularized_models2.R", sep = "/"))
+source(paste(source_path, "run_bayesian_lasso.R", sep = "/"))
 
 
 ############################################################
@@ -798,9 +799,7 @@ run_linear_model <- function(protein_ids_df, downstream_target_df, patient_df,
     }
     
     shuffled_input_dfs <- NA
-    print("dim starter DF")
-    print(dim(starter_df))
-    if((model_type == "linear") & (regularization != "None")) {
+    if((model_type == "linear") & (regularization %fin% c("L1", "L2", "lasso", "ridge"))) {
       shuffled_input_dfs <- get_shuffled_input_dfs(signif_eval_type, protein_ids_df, 
                                                    starter_df, expression_df, 
                                                    num_randomizations)
@@ -983,9 +982,12 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
                           
     # Source the necessary files for the worker node
     source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Sara_LinearModel/"
-    source(paste(source_path, "/general_important_functions2.R", sep = ""))
-    source(paste(source_path, "/linear_model_helper_functions2.R", sep = ""))
-    if (regularization != "None") {source(paste(source_path, "/run_regularized_models2.R", sep = ""))}
+    source(paste(source_path, "general_important_functions2.R", sep = "/"))
+    source(paste(source_path, "linear_model_helper_functions2.R", sep = "/"))
+    if (regularization != "None") {
+      source(paste(source_path, "run_regularized_models2.R", sep = "/"))
+      source(paste(source_path, "run_bayesian_lasso.R", sep = "/"))
+    }
     
     # Get the target t_k's Swissprot & ENSG IDs
     targ <- unlist(strsplit(currentRow$swissprot, ";", fixed = TRUE))
@@ -1060,7 +1062,8 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
       } 
 
     } else if ((model_type == "linear") & (regularization == "L2" | regularization == "ridge" | 
-                                           regularization == "L1" | regularization == "lasso")) {
+                                           regularization == "L1" | regularization == "lasso" |
+                                           regularization == "bayesian.bgl" | regularization == "bayesian.bglss")) {
       
       # Create a file to hold the lambda values
       lm_fit <- run_regularization_model(formula = formula, lm_input_table = lm_input_table, 
@@ -1069,7 +1072,9 @@ run_linear_model_per_target_gene <- function(downstream_target_df, methylation_d
                                          shuffled_input_dfs = shuffled_input_dfs, ensg = targ_ensg,
                                          num_randomizations = num_randomizations,
                                          fixed_lambda_for_rand = fixed_lambda_for_rand)
+      
       summary_table <- lm_fit
+      print(head(summary_table))
       
       ## OLD: for cases in which we want to use LASSO as variable selection and input 
       ## the selected variables into a new linear model
