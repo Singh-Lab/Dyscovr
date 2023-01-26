@@ -386,6 +386,138 @@ get_tnm_fc <- function(df, sample) {
 #' tumor-normal matched run
 #' @param QTL_type either "eQTL" or "meQTL" depending on the type of run we are running
 #' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3'
+create_lm_input_file_outpath <- function(cancerType, specificType, test, tester_name, 
+                                run_name, tumNormMatched, QTLtype, dataset) {
+  outpath <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files"
+  
+  if(dataset != "TCGA") {
+    outpath <- paste(outpath, dataset, sep = "/")
+    
+  } else {
+    outpath <- paste(outpath, cancerType, sep = "/")
+    if(!(specificType == "")) {outpath <- paste(outpath, specificType, sep = "/")}
+    
+    if(tumNormMatched) {
+      outpath <- paste(outpath, "tumor_normal_matched", sep = "/")
+    } else {outpath <- paste(outpath, "tumor_only", sep = "/")}
+  }
+
+  outpath <- paste(outpath, "lm_input_tables", sep = "/")
+  
+  if(test) {
+    outpath <- paste(outpath, tester_name, sep = "/")
+  } else {outpath <- paste(outpath, run_name, sep = "/")}
+  
+  outpath <- paste(outpath, QTLtype, sep = "/")
+  print(paste("File outpath:", outpath))
+  
+  return(outpath)
+}
+
+
+############################################################
+#' Create the appropriate output file name for the master DF result based on the
+#' conditions of the given run
+#' @param test a TRUE/ FALSE value indicating whether this is a test on a single
+#' regulatory protein
+#' @param tester_name if this is a test, the name of the tester regulatory protein
+#' @param run_name string value indicating the type of run if we are not running 
+#' a test on a single regulatory protein
+#' @param target_uniprot a Uniprot ID of the target gene for the given DF
+#' @param expression_df_name the string name used to import the expression DF
+#' @param cna_bucketing a string description of how we are bucketing/ handling 
+#' CNA values
+#' @param mutation_regprot_df_name the string name used to import the mutation
+#' regprot DF (used to get the level of specificity of mutations)
+#' @param meth_bucketing a TRUE/ FALSE value indicating if we are in some way 
+#' bucketing our methylation value
+#' @param meth_type 'Beta' or 'M' depending on the type of methylation we are
+#' using
+#' @param patient_df_name the string name used to import the patient DF
+#' @param num_PEER an integer value from 0 to 10 indicating the number of PEER 
+#' factors we are using
+#' @param num_pcs an integer value from 0 to 2 indicating the number of principal
+#' components we are using
+#' @param randomize a TRUE/ FALSE value indicating whether or not we are randomizing
+#' our dependent variable (expression or methylation)
+#' @param patients_to_incl_label a label indicating the subpopulation we are restricting 
+#' to, if any
+#' @param removeCis a TRUE/ FALSE value indicating whether or not we have removed
+#' cis gene pairings 
+#' @param removeMetastatic a TRUE/ FALSE value indicating whether or not we have removed 
+#' metastatic samples from the analysis
+create_lm_input_table_filename <- function(test, tester_name, run_name, target_uniprot, expression_df_name,
+                                   cna_bucketing, mutation_regprot_df_name, meth_bucketing,
+                                   meth_type, patient_df_name, num_PEER, num_pcs, randomize,
+                                   patients_to_incl_label, removeCis, removeMetastatic) {
+  outfn <- "lm_input"
+  
+  # Add the name of the patient population of interest, if there is one
+  if(!(patients_to_incl_label == "")) {
+    outfn <- paste(outfn, patients_to_incl_label, sep = "_")
+  }
+  
+  # Add the name of the regulatory protein/ group of regulatory proteins
+  if(test) {
+    outfn <- paste(outfn, tester_name, sep = "_")
+  } else {outfn <- paste(outfn, run_name, sep = "_")} 
+  
+  # Add the name of the target 
+  outfn <- paste(outfn, target_uniprot[1], sep = "_")
+  
+  # Add the decisions for expression normalization, CNA bucketing, mutation restriction, 
+  # methylation bucketing, and immune cell deconvolution bucketing 
+  expr_norm <- unlist(strsplit(expression_df_name, "_", fixed = TRUE))[2]
+  cna_bucketing_lab <- "rawCNA"
+  if (cna_bucketing != "rawCNA") {cna_bucketing_lab <- paste("CNA", cna_bucketing, sep = "")}
+  mutation_restr <- unlist(strsplit(mutation_regprot_df_name, "_", fixed = TRUE))[1]
+  meth_b_lab <- "Raw"
+  if(meth_bucketing) {
+    meth_b_lab <- "Bucketed"
+  }
+  meth_label <- paste("meth", paste(meth_type, meth_b_lab, sep = ""), sep = "")
+  ici_label_spl <- unlist(strsplit(patient_df_name, "_", fixed = TRUE))
+  ici_label <- ici_label_spl[4]
+  if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
+  if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
+  
+  outfn <- paste(outfn, paste(mutation_restr, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
+                                                                     sep = "_"), sep = "_"), sep = "_"), sep = "_")
+  
+  # Add PEER factors/ PCs if needed
+  if(!(num_PEER == 0)) {outfn <- paste(outfn, paste(num_PEER, "PEER", sep = ""), sep = "_")}
+  if(!(num_pcs == 0))  {outfn <- paste(outfn, paste(num_pcs, "PCs", sep = ""), sep = "_")}
+  
+  # If we are NOT removing cis comparisons, add a label to denote this
+  if(removeCis) {outfn <- paste(outfn, "RmCis", sep = "_")}
+  
+  # If we are NOT removing metastatic samples, add a label to denote this
+  if(!removeMetastatic) {outfn <- paste(outfn, "notRmMetast", sep = "_")}
+  
+  # If we randomized expression, add "_RANDOMIZED" to the end of the file name
+  if (randomize) {outfn <- paste(outfn, "_RANDOMIZED", sep = "")}
+  
+  print(paste("Outfile Name", outfn))
+  
+  return(outfn)
+}
+
+
+############################################################
+#' Create the appropriate output file path (add the cancer type, the regulatory protein group 
+#' or tester name, tumor-normal matched or tumor only, and the analysis type (eQTL or meQTL)
+#' @param cancerType the name of the type of cancer, or "PanCancer" for all cancers
+#' @param specificType if we are looking pan-cancer, but for specific cancer types 
+#' individually, the specific cancer type we are looking at is given
+#' @param test a TRUE/ FALSE value indicating whether this is a test on a single
+#' regulatory protein
+#' @param tester_name if this is a test, the name of the tester regulatory protein
+#' @param run_name string value indicating the type of run if we are not running 
+#' a test on a single regulatory protein 
+#' @param tumNormMatched a TRUE/ FALSE value indicating whether or not this is a 
+#' tumor-normal matched run
+#' @param QTL_type either "eQTL" or "meQTL" depending on the type of run we are running
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3'
 create_file_outpath <- function(cancerType, specificType, test, tester_name, 
                                 run_name, tumNormMatched, QTLtype, dataset) {
   outpath <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/output_files"
@@ -410,8 +542,8 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
   
   return(outpath)
 }
-  
-  
+
+
 ############################################################
 #' Create the appropriate output file name for the master DF result based on the
 #' conditions of the given run
@@ -493,7 +625,7 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   if(!(num_pcs == 0))  {outfn <- paste(outfn, paste(num_pcs, "PCs", sep = ""), sep = "_")}
   
   # If we are NOT removing cis comparisons, add a label to denote this
-  if(!removeCis) {outfn <- paste(outfn, "noRmCis", sep = "_")}
+  if(removeCis) {outfn <- paste(outfn, "RmCis", sep = "_")}
   
   # If we are NOT removing metastatic samples, add a label to denote this
   if(!removeMetastatic) {outfn <- paste(outfn, "notRmMetast", sep = "_")}
@@ -517,7 +649,7 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
     }
     if (regularization %in% c("L2", "ridge")) {outfn <- paste(outfn, "L2", sep = "_")}
     if (regularization == "bayesian.bgl") {outfn <- paste(outfn, "bayesian.bgl", sep = "_")}
-    if (regularization == "bayesian.bglss") {outfn <- paste(outfn, "bayesian.bglss", sep = "")}
+    if (regularization == "bayesian.bglss") {outfn <- paste(outfn, "bayesian.bglss", sep = "_")}
   }
   
   # If we've restricted the number of covariates, add that label
@@ -534,21 +666,44 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   return(outfn)
 }
 
+############################################################
+#' Short function for combining the output tibbles produced for each row in list_of_rows
+#' Used to recombine output of foreach
+#' @param x_tab the first output table of results
+#' @param y_tab the second output table of results
+combine_tab <- function(x_tab, y_tab) {
+  if (is.na(x_tab)) {
+    if(is.na(y_tab)) {
+      x_tab <- t(as.data.table(rep(NA, times = 6)))
+      y_tab <- t(as.data.table(rep(NA, times = 6)))
+    } else {
+      x_tab <- t(as.data.table(rep(NA, times = ncol(y_tab))))
+      colnames(x_tab) <- colnames(y_tab)
+    }
+  } else {
+    if(is.na(y_tab)) {
+      y_tab <- t(as.data.table(rep(NA, times = ncol(x_tab))))
+      colnames(y_tab) <- colnames(x_tab)
+    }
+  }
+  comb_dt <- rbindlist(list(as.data.table(x_tab), as.data.table(y_tab)), 
+                       use.names = TRUE, fill = TRUE)
+  return(comb_dt)
+}
 
+############################################################
 #' A function to get a list of randomized input DFs (either per-sample or per-target expression
 #' DFs, or shuffled starter DFs) that will be input to our regularized regression model 
 #' to generate an empirical p-value
 #' @param signif_eval_type either "randomization_predictors", "randomization_perTarg", or
 #' "randomization_perSamp" to denote what type of significance evaluation we are doing,
 #' and therefore what data frame we will need to randomize and along what axis
-#' @param protein_ids_df a data frame with swissprot and ensg IDs for the driver genes we're testing
-#' @param starter_df for the predictor randomization; a data frame with covariates for the drivers 
+#' @param lm_input_df for the predictor randomization; a data frame with covariates for the drivers 
 #' @param expression_df for the per-sample and per-target expression randomization; an expression
 #' data frame (first column is ENSG ID)
 #' @param num_randomizations the number of randomizations we are performing (will equal the 
 #' length of the output list)
-get_shuffled_input_dfs <- function(signif_eval_type, protein_ids_df, starter_df, 
-                                   expression_df, num_randomizations) {
+get_shuffled_input_dfs <- function(signif_eval_type, lm_input_df, expression_df, num_randomizations) {
   
   shuffled_input_dfs <- NA
   
@@ -556,7 +711,8 @@ get_shuffled_input_dfs <- function(signif_eval_type, protein_ids_df, starter_df,
   # generating a p-value, we want to pre-shuffle the input data frame per-driver and save 
   # these DFs as a list
   if (signif_eval_type == "randomization_predictors") {
-    swissprot_ids <- protein_ids_df$swissprot_ids
+    swissprot_ids <- unique(unlist(lapply(colnames(lm_input_df)[grepl("MutStat_i", colnames(lm_input_df))], function(x)
+      unlist(strsplit(x, "-", fixed = TRUE))[1])))
     driver_indices <- lapply(swissprot_ids, function(s) which(grepl(s, colnames(starter_df))))
     remaining_indices <- setdiff(1:ncol(starter_df), unlist(driver_indices))
     non_driver_starter_df <- starter_df[, remaining_indices, with = FALSE]
@@ -570,7 +726,7 @@ get_shuffled_input_dfs <- function(signif_eval_type, protein_ids_df, starter_df,
       return(shuffled_df)
     })
   } else if (signif_eval_type == "randomization_perSamp") {
-    expression_df_sub <- expression_df[,colnames(expression_df) %fin% starter_df$sample_id, with = FALSE]
+    expression_df_sub <- expression_df[,colnames(expression_df) %fin% lm_input_df$sample_id, with = FALSE]
     
     shuffled_input_dfs <- lapply(1:num_randomizations, function(i) {
       expression_df_rand <- apply(expression_df_sub, MARGIN = 2,  function(x) dqrng::dqsample(x))
@@ -637,7 +793,7 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
                              methylation_df, cna_df, expression_df, log_expression, cna_bucketing,
                              meth_bucketing, analysis_type, tumNormMatched, debug, dataset) {
   
-  print(paste("Target:", targ_k))
+  #print(paste("Target:", targ_k))
   
   if(debug) {
     print(paste("Target:", targ_k))
@@ -727,13 +883,233 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
       })
       
       return(full_df)
+    } else {
+      if(debug) {
+        print(paste("Target not found in all DFs:", targ_k))
+      }
+      return(NA)
     }
   } else {
     if(debug) {
-      print(paste("Target not found in all DFs:", targ_k))
+      print(paste("Target Uniprot or ENSG ID is missing,", targ_k))
     }
     return(NA)
   }
+}
+
+
+############################################################
+#### LIMIT TARGETS FILE TO ONLY THOSE TARGETS WITHOUT A
+#### FILE IN THE PROVIDED DIRECTORY
+############################################################
+#' Limits the target gene DF to only those targets that don't have an 
+#' existing file in the outpath provided
+#' @param outpath the path to which the LM input files will be written
+#' @param targets_DF the data frame with gene targets for LM input file creation
+#' @param gene_name_index the numerical index of where the target gene name is found
+#' in a given file name
+limit_to_targets_wo_existing_files <- function(outpath, targets_DF, gene_name_index) {
+  # Get all the existing files in this path, if any exist
+  files_in_outpath <- list.files(paste0(outpath, "/"), pattern = "lm_input_")
+  
+  # Check if there are sub-directories in this path that might contain the file
+  dirs_in_path <- list.dirs(outpath)
+  if(TRUE %in% unlist(lapply(dirs_in_path, function(d) grepl("part_", d)))) {
+    dirs_part <- dirs_in_path[grepl("part_", dirs_in_path)]
+    for (d in dirs_part) {
+      files_d <- list.files(paste0(d, "/"), pattern = "lm_input_")
+      files_in_outpath <- c(files_in_outpath, files_d)
+    }
+  } 
+  genes_in_outpath <- unlist(lapply(files_in_outpath, function(f) 
+    unlist(strsplit(f, "_", fixed = TRUE))[gene_name_index]))
+  
+  rows_to_keep <- unlist(lapply(1:targets_DF[, .N], function(i) {
+    ids <- unlist(strsplit(as.character(targets_DF[i, 'swissprot']), ';', fixed = TRUE))
+    if(length(intersect(ids, genes_in_outpath)) > 0) {return(NA)}
+    else {return(i)}
+  }))
+  rows_to_keep <- rows_to_keep[!is.na(rows_to_keep)]
+
+  targets_DF <- targets_DF[rows_to_keep,]
+  print("Targets DF, subsetted")
+  print(dim(targets_DF))
+  
+  return(targets_DF)
+}
+
+############################################################
+#### ADJUST THE LINEAR MODEL INPUT TABLE TO EXCLUDE -INF OR INF VALS
+############################################################
+#' Make sure any -Inf or Inf values are given NA and then omitted
+#' If a column is >25% Inf or -Inf, remove that column first
+#' @param lm_input_table the LM input table for a given target gene
+fix_lm_input_table <- function(lm_input_table) {
+  
+  nrow <- lm_input_table[, .N]
+  
+  # Check for columns that are mostly -Inf or Inf
+  cols_to_keep <- unlist(lapply(1:ncol(lm_input_table), function(i) {
+    col <- unlist(lm_input_table[,i, with = FALSE])
+    if(length(col[(col == Inf) | (col == -Inf) | 
+                  (col == "Inf") | (col == "-Inf")]) > (0.25 * nrow)) {
+      return(NA)
+    } else {return(i)}
+  }))
+  cols_to_keep <- cols_to_keep[!is.na(cols_to_keep)]
+  
+  lm_input_table_sub <- lm_input_table[, cols_to_keep, with = FALSE]
+  
+  # Then, remove all remaining rows with Inf or -Inf values
+  lm_input_table_sub[(lm_input_table_sub == -Inf) | (lm_input_table_sub == "-Inf") |
+                   (lm_input_table_sub == Inf) | (lm_input_table_sub == "Inf")] <- NA
+  lm_input_table_sub <- na.omit(lm_input_table_sub)
+  
+  return(lm_input_table_sub)
+}
+
+############################################################
+#### IMPORT ALL THE LINEAR MODEL INPUT TABLES FROM A LIST
+############################################################
+#' Given a vector of linear model input file names (without path attached)
+#' this function reads them into a list of data tables that are returned
+#' @param lm_input_fns_sub vector of LM input files
+#' @param input_lm_filepath the path to the linear model input files
+#' @param randomize TRUE/FALSE value to indicate whether or not we are randomizing 
+#' the target variable
+#' @param gene_names_sub vector of the genes associated with each of the LM input files
+#' @param select_drivers a given semicolon-separated string with the drivers we 
+#' wish to include in each DF
+#' @param select_args a vector of covariates we plan to include in the consequent model
+#' @param num_pcs the number of genotypic PCs to include
+#' @param num_PEER the number of PEER factors to include
+#' @param qtl_type the type of model (eQTL or meQTL)
+import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, gene_names_sub,
+                                select_drivers, select_args, num_pcs, num_PEER, qtl_type) {
+  
+  # Get a threshold for number of samples
+  # Set threshold to 25, as suggested in this paper: https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0229345
+  thres <- 25
+  print(paste0("Minimum number of samples with data for a given gene:", thres))
+  
+  num_wo_yvar <- 0
+  
+  lm_input_dfs <- lapply(lm_input_fns_sub, function(fn) {
+    
+    # Import file
+    if(!is.na(fn)) {
+      file <- fread(paste(input_lm_filepath, fn, sep = "/"), header = TRUE)
+      
+      # Filter and randomize, if needed
+      if(qtl_type == "eQTL") {
+        if("ExpStat_k" %fin% colnames(file)) {
+          if(nrow(file) >= thres) {
+            if(randomize) {file$ExpStat_k <- dqsample(file$ExpStat_k)}
+            # Do some preliminary filtering of columns we do not need
+            file_filt <- filter_input_file(file, select_drivers, select_args, 
+                                           num_pcs, num_PEER)
+            #print(head(file_filt))
+            return(file_filt)
+          } else {
+            num_wo_yvar <- num_wo_yvar + 1
+            return(NA)
+          }
+        } else {return(NA)}
+        
+      } else if(qtl_type == "meQTL") {
+        if("MethStat_k" %fin% colnames(file)) {
+          if(nrow(file) >= thres) {
+            if(randomize) {file$MethStat_k <- dqsample(file$MethStat_k)}
+            # Do some preliminary filtering of columns we do not need
+            file_filt <- filter_input_file(file, select_drivers, select_args, 
+                                           num_pcs, num_PEER)
+            #print(head(file_filt))
+            return(file_filt)
+          } else {return(NA)}
+        } else {
+          num_wo_yvar <- num_wo_yvar + 1
+          return(NA)
+        }
+      } else {
+        print("QTL type is invalid. Only eQTL and meQTL are implemented. Returning NA.")
+        return(NA)
+      }
+    }
+  })
+  
+  print(paste("Number of genes without a y-variable column, also discarded: ",  num_wo_yvar))
+  
+  names(lm_input_dfs) <- gene_names_sub
+  return(lm_input_dfs)
+}
+
+
+############################################################
+#### FILTER THE LM INPUT TABLE TO EXCLUDE COLUMNS WE DON'T NEED
+############################################################
+#' Filter out columns we don't need from the LM input table given the selected
+#' drivers, arguments, number of PCs/ PEER facors, and race
+#' @param lm_input_table the LM input table for a given target gene
+#' @param select_drivers vector of driver Uniprot IDs to keep in model
+#' @param covs_to_incl a vector, either c("ALL") to include all covariates, or a vector
+#' of all the covariates we want to keep
+#' @param num_PEER a value from 0-10 indicating the number of PEER factors we 
+#' are including as covariates in the model
+#' @param num_pcs a value from 0-2 indicating the number of  
+#' principal components we are including as covariates in the model 
+filter_input_file <- function(lm_input_table, select_drivers, covs_to_incl, num_pcs, num_PEER) {
+  
+  colnames_to_incl <- colnames(lm_input_table)
+  
+  # Note: currently excluding age b1 and age b2 since no patients fall into these categories
+  colnames_to_incl <- colnames_to_incl[!((colnames_to_incl == "Age_b1") | (colnames_to_incl == "Age_b2"))]
+  
+  # Remove the race variable entirely
+  colnames_to_incl <- colnames_to_incl[!(grepl("Race", colnames_to_incl))]
+
+  # Remove the PEER factors we are not using
+  peer_factors <- colnames_to_incl[grepl("PEER", colnames_to_incl)]
+  peer_fact_to_remove <- setdiff(peer_factors, peer_factors[0:num_PEER])
+  colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% peer_fact_to_remove)]
+  
+  # Remove the PCs we are not using
+  pcs <- colnames_to_incl[grepl("PC", colnames_to_incl)]
+  pcs_to_remove <- setdiff(pcs, pcs[0:num_pcs])
+  colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% pcs_to_remove)]  
+  
+  # Exclude the library size
+  colnames_to_incl <- colnames_to_incl[!(colnames_to_incl == "Lib_Size")]
+  
+  if(select_drivers != "ALL") {
+    select_driver_vect <- unlist(strsplit(select_drivers, ";", fixed = TRUE))
+    drivers_in_tab <- unlist(lapply(colnames_to_incl[grepl("MutStat_i", colnames_to_incl)], function(x)
+      unlist(strsplit(x, "_", fixed = TRUE))[1]))
+    drivers_to_exclude <- setdiff(drivers_in_tab, select_driver_vect)
+    drivers_to_exclude_covs <- unlist(lapply(drivers_to_exclude, function(d) 
+      return(colnames_to_incl[grepl(d, colnames_to_incl)])))
+    colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% drivers_to_exclude_covs)]
+  }
+  
+  # Additionally, if we have any columns that are uniform (the same value in all patients) we'd 
+  # like to remove those as well, as long as they are not MutStat_i, CNAStat_i or FNCStat_i
+  uniform_val_tf <- sapply(lm_input_table, function(x) length(unique(x)) == 1)
+  if(TRUE %fin% uniform_val_tf) {
+    uniform_val_ind <- which(uniform_val_tf)
+    uniform_vals <- colnames(lm_input_table)[uniform_val_ind]
+    uniform_vals <- uniform_vals[!(grepl("MutStat_i", uniform_vals) | grepl("CNAStat_i", uniform_vals) | 
+                                     grepl("FNCStat_i", uniform_vals))]
+    colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% uniform_vals)]
+  }
+  
+  # Now, of the variables we have left, include only those given in the covs_to_include parameter
+  if(!(covs_to_incl[1] == "ALL")) {
+    colnames_to_incl <- unlist(lapply(colnames_to_incl, function(x) {
+      if(any(unlist(lapply(covs_to_incl, function(y) grepl(y, x))))) {return(x)}
+    }))
+  }
+  lm_input_table_sub <- lm_input_table[, which(colnames(lm_input_table) %fin% colnames_to_incl), with = FALSE]
+  
+  return(lm_input_table_sub)
 }
 
 
@@ -744,36 +1120,23 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
 #' contructs a formula to pass to the speedlm formula. Removes 
 #' unnecessary covariates, etc.
 #' @param lm_input_table the LM input table produced from the above function
+#' @param protein_ids_df the input DF of all drivers/ regulatory proteins
 #' @param analysis_type 'eQTL' or 'meQTL'
-#' @param num_PEER a value from 0-10 indicating the number of PEER factors we 
-#' are including as covariates in the model
-#' @param num_pcs a value from 0-2 indicating the number of  
-#' principal components we are including as covariates in the model 
 #' @param cna_bucketing a string indicating if/how we are bucketing CNA values. Possible
 #' values are "bucketInclAmp", "bucketExclAmp", and "rawCNA"
 #' @param meth_bucketing a TRUE/FALSE value indicating whether or not we are bucketing
 #' methylation values
-#' @param covs_to_incl a vector, either c("ALL") to include all covariates, or a vector
-#' of all the covariates we want to keep
-construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
-                              cna_bucketing, meth_bucketing, covs_to_incl) {
+#' @param runRegprotsJointly a TRUE/ FALSE value indicating whether or not we are 
+#' running all our drivers/ regulatory proteins jointly in one model
+construct_formula <- function(lm_input_table, protein_ids_df, analysis_type, 
+                              cna_bucketing, meth_bucketing, runRegprotsJointly) {
+  
+  print("Now constructing formula...")
+
+  # Exclude sample ID
   colnames_to_incl <- colnames(lm_input_table)[2:ncol(lm_input_table)]
-  
-  # Note: currently excluding age b1 and age b2 since no patients fall into these categories
-  colnames_to_incl <- colnames_to_incl[!((colnames_to_incl == "Age_b1") | (colnames_to_incl == "Age_b2"))]
-  
-  # Remove the race variable entirely
-  colnames_to_incl <- colnames_to_incl[!(grepl("Race", colnames_to_incl))]
-  
-  # Remove the PEER factors we are not using
-  peer_factors <- colnames_to_incl[grepl("PEER", colnames_to_incl)]
-  peer_fact_to_remove <- setdiff(peer_factors, peer_factors[0:num_PEER])
-  colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% peer_fact_to_remove)]
-  
-  # Remove the PCs we are not using
-  pcs <- colnames_to_incl[grepl("PC", colnames_to_incl)]
-  pcs_to_remove <- setdiff(pcs, pcs[0:num_pcs])
-  colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% pcs_to_remove)]  
+  #print(length(colnames_to_incl))
+  if(length(colnames_to_incl) < 3) {print(lm_input_table)}
   
   # For the bucketed variables, remove the last bucket (we don't need it!)
   bucketed_vars <- c("Tot_Mut_b","Tumor_purity_b", "Tot_IC_Frac_b", "Cancer_type_b")
@@ -804,25 +1167,6 @@ construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
   }))
   colnames_to_incl <- colnames_to_incl[-vals_to_remove]
   
-  
-  # Additionally, if we have any columns that are uniform (the same value in all patients) we'd 
-  # like to remove those as well, as long as they are not MutStat_i, CNAStat_i or FNCStat_i
-  uniform_val_ind <- which(sapply(lm_input_table, function(x) length(unique(x)) == 1))
-  uniform_vals <- colnames(lm_input_table)[uniform_val_ind]
-  uniform_vals <- uniform_vals[!(grepl("MutStat_i", uniform_vals) | grepl("CNAStat_i", uniform_vals) | 
-                                   grepl("FNCStat_i", uniform_vals))]
-  colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% uniform_vals)]
-  
-  # Exclude the library size, as we are using this as an offset instead
-  colnames_to_incl <- colnames_to_incl[!(colnames_to_incl == "Lib_Size")]
-  
-  # Now, of the variables we have left, include only those given in the covs_to_include parameter
-  if(!(covs_to_incl[1] == "ALL")) {
-    colnames_to_incl <- unlist(lapply(colnames_to_incl, function(x) {
-      if(any(unlist(lapply(covs_to_incl, function(y) grepl(y, x))))) {return(x)}
-    }))
-  }
-  
   if (analysis_type == "eQTL") {      
     colnames_to_incl <- colnames_to_incl[!(colnames_to_incl == "ExpStat_k")]
     formula <- paste(colnames_to_incl, collapse = " + ") 
@@ -835,6 +1179,7 @@ construct_formula <- function(lm_input_table, analysis_type, num_PEER, num_pcs,
     print(paste("Invalid analysis type:", analysis_type))
     return(NA)
   }
+  
   return(formula)
 }
 

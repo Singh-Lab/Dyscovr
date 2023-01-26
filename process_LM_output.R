@@ -36,7 +36,7 @@ library("RColorBrewer", lib.loc = library.path)
 ############################################################
 # Path to where output figures should be saved
 output_vis_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/output_visualizations/"
-if(args$dataset != "TCGA") {output_vis_path <- paste0(output_vis_path, args$dataset)}
+if(args$dataset != "TCGA") {output_vis_path <- paste0(output_vis_path, paste0(args$dataset, "/"))}
 
 output_vis_path <- paste0(output_vis_path, args$cancerType)
 
@@ -63,120 +63,6 @@ all_genes_id_conv <- read.csv("/Genomics/grid/users/scamilli/thesis_work/run-mod
 # Adjust the outfn for visualizations
 outfn_vis <- paste(unlist(strsplit(outfn, "_", fixed = TRUE))[2:length(unlist(strsplit(outfn, "_", fixed = TRUE)))], 
                collapse = "_")
-
-############################################################
-############################################################
-#### BASIC VISUALIZTION OF OUTPUT
-############################################################
-############################################################
-
-############################################################
-#### VISUALIZE BETA VALUE DISTRIBUTION
-############################################################
-#' Function plots a histogram to visualize the distribution
-#' of regulatory protein r_i beta values across all linear models.
-#' @param results_table a master DF produced from run_linear_model()
-visualize_beta_distrib <- function(results_table) {
-  betas <- results_table$estimate
-  hist(betas, main = "Histogram of Beta Coefficient Values Across all Reg. Proteins",
-       xlab = "Beta Coefficient Value", ylab = "Frequency", col = "darkseagreen2")
-}
-
-
-# Create specific filenames
-if(!useNumFunctCopies) {
-  fn_mut <- paste(output_vis_path, paste("BetaDistrib_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  fn_cna <- paste(output_vis_path, paste("BetaDistrib_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  
-  print(paste("FN MUT:", fn_mut))
-  print(paste("FN CNA:", fn_cna))
-  
-  # Call this function & save output
-  tryCatch({
-    png(fn_mut, width = 450, height = 350)
-    visualize_beta_distrib(master_df_mut)
-    dev.off()
-    
-    png(fn_cna, width = 450, height = 350)
-    visualize_beta_distrib(master_df_cna)
-    dev.off()
-  }, error = function(cond) {print(cond)})
-} else {
-  fn_fnc <- paste(output_vis_path, paste("BetaDistrib_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  print(paste("FN FNC:", fn_fnc))
-  tryCatch({
-    png(fn_fnc, width = 450, height = 350)
-    visualize_beta_distrib(master_df_fnc)
-    dev.off()
-  }, error = function(cond) {print(cond)})
-}
-
-
-############################################################
-#### VISUALIZE P-VALUE DISTRIBUTION
-############################################################
-#' Function plots a histogram to visualize the distribution
-#' of regulatory protein r_i beta values across all linear models.
-#' @param results_table a master DF produced from run_linear_model()
-visualize_pval_distrib <- function(results_table) {
-  pvals <- results_table$p.value[!is.na(results_table$p.value) & 
-                                   !is.infinite(results_table$p.value)]
-  hist(pvals, main = "Histogram of p-Values",
-       xlab = "p-value", ylab = "Frequency", col = "blueviolet")
-}
-
-# Create specific filenames
-if("p.value" %fin% colnames(master_df_mut)) {
-  if(!useNumFunctCopies) {
-    fn_mut <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-    fn_cna <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-    
-    # Call this function & save output
-    tryCatch({
-      png(fn_mut, width = 450, height = 350)
-      visualize_pval_distrib(master_df_mut)
-      dev.off()
-      
-      png(fn_cna, width = 450, height = 350)
-      visualize_pval_distrib(master_df_cna)
-      dev.off()
-    }, error = function(cond) {print(cond)})
-  } else {
-    fn_fnc <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-    # Call this function & save output
-    tryCatch({
-      png(fn_fnc, width = 450, height = 350)
-      visualize_pval_distrib(master_df_fnc)
-      dev.off()
-    }, error = function(cond) {print(cond)})
-  }
-}
-
-
-############################################################
-#### VISUALIZE Q-Q PLOT
-############################################################
-#' Function plots a Q-Q plot to visualize the distribution of p-values
-#' and assess whether they come from a uniform distribution
-#' @param results_table a master DF produced from run_linear_model()
-qqplot_pvals <- function(results_table) {
-  qqnorm(results_table$p.value, pch = 1, frame = FALSE)
-  qqline(results_table$p.value, col = "steelblue", lwd = 2)
-}
-
-
-############################################################
-#### VISUALIZE ERROR DISTRIBUTION
-############################################################
-#' Function plots a histogram of the standard errors produced from
-#' all LM runs to assess whether the errors derive from a normal distribution
-#' @param results_table a master DF produced from run_linear_model()
-visualize_error_distrib <- function(results_table) {
-  hist(results_table$std.error, main = "Standard Error Distribution Across All Tests",
-       xlab = "Standard Error (SE)", ylab = "Frequency")
-}
-
-
 ############################################################
 ############################################################
 #### PEFORM MULTIPLE HYPOTHESIS TESTING CORRECTION
@@ -290,12 +176,125 @@ if(!useNumFunctCopies) {
   tryCatch({
     # Call this function
     master_df_fnc_corrected <- add_targ_regprot_gns(master_df_fnc_corrected, all_genes_id_conv, runRegprotsJointly)
-
+    
     # Write this to a new file
     outfn <- str_replace(outfn, "uncorrected", "corrected") 
     print(paste("NEW FN:", outfn))
     fwrite(master_df_fnc_corrected, paste(outpath, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
   }, error = function(cond) {print(cond)})
+}
+
+
+############################################################
+############################################################
+#### BASIC VISUALIZTION OF OUTPUT
+############################################################
+############################################################
+
+############################################################
+#### VISUALIZE BETA VALUE DISTRIBUTION
+############################################################
+#' Function plots a histogram to visualize the distribution
+#' of regulatory protein r_i beta values across all linear models.
+#' @param results_table a master DF produced from run_linear_model()
+visualize_beta_distrib <- function(results_table) {
+  betas <- results_table$estimate
+  hist(betas, main = "Histogram of Beta Coefficient Values Across all Reg. Proteins",
+       xlab = "Beta Coefficient Value", ylab = "Frequency", col = "darkseagreen2")
+}
+
+
+# Create specific filenames
+if(!useNumFunctCopies) {
+  fn_mut <- paste(output_vis_path, paste("BetaDistrib_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+  fn_cna <- paste(output_vis_path, paste("BetaDistrib_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+  
+  print(paste("FN MUT:", fn_mut))
+  print(paste("FN CNA:", fn_cna))
+  
+  # Call this function & save output
+  tryCatch({
+    png(fn_mut, width = 450, height = 350)
+    visualize_beta_distrib(master_df_mut)
+    dev.off()
+    
+    png(fn_cna, width = 450, height = 350)
+    visualize_beta_distrib(master_df_cna)
+    dev.off()
+  }, error = function(cond) {print(cond)})
+} else {
+  fn_fnc <- paste(output_vis_path, paste("BetaDistrib_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+  print(paste("FN FNC:", fn_fnc))
+  tryCatch({
+    png(fn_fnc, width = 450, height = 350)
+    visualize_beta_distrib(master_df_fnc)
+    dev.off()
+  }, error = function(cond) {print(cond)})
+}
+
+
+############################################################
+#### VISUALIZE P-VALUE DISTRIBUTION
+############################################################
+#' Function plots a histogram to visualize the distribution
+#' of regulatory protein r_i beta values across all linear models.
+#' @param results_table a master DF produced from run_linear_model()
+visualize_pval_distrib <- function(results_table) {
+  pvals <- results_table$p.value[!is.na(results_table$p.value) & 
+                                   !is.infinite(results_table$p.value)]
+  hist(pvals, main = "Histogram of p-Values",
+       xlab = "p-value", ylab = "Frequency", col = "blueviolet")
+}
+
+# Create specific filenames
+if("p.value" %fin% colnames(master_df_mut)) {
+  if(!useNumFunctCopies) {
+    fn_mut <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    fn_cna <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    
+    # Call this function & save output
+    tryCatch({
+      png(fn_mut, width = 450, height = 350)
+      visualize_pval_distrib(master_df_mut)
+      dev.off()
+      
+      png(fn_cna, width = 450, height = 350)
+      visualize_pval_distrib(master_df_cna)
+      dev.off()
+    }, error = function(cond) {print(cond)})
+  } else {
+    fn_fnc <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    # Call this function & save output
+    tryCatch({
+      png(fn_fnc, width = 450, height = 350)
+      visualize_pval_distrib(master_df_fnc)
+      dev.off()
+    }, error = function(cond) {print(cond)})
+  }
+}
+
+
+############################################################
+#### VISUALIZE Q-Q PLOT
+############################################################
+#' Function plots a Q-Q plot to visualize the distribution of p-values
+#' and assess whether they come from a uniform distribution
+#' @param results_table a master DF produced from run_linear_model()
+qqplot_pvals <- function(results_table) {
+  qqnorm(results_table$p.value, pch = 1, frame = FALSE)
+  qqline(results_table$p.value, col = "steelblue", lwd = 2)
+}
+
+
+############################################################
+#### VISUALIZE ERROR DISTRIBUTION
+############################################################
+#' Function plots a histogram of the standard errors produced from
+#' all LM runs to assess whether the errors derive from a normal distribution
+#' @param results_table a master DF produced from run_linear_model()
+visualize_error_distrib <- function(results_table) {
+  hist(results_table$std.error, main = "Standard Error Distribution Across All Tests",
+       xlab = "Standard Error (SE)", ylab = "Frequency")
 }
 
 
