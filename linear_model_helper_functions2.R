@@ -8,9 +8,9 @@
 
 library.path <- .libPaths()
 
-library(stringr, lib.loc = library.path)
-library(data.table, lib.loc = library.path)
-library(broom, lib.loc = library.path)
+library(stringr, lib.loc = library.path, quietly = TRUE)
+library(data.table, lib.loc = library.path, quietly = TRUE)
+library(broom, lib.loc = library.path, quietly = TRUE)
 
 ############################################################
 
@@ -525,7 +525,6 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
   if(dataset != "TCGA") {outpath <- paste(outpath, dataset, sep = "/")}
   
   outpath <- paste(outpath, cancerType, sep = "/")
-  if(!(specificType == "")) {outpath <- paste(outpath, specificType, sep = "/")}
   
   if(test) {
     outpath <- paste(outpath, tester_name, sep = "/")
@@ -538,6 +537,9 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
   }
   
   outpath <- paste(outpath, QTLtype, sep = "/")
+  
+  if(!(specificType == "")) {outpath <- paste(outpath, specificType, sep = "/")}
+  
   print(paste("File outpath:", outpath))
   
   return(outpath)
@@ -671,25 +673,71 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
 #' Used to recombine output of foreach
 #' @param x_tab the first output table of results
 #' @param y_tab the second output table of results
-combine_tab <- function(x_tab, y_tab) {
-  if (is.na(x_tab)) {
-    if(is.na(y_tab)) {
-      x_tab <- t(as.data.table(rep(NA, times = 6)))
-      y_tab <- t(as.data.table(rep(NA, times = 6)))
+#' @param expected_col_num the expected number of columns, in case we need to turn
+#' 2 NA inputs into a table accepted in the re-combining process
+combine_tab <- function(x_tab, y_tab, expected_col_num = 7) {
+  
+  # Check if length of either table is 0; if so, handle like an NA table
+  if((length(x_tab) == 0) | (length(y_tab) == 0)) {
+    if (length(x_tab) == 0) {x_tab <- as.data.table(t(rep(NA, times = expected_col_num)))}
+    if (length(y_tab) == 0) {y_tab <- as.data.table(t(rep(NA, times = expected_col_num)))}
+  }
+  # Check if the length is 1 (if so, it is NA)
+  else if(length(x_tab) == 1 | length(y_tab) == 1) {
+    # Check if either table is NA
+    if (is.na(x_tab)) {
+      if(is.na(y_tab)) {
+        x_tab <- as.data.table(t(rep(NA, times = expected_col_num)))
+        y_tab <- as.data.table(t(rep(NA, times = expected_col_num)))
+      } else {
+        x_tab <- as.data.table(t(rep(NA, times = ncol(y_tab))))
+        colnames(x_tab) <- colnames(y_tab)
+      }
     } else {
-      x_tab <- t(as.data.table(rep(NA, times = ncol(y_tab))))
-      colnames(x_tab) <- colnames(y_tab)
-    }
-  } else {
-    if(is.na(y_tab)) {
-      y_tab <- t(as.data.table(rep(NA, times = ncol(x_tab))))
-      colnames(y_tab) <- colnames(x_tab)
+      if(is.na(y_tab)) {
+        y_tab <- as.data.table(t(rep(NA, times = ncol(x_tab))))
+        colnames(y_tab) <- colnames(x_tab)
+      }
     }
   }
-  comb_dt <- rbindlist(list(as.data.table(x_tab), as.data.table(y_tab)), 
-                       use.names = TRUE, fill = TRUE)
+  # Otherwise, the length is greater than 1
+  else {
+    # Remove any NA or NAN values
+    if(TRUE %in% c(is.na(x_tab), is.na(y_tab))) {
+      x_tab <- na.omit(x_tab)
+      y_tab <- na.omit(y_tab)
+    }
+    
+    # Again, check if removing NAs/NaNs has set the length of either table is 0; 
+    # if so, handle like an NA table
+    if((length(x_tab) == 0) | (length(y_tab) == 0)) {
+      if (length(x_tab) == 0) {x_tab <- as.data.table(t(rep(NA, times = expected_col_num)))}
+      if (length(y_tab) == 0) {y_tab <- as.data.table(t(rep(NA, times = expected_col_num)))}
+      
+    } else {
+      # Check if the number of rows is 0
+      if(x_tab[, .N] == 0) {
+        x_tab <- rbind(x_tab, as.data.table(t(rep(NA, times = ncol(x_tab)))), use.names = F)
+      }
+      if(y_tab[, .N] == 0) {
+        y_tab <- rbind(y_tab, as.data.table(t(rep(NA, times = ncol(y_tab)))), use.names = F)
+      }
+    }
+  }
+  #print(dim(y_tab))
+
+  comb_dt <- tryCatch({
+    rbindlist(list(x_tab, y_tab), use.names = TRUE, fill = TRUE)
+    #rbind(x_tab, y_tab)
+    },error=function(cond){
+      print(cond)
+      return(x_tab)
+    })
+  print(dim(comb_dt))
+  print(head(comb_dt))
   return(comb_dt)
 }
+
 
 ############################################################
 #' A function to get a list of randomized input DFs (either per-sample or per-target expression
@@ -1048,7 +1096,7 @@ import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
 #### FILTER THE LM INPUT TABLE TO EXCLUDE COLUMNS WE DON'T NEED
 ############################################################
 #' Filter out columns we don't need from the LM input table given the selected
-#' drivers, arguments, number of PCs/ PEER facors, and race
+#' drivers, arguments, number of PCs/ PEER facors, and race. 
 #' @param lm_input_table the LM input table for a given target gene
 #' @param select_drivers vector of driver Uniprot IDs to keep in model
 #' @param covs_to_incl a vector, either c("ALL") to include all covariates, or a vector
@@ -1058,7 +1106,7 @@ import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
 #' @param num_pcs a value from 0-2 indicating the number of  
 #' principal components we are including as covariates in the model 
 filter_input_file <- function(lm_input_table, select_drivers, covs_to_incl, num_pcs, num_PEER) {
-  
+
   colnames_to_incl <- colnames(lm_input_table)
   
   # Note: currently excluding age b1 and age b2 since no patients fall into these categories
@@ -1107,9 +1155,115 @@ filter_input_file <- function(lm_input_table, select_drivers, covs_to_incl, num_
       if(any(unlist(lapply(covs_to_incl, function(y) grepl(y, x))))) {return(x)}
     }))
   }
-  lm_input_table_sub <- lm_input_table[, which(colnames(lm_input_table) %fin% colnames_to_incl), with = FALSE]
+  lm_input_table_sub <- lm_input_table[, c(1, which(colnames(lm_input_table) %fin% colnames_to_incl)), with = FALSE]
   
   return(lm_input_table_sub)
+}
+
+
+#' Helper function to remove samples with outlier expression values in the given gene
+#' using standard IQR-based thresholds (Q1 and Q3)
+#' @param lm_input_table the linear model input table
+filter_expression_outlier_samples <- function(lm_input_table) {
+  
+  if(!is.na(lm_input_table)) {
+    if(!lm_input_table[, .N] == 0) {
+      # Get the expression values
+      expr_vals <- unlist(as.numeric(lm_input_table$ExpStat_k))
+      
+      # Get the IQR
+      iqr <- IQR(expr_vals)
+      
+      # Get Q1 and Q3 of data
+      q1 <- as.numeric(quantile(expr_vals)[2])
+      q3 <- as.numeric(quantile(expr_vals)[4])
+      
+      # Get Q1 - 1.5(IQR), lower limit, and Q3 + 1.5(IQR), upper limit
+      lower_thres <- as.numeric(q1 - (1.5 * iqr))
+      upper_thres <- as.numeric(q3 + (1.5 * iqr))
+      
+      lm_input_table_sub <- lm_input_table[(lm_input_table$ExpStat_k < upper_thres) & 
+                                             (lm_input_table$ExpStat_k > lower_thres), ]
+      #print(paste("Number of samples removed due to extreme expression outliers: ", 
+                  #(nrow(lm_input_table) - nrow(lm_input_table_sub))))
+      
+      return(lm_input_table_sub)
+    }
+  }
+  return(NA)
+}
+
+#' Helper function to remove samples with outlier expression values in the given gene
+#' using a standard deviation threshold (> 3 SDs from the mean value)
+#' @param lm_input_table the linear model input table
+filter_expression_outlier_samples2 <- function(lm_input_table) {
+  
+  if(!is.na(lm_input_table)) {
+    if(!lm_input_table[, .N] == 0) {
+      # Get the expression values
+      expr_vals <- unlist(as.numeric(lm_input_table$ExpStat_k))
+      
+      # Get the mean and standard deviation
+      mean <- mean(expr_vals)
+      std_dev <- sd(expr_vals)
+      
+      # Get the upper and lower bounds
+      lower_thres <- as.numeric(mean - (std_dev * 3))
+      upper_thres <- as.numeric(mean + (std_dev * 3))
+      
+      lm_input_table_sub <- lm_input_table[(lm_input_table$ExpStat_k < upper_thres) & 
+                                             (lm_input_table$ExpStat_k > lower_thres), ]
+      #print(paste("Number of samples removed due to extreme expression outliers: ", 
+                  #(nrow(lm_input_table) - nrow(lm_input_table_sub))))
+      
+      return(lm_input_table_sub)
+    }
+  }
+  return(NA)
+}
+
+
+#' Helper function to remove samples with outlier expression values in the given gene
+#' using a hard cutoff of values 4 and -4, since with quantile-normalization and per-sample
+#' normal transformation all samples have the same distribution and range of expression values.
+#' Values that were originally zero will be below -4 after the normalization procedure and 
+#' should be removed.
+#' @param lm_input_table the linear model input table
+filter_expression_outlier_samples3 <- function(lm_input_table) {
+  
+  if(!is.na(lm_input_table)) {
+    if(!lm_input_table[, .N] == 0) {
+      
+      lm_input_table_sub <- lm_input_table[abs(lm_input_table$ExpStat_k) > 4, ]
+      #print(paste("Number of samples removed due to extreme expression outliers: ", 
+                  #(nrow(lm_input_table) - nrow(lm_input_table_sub))))
+      
+      return(lm_input_table_sub)
+    }
+  }
+  return(NA)
+}
+
+#' Helper function to alter samples with outlier expression values in the given gene
+#' using a hard cutoff of values 4 and -4, since with quantile-normalization and per-sample
+#' normal transformation all samples have the same distribution and range of expression values.
+#' Values that were originally zero will be below -4 after the normalization procedure. Take any
+#' values above or below 4 and truncate them to be between -4 and 4 (if < -4, be -4, if >4, be 4).
+#' @param lm_input_table the linear model input table
+collapse_expression_outlier_samples <- function(lm_input_table) {
+  
+  if(!is.na(lm_input_table)) {
+    if(!lm_input_table[, .N] == 0) {
+      
+      lm_input_table$ExpStat_k[which(lm_input_table$ExpStat_k < -4)] <- -4
+      lm_input_table$ExpStat_k[which(lm_input_table$ExpStat_k > 4)] <- 4
+      #print(paste("Number of samples removed due to extreme expression outliers: ", 
+      #(nrow(lm_input_table) - nrow(lm_input_table_sub))))
+      
+      return(lm_input_table)
+    }
+  }
+  return(NA)
 }
 
 
@@ -1289,7 +1443,8 @@ combine_collinearity_diagnostics <- function(path, outfn, debug, randomize) {
 #' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3'
 subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched, dataset) {
   df <- as.data.frame(df)
-  
+  df_adj <- NA
+
   column_names_to_keep <- c("ensg_id", "Swissprot", "swissprot", "gene_name", "ensg_ids")
   
   if(colNames == TRUE) {
@@ -1318,28 +1473,30 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched, d
     }
     
   } else {
-    if(length(unlist(strsplit(df$sample_id[1], "-", fixed = TRUE))) == 4) {
-      df$sample_id <- unlist(lapply(df$sample_id, function(x) 
-        paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
-    }
-    # Keep only intersecting patients
-    just_patients <- df$sample_id
-    if(dataset == "TCGA") {
-      just_patients <- unlist(lapply(df$sample_id, function(x) 
-        unlist(strsplit(x, "-", fixed = TRUE))[1]))
-    }
-    df_adj <- df[which(just_patients %fin% patients),]
-    print(head(df_adj))
-    
-    # Keep only cancer samples
-    if(dataset == "TCGA") {
-      if(!tumNormMatched) {
-        df_adj <- df_adj[which(grepl("-0", df_adj$sample_id, fixed = TRUE)),]
+    if(length(df) > 0) {
+      if(nrow(df) > 0) {
+        if(length(unlist(strsplit(as.character(df$sample_id[1]), "-", fixed = TRUE))) == 4) {
+          df$sample_id <- unlist(lapply(df$sample_id, function(x) 
+            paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
+        }
+        # Keep only intersecting patients
+        just_patients <- df$sample_id
+        if(dataset == "TCGA") {
+          just_patients <- unlist(lapply(df$sample_id, function(x) 
+            unlist(strsplit(x, "-", fixed = TRUE))[1]))
+        }
+        df_adj <- df[which(just_patients %fin% patients),]
+        
+        # Keep only cancer samples
+        #if(dataset == "TCGA") {
+        #  if(!tumNormMatched) {
+        #    df_adj <- df_adj[which(grepl("-0", df_adj$sample_id, fixed = TRUE)),]
+        #  }
+        #  
+        #  # Remove any duplicate samples
+        #  df_adj <- df_adj[!(grepl('-1', df_adj$sample_id, fixed = TRUE)),]
+        #}
       }
-      
-      # Remove any duplicate samples
-      df_adj <- df_adj[!(grepl('-1', df_adj$sample_id, fixed = TRUE)),]
-      
     }
   }
   return(as.data.table(df_adj))
@@ -1429,7 +1586,7 @@ remove_metastatic_samples <- function(df, colNames) {
     #print(head(df_adj))
     
   } else {
-    if(length(unlist(strsplit(df$sample_id[1], "-", fixed = TRUE))) == 4) {
+    if(length(unlist(strsplit(as.character(df$sample_id[1]), "-", fixed = TRUE))) == 4) {
       df$sample_id <- unlist(lapply(df$sample_id, function(x) 
         paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
     }

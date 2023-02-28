@@ -20,15 +20,15 @@ library(data.table, lib.loc = library.path, quietly = TRUE)
 library(speedglm, lib.loc = library.path, quietly = TRUE)
 library(argparse, lib.loc = library.path, quietly = TRUE)
 library(stringr, lib.loc = library.path, quietly = TRUE)
+library(dqrng, lib.loc = library.path, quietly = TRUE)
+library(foreach, lib.loc = library.path, quietly = TRUE)
+library(snow, lib.loc = library.path, quietly = TRUE)
+library(doParallel, lib.loc = library.path, quietly = TRUE)
 #library(glmnet, lib.loc = library.path)
 #library(cli, lib.loc = library.path)
 #library(nlme, lib.loc = library.path)
 #library(lme4, lib.loc = library.path)
 #library(lmerTest, lib.loc = library.path)
-library(dqrng, lib.loc = library.path, quietly = TRUE)
-library(foreach, lib.loc = library.path, quietly = TRUE)
-library(snow, lib.loc = library.path, quietly = TRUE)
-library(doParallel, lib.loc = library.path, quietly = TRUE)
 
 # Source other files needed
 source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Sara_LinearModel/"
@@ -171,6 +171,10 @@ parser$add_argument("--select_args_label", default = "", type = "character",
                     help = "If we are providing a character string for --select_args, this is an option to provide a label for what arguments we are selecting for labeling the output files and visualizations.")
 parser$add_argument("--select_drivers", default = "ALL", type ="character",
                     help = "Option to provide a semicolon-separated character string listing all driver Uniprot IDs to include, if LM input tables contain more driver covariates than is desired.")
+parser$add_argument("--path_to_driver_lists", default = "", type ="character",
+                    help = "Option to provide a path to files with drivers for individual cancer types. Will only be checked for a path is specificTypes is not ALL.")
+parser$add_argument("--driver_file_prefix", default = "", type = "character",
+                    help = "If path_to_driver_lists is not empty, this provides a prefix for the driver files we want to access for each cancer.")
 
 
 # Parse the given arguments
@@ -305,7 +309,7 @@ run_linear_model <- function(list_of_input_dfs, expression_df, analysis_type, cn
   master_df <- NA
   
   # Create a file to log our optimal lambda values
-  file.create("optimal_lambdas_real.txt")
+  #file.create("optimal_lambdas_real.txt")
   
   # Create shuffled input DFs if using an empirical approach to p-value generation
   shuffled_input_dfs <- NA
@@ -388,7 +392,6 @@ run_linear_model <- function(list_of_input_dfs, expression_df, analysis_type, cn
         return(NA)
       }
                           
-      lm_fit <- NA
       summary_table <- NA
                           
       if ((model_type == "linear") & (regularization == "None")) {
@@ -400,7 +403,7 @@ run_linear_model <- function(list_of_input_dfs, expression_df, analysis_type, cn
             speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
             #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), data = lm_input_table)
           }, error = function(cond) {
-            message(paste("There was a problem with this linear model run:",cond))
+            message(paste("There was a problem with this linear model run:", cond))
             print(formula)
             print("Offending LM Input Table:")
             print(head(lm_input_table))
@@ -411,7 +414,8 @@ run_linear_model <- function(list_of_input_dfs, expression_df, analysis_type, cn
           })
         
         if(!is.na(lm_fit)) {
-          summary_table <- tidy(lm_fit)
+          summary_table <- as.data.table(tidy(lm_fit))
+          rm(lm_fit)
         } 
                             
       } else if ((model_type == "linear") & (regularization == "L2" | regularization == "ridge" | 
@@ -419,15 +423,13 @@ run_linear_model <- function(list_of_input_dfs, expression_df, analysis_type, cn
                                              regularization == "bayesian.bgl" | regularization == "bayesian.bglss")) {
         
         # Create a file to hold the lambda values
-        lm_fit <- run_regularization_model(formula = formula, lm_input_table = lm_input_table, 
+        summary_table <- run_regularization_model(formula = formula, lm_input_table = lm_input_table, 
                                            type = regularization, debug = debug, meth_bucketing = meth_bucketing, 
                                            cna_bucketing = cna_bucketing, signif_eval_type = signif_eval_type,
                                            shuffled_input_dfs = shuffled_input_dfs, ensg = targ_ensg,
                                            num_randomizations = num_randomizations,
                                            fixed_lambda_for_rand = fixed_lambda_for_rand)
-        
-        summary_table <- lm_fit
-                            
+
       } else if (model_type == "mixed") {
         # Our random effects variable is our genotype PCs; if we are not including them,
         # run the simple linear model instead
@@ -455,7 +457,8 @@ run_linear_model <- function(list_of_input_dfs, expression_df, analysis_type, cn
             })
         }
         if(!is.na(lm_fit)) {
-          summary_table <- tidy(lm_fit)
+          summary_table <- as.data.table(tidy(lm_fit))
+          rm(lm_fit)
         }
       } else {
         if(is.na(formula)) {
@@ -466,9 +469,6 @@ run_linear_model <- function(list_of_input_dfs, expression_df, analysis_type, cn
           return(NA)
         }
       }
-      
-      # Tidy the output
-      #if(!is.na(lm_fit)) {print(summary(lm_fit))}
       
       if(inclResiduals & (!(is.na(summary_table)))) {
         residuals <- as.numeric(lm_input_table$ExpStat_k) - 
@@ -493,12 +493,7 @@ run_linear_model <- function(list_of_input_dfs, expression_df, analysis_type, cn
           summary_table <- summary_table[rows_to_keep,]
         }
       }
-                          
-      if(debug) {
-        print("Summary Table")
-        print(head(summary_table))
-      }
-                          
+                            
       # Run collinearity diagnostics 
       if(collinearity_diagn) {
         print("Running Collinearity Diagnostics")
@@ -508,9 +503,20 @@ run_linear_model <- function(list_of_input_dfs, expression_df, analysis_type, cn
       }
                 
       # Make sure that the summary table for this gene is returned
-      if(length(summary_table) == 0) {summary_table <- NA}
+      #if(length(summary_table) == 0) {summary_table <- NA}
+      if(debug) {
+        print("Summary Table")
+        print(head(summary_table))
+      }
+      
+      # Try to clear up some memory
+      gc()
+      
+      # Return summary table
       summary_table <- summary_table
   }
+  print(head(master_df))
+  print(dim(master_df))
   
   # tell R that we don't need the processes anymore
   stopCluster(parallel_cluster)
@@ -549,12 +555,11 @@ run_linear_model <- function(list_of_input_dfs, expression_df, analysis_type, cn
 if(args$cancerType == "PanCancer") {
   if(!(args$specificTypes == "ALL")) {
     cancer_types <- unlist(strsplit(args$specificTypes, ";", fixed = TRUE))
-    outpath <- lapply(cancer_types, function(ct) {
-      return(create_file_outpath(cancerType = args$cancerType, specificType = ct, test = test, 
-                                 tester_name = args$tester_name, run_name = args$run_name,
-                                 tumNormMatched = tumNormMatched, QTLtype = args$QTLtype,
-                                 dataset = args$dataset))
-    })
+    outpath <- lapply(cancer_types, function(ct) 
+      create_file_outpath(cancerType = args$cancerType, specificType = ct, test = test,
+                          tester_name = args$tester_name, run_name = args$run_name,
+                          tumNormMatched = tumNormMatched, QTLtype = args$QTLtype,
+                          dataset = args$dataset))
     names(outpath) <- cancer_types
   } else {
     outpath <- create_file_outpath(cancerType = args$cancerType, specificType = "", test = test, 
@@ -584,7 +589,7 @@ outfn <- create_output_filename(test = test, tester_name = args$tester_name, run
                                 num_pcs = args$num_pcs, randomize = randomize, covs_to_incl_label = args$select_args_label,
                                 patients_to_incl_label = args$patientsOfInterestLabel, removeCis = FALSE,
                                 model_type = args$model_type, removeMetastatic = TRUE, 
-                                regularization = args$regularization, signif_eval_type = args$signif_eval_type)
+                                regularization = args$regularization, signif_eval_type = args$signif_eval_type)[1]
 
 if(debug) {
   print(paste("Outfile Name:", outfn))
@@ -610,18 +615,23 @@ tryCatch({
 ############################################################
 lm_input_fns <- NA
 
+# Input LM filepath
+input_lm_filepath <- args$input_lm_filepath
+if(args$patientsOfInterest != "") { 
+  input_lm_filepath <- paste(input_lm_filepath, "subtype_files", sep = "/")
+}
+
 # Get the index of where the target gene name will be found in each file name
-gene_name_index <- length(unlist(strsplit(args$run_name, "_", fixed = TRUE))) + 2
+gene_name_index <- length(unlist(strsplit(args$run_name, "_", fixed = TRUE))) + 3
 
 if(args$patientsOfInterest != "") {
   gene_name_index <- gene_name_index + 1
-  lm_input_fns <- list.files(paste0(args$input_lm_filepath, "subtype_files/"), 
-                             pattern = args$patientsOfInterestLabel)
+  lm_input_fns <- list.files(input_lm_filepath, pattern = args$patientsOfInterestLabel)
   
 } else {
-  lm_input_fns <- list.files(args$input_lm_filepath, pattern = "lm_input_")
+  lm_input_fns <- list.files(input_lm_filepath, pattern = "lm_input_")
   # Check if there are sub-directories in this path that might contain the file
-  dirs_in_path <- list.dirs(args$input_lm_filepath)
+  dirs_in_path <- list.dirs(input_lm_filepath)
   if(TRUE %in% unlist(lapply(dirs_in_path, function(d) grepl("part_", d)))) {
     dirs_part <- dirs_in_path[grepl("part_", dirs_in_path)]
     gene_name_index <- gene_name_index + 1
@@ -637,6 +647,7 @@ if(args$patientsOfInterest != "") {
 
 gene_names <- unlist(lapply(lm_input_fns, function(fn) 
   unlist(strsplit(fn, "_", fixed = TRUE))[gene_name_index]))
+if(debug) {print(head(gene_names))}
 
 print("# of input LM DFs")
 print(length(lm_input_fns))
@@ -691,13 +702,13 @@ if(length(lm_input_fns_sub) > N) {
   split_target_list_flag <- TRUE
   
   lm_input_dfs <- import_lm_input_fns(lm_input_fns_sub = lm_input_fns_sub[1:N], 
-                                      input_lm_filepath = args$input_lm_filepath, 
+                                      input_lm_filepath = input_lm_filepath, 
                                       randomize = randomize, gene_names_sub = gene_names_sub[1:N], 
                                       select_drivers = args$select_drivers, select_args = covs_to_incl, 
                                       num_pcs = args$num_pcs, num_PEER = args$num_PEER, qtl_type = args$QTLtype)
 } else {
   lm_input_dfs <- import_lm_input_fns(lm_input_fns_sub = lm_input_fns_sub, 
-                                      input_lm_filepath = args$input_lm_filepath, 
+                                      input_lm_filepath = input_lm_filepath, 
                                       randomize = randomize, gene_names_sub = gene_names_sub, 
                                       select_drivers = args$select_drivers, select_args = covs_to_incl, 
                                       num_pcs = args$num_pcs, num_PEER = args$num_PEER, qtl_type = args$QTLtype)
@@ -723,7 +734,8 @@ print(length(lm_input_dfs))
 #' @param clinical_df a file name for a clinical data frame that can link patient IDs to
 #' their respective cancer types
 #' @param main_path local path to relevant files
-get_patient_cancer_mapping <- function(specificTypes, clinical_df, main_path) {
+#' @param thres a threshold for number of samples to include a cancer type, by default 25
+get_patient_cancer_mapping <- function(specificTypes, clinical_df, main_path, thres = 25) {
     specific_types <- unlist(strsplit(specificTypes, ";", fixed = TRUE))
     clinical_df <- fread(paste(main_path, paste("clinical/", clinical_df, sep = ""), sep = ""), 
                          header = TRUE)
@@ -731,9 +743,11 @@ get_patient_cancer_mapping <- function(specificTypes, clinical_df, main_path) {
       pats <- clinical_df[grepl(ct, clinical_df$project_id),'case_submitter_id']
       pats_ids <- unlist(lapply(pats$case_submitter_id, function(pat) 
         unlist(strsplit(pat, "-", fixed = TRUE))[3]))
-      return(pats_ids)
+      if(length(pats_ids) > thres) {return(pats_ids)}
+      else {return(NA)}
     })
     names(patient_cancer_mapping) <- specific_types
+    patient_cancer_mapping <- patient_cancer_mapping[!is.na(patient_cancer_mapping)]
     return(patient_cancer_mapping)
 }
 
@@ -770,13 +784,18 @@ gc()
 # Run the function itself
 
 # Case 1: If we're running on just one cancer type or PanCancer
-if(is.na(patient_cancer_mapping)) {
+if(length(patient_cancer_mapping) == 1) {
   
   # If needed, subset these data tables by the given patient IDs of interest
   if(patients_of_interest != "") {
     lm_input_dfs <- lapply(lm_input_dfs, function(df) 
       subset_by_intersecting_ids(patients_of_interest, df, FALSE, tumNormMatched, args$dataset))
   }
+  
+  # Filter samples with outlier expression for each target gene
+  #lm_input_dfs <- lapply(lm_input_dfs, function(df) 
+    #filter_expression_outlier_samples3(df))
+    #collapse_expression_outlier_samples(df))
 
   master_df <- run_linear_model(list_of_input_dfs = lm_input_dfs, 
                                 expression_df = expression_df, 
@@ -794,6 +813,8 @@ if(is.na(patient_cancer_mapping)) {
                                 dataset = args$dataset,
                                 inclResiduals = inclResiduals)
   
+  #fwrite(master_df, paste(outpath, paste(outfn, "_part1.csv", sep = ""), sep = "/"))
+  
   if(split_target_list_flag) {
     
     # Clear memory from the previous batch
@@ -801,7 +822,7 @@ if(is.na(patient_cancer_mapping)) {
     gc()
     
     # Run again on the next batch
-    lm_input_dfs <- import_lm_input_fns(lm_input_fns_sub[(N+1):length(lm_input_fns_sub)], args$input_lm_filepath, 
+    lm_input_dfs <- import_lm_input_fns(lm_input_fns_sub[(N+1):length(lm_input_fns_sub)], input_lm_filepath, 
                                         randomize, gene_names_sub[(N+1):length(lm_input_fns_sub)], 
                                         args$select_drivers, covs_to_incl, args$num_pcs, args$num_PEER, args$QTLtype)
     
@@ -810,6 +831,11 @@ if(is.na(patient_cancer_mapping)) {
       lm_input_dfs <- lapply(lm_input_dfs, function(df) 
         subset_by_intersecting_ids(patients_of_interest, df, FALSE, tumNormMatched, args$dataset))
     }
+    
+    # Filter samples with outlier expression for each target gene
+    #lm_input_dfs <- lapply(lm_input_dfs, function(df) 
+      #filter_expression_outlier_samples3(df))
+      #collapse_expression_outlier_samples(df))
     
     master_df_2 <- run_linear_model(list_of_input_dfs = lm_input_dfs, 
                                   expression_df = expression_df, 
@@ -827,33 +853,69 @@ if(is.na(patient_cancer_mapping)) {
                                   dataset = args$dataset,
                                   inclResiduals = inclResiduals)
     
+    #fwrite(master_df_2, paste(outpath, paste(outfn, "_part2.csv", sep = ""), sep = "/"))
+    
     master_df <- rbind(master_df, master_df_2)
   }
   
   
 # Case 2: If we're running on multiple cancer types separately
-} else if (!(is.na(patient_cancer_mapping))) {
+} else if (length(patient_cancer_mapping) > 1) {
   # Handle the case of running multiple cancer types per-cancer
   # Subset all the input files for each cancer type and run separately
   master_df_list <- lapply(1:length(outpath), function(i) {
     
+    cancer_type <- names(patient_cancer_mapping)[i]
+    
+    print(paste("Now processing...", cancer_type))
+    
     # Get the patients for this cancer type
     patient_ids <- unique(unlist(patient_cancer_mapping[[i]]))
-    print(patient_ids)
+    print(head(patient_ids))
     
     if(patients_of_interest != "") {
       patient_ids <- patient_ids[patient_ids %fin% patients_of_interest]
     }
     
     # Subset input DFs to these patients of interest
-    lm_input_dfs <- lapply(lm_input_dfs, function(df) 
-      subset_by_intersecting_ids(patient_ids, df, FALSE, tumNormMatched, args$dataset))
+    lm_input_dfs_sub <- lapply(lm_input_dfs, function(df) {
+      df_sub <- subset_by_intersecting_ids(patient_ids, df, FALSE, tumNormMatched, args$dataset)
+      if(!(nrow(df_sub) == 0)) {return(df_sub)}
+      else {return(NA)}
+    })
+    lm_input_dfs_sub <- lm_input_dfs_sub[!is.na(lm_input_dfs_sub)]
+    if(length(lm_input_dfs_sub) == 0) {return(NA)}
     
+    # Filter samples with outlier expression for each target gene
+    #lm_input_dfs_sub <- lapply(lm_input_dfs_sub, function(df) 
+      #filter_expression_outlier_samples3(df))
+      #collapse_expression_outlier_samples(df))
+    
+    # Subset input DFs to drivers that pass particular threshold
+    if(args$path_to_driver_lists != "") {
+      driver_filename <- paste0(args$path_to_driver_lists, 
+                                paste0(args$driver_file_prefix, 
+                                       paste0(cancer_type, ".csv")))
+      driver_file <- fread(driver_filename, header = T)
+      select_driver_vect <- unique(unlist(driver_file$swissprot_ids))
+      if(debug) {print(select_driver_vect)}
+      
+      lm_input_dfs_sub <- lapply(lm_input_dfs_sub, function(df) {
+        drivers_in_tab <- unique(unlist(lapply(colnames(df)[grepl("MutStat_i", colnames(df))], function(x)
+          unlist(strsplit(x, "_", fixed = TRUE))[1])))
+        drivers_to_exclude <- setdiff(drivers_in_tab, select_driver_vect)
+        drivers_to_exclude_covs <- unlist(lapply(drivers_to_exclude, function(d) 
+          return(colnames(df)[grepl(d, colnames(df))])))
+        df_sub <- df[, !(colnames(df) %fin% drivers_to_exclude_covs), with = FALSE]
+        return(df_sub)
+      })
+    }
+
     # Get the outpath for this cancer type
-    outpath_i <- outpath[[i]]
+    #outpath_i <- outpath[i]
     
     # Run the model with these subsetted files
-    master_df <- run_linear_model(list_of_input_dfs = lm_input_dfs, 
+    master_df <- run_linear_model(list_of_input_dfs = lm_input_dfs_sub, 
                                   expression_df = expression_df, 
                                   analysis_type = args$QTLtype,
                                   cna_bucketing = args$cna_bucketing,
@@ -868,9 +930,91 @@ if(is.na(patient_cancer_mapping)) {
                                   run_query_genes_jointly = runRegprotsJointly,
                                   dataset = args$dataset,
                                   inclResiduals = inclResiduals)
-    
     return(master_df)
   })
+  names(master_df_list) <- names(patient_cancer_mapping)
+    
+  if(split_target_list_flag) {
+    
+    # Clear memory from the previous batch
+    rm(lm_input_dfs)
+    rm(lm_input_df_sub)
+    gc()
+    
+    # Run again on the next batch
+    lm_input_dfs <- import_lm_input_fns(lm_input_fns_sub[(N+1):length(lm_input_fns_sub)], input_lm_filepath, 
+                                        randomize, gene_names_sub[(N+1):length(lm_input_fns_sub)], 
+                                        args$select_drivers, covs_to_incl, args$num_pcs, args$num_PEER, args$QTLtype)
+    
+    master_df_list_2 <- lapply(1:length(outpath), function(i) {
+      
+      # Get the patients for this cancer type
+      patient_ids <- unique(unlist(patient_cancer_mapping[[i]]))
+      print(head(patient_ids))
+      
+      if(patients_of_interest != "") {
+        patient_ids <- patient_ids[patient_ids %fin% patients_of_interest]
+      }
+      
+      # Subset input DFs to these patients of interest
+      lm_input_dfs_sub <- lapply(lm_input_dfs, function(df) {
+        df_sub <- subset_by_intersecting_ids(patient_ids, df, FALSE, tumNormMatched, args$dataset)
+        if(!(nrow(df_sub) == 0)) {return(df_sub)}
+        else {return(NA)}
+      })
+      lm_input_dfs_sub <- lm_input_dfs_sub[!is.na(lm_input_dfs_sub)]
+      if(length(lm_input_dfs_sub) == 0) {return(NA)}
+      
+      # Filter samples with outlier expression for each target gene
+      #lm_input_dfs_sub <- lapply(lm_input_dfs_sub, function(df) 
+        #filter_expression_outlier_samples3(df))
+        #collapse_expression_outlier_samples(df))
+      
+      # Subset input DFs to drivers that pass particular threshold
+      if(args$path_to_driver_lists != "") {
+        driver_filename <- paste0(args$path_to_driver_lists, 
+                                  paste0(args$driver_file_prefix, 
+                                         paste0(cancer_type, ".csv")))
+        driver_file <- fread(driver_filename, header = T)
+        select_driver_vect <- unique(unlist(driver_file$swissprot_ids))
+        if(debug) {print(select_driver_vect)}
+        
+        lm_input_dfs_sub <- lapply(lm_input_dfs_sub, function(df) {
+          drivers_in_tab <- unique(unlist(lapply(colnames(df)[grepl("MutStat_i", colnames(df))], function(x)
+            unlist(strsplit(x, "_", fixed = TRUE))[1])))
+          drivers_to_exclude <- setdiff(drivers_in_tab, select_driver_vect)
+          drivers_to_exclude_covs <- unlist(lapply(drivers_to_exclude, function(d) 
+            return(colnames(df)[grepl(d, colnames(df))])))
+          df_sub <- df[, !(colnames(df) %fin% drivers_to_exclude_covs), with = FALSE]
+          return(df_sub)
+        })
+      }
+    
+      master_df_2 <- run_linear_model(list_of_input_dfs = lm_input_dfs_sub, 
+                                      expression_df = expression_df, 
+                                      analysis_type = args$QTLtype,
+                                      cna_bucketing = args$cna_bucketing,
+                                      meth_bucketing = meth_bucketing,
+                                      debug = debug,
+                                      collinearity_diagn = collinearity_diagn,
+                                      regularization = args$regularization,
+                                      signif_eval_type = args$signif_eval_type,
+                                      num_randomizations = args$num_randomizations,
+                                      fixed_lambda_for_rand = fixed_lambda_for_rand,
+                                      model_type = args$model_type,
+                                      run_query_genes_jointly = runRegprotsJointly,
+                                      dataset = args$dataset,
+                                      inclResiduals = inclResiduals)
+      return(master_df_2)
+    })
+    
+    master_df_list <- lapply(1:length(master_df_list), function(i) {
+      master_df <- master_df_list[[i]]
+      master_df_2 <- master_df_list_2[[i]]
+      return(rbind(master_df, master_df_2))
+    })
+    names(master_df_list) <- names(patient_cancer_mapping)
+  }
 
 } else {
   print("Something went wrong with patient-cancer type mapping. Exiting now.")
@@ -903,8 +1047,6 @@ process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn,
   #try(master_df <- setorder(master_df, cols = "p.value", order = -1, na.last = TRUE))  
   
   # Write the results to the given file, making the directory if it does not already exist
-  outpath <- as.character(unlist(outpath[[1]]))
-  print(outpath)
   tryCatch({
     dir.create(outpath, showWarnings = FALSE)
   }, error = function(cond) {
@@ -939,8 +1081,9 @@ process_raw_output_df <- function(master_df, outpath, outfn, collinearity_diagn,
 }
 
 
-if(is.na(patient_cancer_mapping)) {
+if(length(patient_cancer_mapping) == 1) {
   outpath <- as.character(unlist(outpath[[1]]))
+  print(outpath)
   outfn <- as.character(unlist(outfn[[1]]))
   master_df <- na.omit(master_df)
   master_df <- process_raw_output_df(master_df = master_df, outpath = outpath, outfn = outfn, 
@@ -958,21 +1101,35 @@ if(is.na(patient_cancer_mapping)) {
   
 } else {
   for (i in 1:length(master_df_list)) {
-    master_df <- master_df_list[[i]]
-    outpath <- as.character(unlist(outpath[[i]]))
-    outfn <- as.character(unlist(outfn[[i]]))
-    master_df <- process_raw_output_df(master_df = master_df, outpath = outpath, outfn = outfn, 
-                                       collinearity_diagn = collinearity_diagn, debug = debug,
-                                       randomize = randomize, useNumFunctCopies = useNumFunctCopies)
-    if(!useNumFunctCopies) {
-      master_df_mut <- master_df[grepl("MutStat_i", master_df$term),]
-      master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
-    } else {
-      master_df_fnc <- master_df[master_df$term == "FNCStat_i",]
-    }
+    master_df <- na.omit(master_df_list[[i]])
+    print(outpath)
+    print(outfn)
+    outpath_curr <- as.character(outpath[i])
+    print(outpath_curr)
+    #outfn <- as.character(outfn[i])
     
-    # Call the file to create output visualizations
-    source(paste(source_path, "process_LM_output.R", sep = "")) 
+    if((length(master_df) > 1) & (!is.na(outpath_curr) & (!is.na(outfn)))) {
+      if(('p.value' %fin% colnames(master_df)) & (nrow(master_df) > 0)) {
+        master_df <- process_raw_output_df(master_df = master_df, outpath = outpath_curr, outfn = outfn, 
+                                           collinearity_diagn = collinearity_diagn, debug = debug,
+                                           randomize = randomize, useNumFunctCopies = useNumFunctCopies)
+        if(!useNumFunctCopies) {
+          master_df_mut <- master_df[grepl("MutStat_i", master_df$term),]
+          master_df_cna <- master_df[grepl("CNAStat_i", master_df$term),]
+        } else {
+          master_df_fnc <- master_df[master_df$term == "FNCStat_i",]
+        }
+        
+        # Call the file to create output visualizations
+        ct <- names(master_df_list)[i]
+        
+        source(paste(source_path, "process_LM_output.R", sep = "")) 
+      }
+    }
+    else {
+      print(paste("Error: either master DF is empty or outfile name/ path is NA for cancer type",
+                  names(master_df_list)[i]))
+    }
   }
 }
 

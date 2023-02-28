@@ -729,7 +729,7 @@ create_driver_pie <- function(master_df, tophit_thres, perc_or_qval_or_ss, all_g
 }
 
 
-create_driver_pie(master_df, 0.05, all_genes_id_conv)
+create_driver_pie(master_df, 0.05, "qval", all_genes_id_conv)
 
 
 

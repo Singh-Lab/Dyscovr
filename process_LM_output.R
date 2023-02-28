@@ -19,16 +19,16 @@
 # install.packages("gplots")
 # install.packages("pheatmap")
 # BiocManager::install("ComplexHeatmap")
-library("gplots", lib.loc = library.path)
+library("gplots", lib.loc = library.path, quietly = TRUE)
 #library("pheatmap", lib.loc = library.path)
 #library(ComplexHeatmap, lib.loc = library.path)
-library(broom, lib.loc = library.path)
-library(qvalue, lib.loc = library.path)
-library(ggplot2, lib.loc = library.path)
-library(stringr, lib.loc = library.path)
-library(dplyr, lib.loc = library.path)
-library(olsrr, lib.loc = library.path)
-library("RColorBrewer", lib.loc = library.path)
+library(broom, lib.loc = library.path, quietly = TRUE)
+library(qvalue, lib.loc = library.path, quietly = TRUE)
+library(ggplot2, lib.loc = library.path, quietly = TRUE)
+library(stringr, lib.loc = library.path, quietly = TRUE)
+library(dplyr, lib.loc = library.path, quietly = TRUE)
+library(olsrr, lib.loc = library.path, quietly = TRUE)
+library("RColorBrewer", lib.loc = library.path, quietly = TRUE)
 
 
 ############################################################
@@ -40,9 +40,6 @@ if(args$dataset != "TCGA") {output_vis_path <- paste0(output_vis_path, paste0(ar
 
 output_vis_path <- paste0(output_vis_path, args$cancerType)
 
-if (args$cancerType == "PanCancer") {
-  output_vis_path <- paste(output_vis_path, args$specificTypes, sep = "/")
-}
 if(test) {
   output_vis_path <- paste(output_vis_path, args$tester_name, sep = "/")
 } else {
@@ -55,6 +52,10 @@ if(args$dataset == "TCGA") {
 }
 output_vis_path <- paste(output_vis_path, args$QTLtype, sep = "/")
 
+if ((args$cancerType == "PanCancer") & (args$specificTypes != "ALL")) {
+  output_vis_path <- paste(output_vis_path, ct, sep = "/")
+}
+
 print(paste("Output Visualization Path:", output_vis_path)) 
 
 # Generalized ID conversion table from BiomaRt
@@ -63,6 +64,7 @@ all_genes_id_conv <- read.csv("/Genomics/grid/users/scamilli/thesis_work/run-mod
 # Adjust the outfn for visualizations
 outfn_vis <- paste(unlist(strsplit(outfn, "_", fixed = TRUE))[2:length(unlist(strsplit(outfn, "_", fixed = TRUE)))], 
                collapse = "_")
+
 ############################################################
 ############################################################
 #### PEFORM MULTIPLE HYPOTHESIS TESTING CORRECTION
@@ -133,6 +135,9 @@ if("p.value" %fin% colnames(master_df_mut)) {
       master_df_fnc_corrected <- mh_correct(master_df_fnc, fn_fnc_qvalvis, fn_fnc_qvalsum)
     }, error = function(cond) {print(cond)})
   }
+} else {
+  master_df_mut_corrected <- master_df_mut
+  master_df_cna_corrected <- master_df_cna
 }
 
 ############################################################
@@ -153,9 +158,13 @@ add_targ_regprot_gns <- function(master_df_sig, all_genes_id_conv, runRegprotsJo
   
   # Add a column for the regulatory protein name
   if(!runRegprotsJointly) {
-    master_df_sig$R_i.name <- unlist(lapply(master_df_sig$R_i, function(x) 
+    # Add a column for the regulatory protein name
+    unique_ri <- data.frame("R_i" = unique(master_df_sig$R_i))
+    unique_ri$R_i.name <- unlist(lapply(unique_ri$R_i, function(x) 
       paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
                                      'external_gene_name']), collapse = ";")))
+    master_df_sig$R_i.name <- unlist(lapply(master_df_sig$R_i, function(x) 
+      unique_ri[unique_ri$R_i == x, 'R_i.name']))
   }
   return(master_df_sig)
 }
@@ -169,8 +178,8 @@ if(!useNumFunctCopies) {
     # Write this to a new file
     outfn <- str_replace(outfn, "uncorrected", "corrected") 
     print(paste("NEW FN:", outfn))
-    fwrite(master_df_mut_corrected, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
-    fwrite(master_df_cna_corrected, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
+    fwrite(master_df_mut_corrected, paste(outpath_curr, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
+    fwrite(master_df_cna_corrected, paste(outpath_curr, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
   }, error = function(cond) {print(cond)})
 } else {
   tryCatch({
@@ -180,7 +189,7 @@ if(!useNumFunctCopies) {
     # Write this to a new file
     outfn <- str_replace(outfn, "uncorrected", "corrected") 
     print(paste("NEW FN:", outfn))
-    fwrite(master_df_fnc_corrected, paste(outpath, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
+    fwrite(master_df_fnc_corrected, paste(outpath_curr, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
   }, error = function(cond) {print(cond)})
 }
 
@@ -510,10 +519,10 @@ if(!useNumFunctCopies) {
     #outfn <- str_replace(outfn, "corrected_", "") 
     #outfn <- str_replace(outfn, "res", "sig_res")
     #if(length(master_df_mut_sig) > 0) {
-      #fwrite(master_df_mut_sig, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
+      #fwrite(master_df_mut_sig, paste(outpath_curr, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
     #}
     #if(length(master_df_cna_sig) > 0) {
-      #fwrite(master_df_cna_sig, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
+      #fwrite(master_df_cna_sig, paste(outpath_curr, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
     #}
   }, error = function(cond) {print(cond)})
 } else {
@@ -524,7 +533,7 @@ if(!useNumFunctCopies) {
     #outfn <- str_replace(outfn, "corrected_", "") 
     #outfn <- str_replace(outfn, "res", "sig_res")
     #if(length(master_df_fnc_sig) > 0) {
-      #fwrite(master_df_fnc_sig, paste(outpath, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
+      #fwrite(master_df_fnc_sig, paste(outpath_curr, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
     #}
   }, error = function(cond) {print(cond)})
 }
