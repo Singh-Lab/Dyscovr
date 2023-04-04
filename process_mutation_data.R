@@ -6,7 +6,7 @@
 library(TCGAbiolinks)
 library(GenomicRanges)
 library(TRONCO)
-library(seqinr)
+#library(seqinr)
 library(stringr)
 library(dplyr)
 library("RColorBrewer")

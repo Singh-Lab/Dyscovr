@@ -1,5 +1,5 @@
 ##############################################################################
-# CREATE FIGURES FOR TP53/ PIK3CA PAPER
+# CREATE FIGURES FOR METABOLISM PAPER
 # Created By: Sara Geraghty, Dec. 2021
 ##############################################################################
 
@@ -7,12 +7,13 @@
 # All other plots were made in BioRender.com
 
 library(ggplot2)
+library(TCGAbiolinks)
 library(gplots)
 library(maftools)
 library(stats)
 library(RColorBrewer)
 library(ggVennDiagram)
-library("gage")
+#library("gage")
 library(dendextend)
 library("pheatmap")
 library(ComplexHeatmap)
@@ -23,8 +24,12 @@ library("DOSE")
 library("enrichplot")
 library(ggrepel)
 library(ggsci)
+library(tidyverse)
+library(ggraph)
+library(tidygraph)
 library(org.Hs.eg.db)
 keytypes(org.Hs.eg.db)
+
 
 
 # NEJM color palatte: https://nanx.me/ggsci/reference/pal_nejm.html
@@ -143,6 +148,10 @@ maf <- read.maf(maf_filename)
 # Remove Translation_Start_Site mutations (not using)
 maf <- subsetMaf(maf, query = "Variant_Classification %in% c('Missense_Mutation', 'Nonsense_Mutation',
                                                               'Nonstop_Mutation', 'Splice_Site')")
+
+# Import intersecting patients
+intersecting_patients <- read.table(paste(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt", sep = ""))[,1]
+
 # Subset to only patients of interest
 maf_file_barcodes <- as.character(unlist(maf@data$Tumor_Sample_Barcode))
 patient_ids <- unlist(lapply(maf_file_barcodes, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3]))
@@ -284,23 +293,37 @@ relate_sample_size_to_sig_eQTL(list_of_master_dfs, list_of_sample_sizes, maf_lis
 #' Plot overlap in significant hits for a GOI between different subgroups using a Venn
 #' diagram format
 #' @param list_of_master_dfs a list of master DFs, with the name being the cancer type or subtype
-#' @param goi a driver gene-of-interest
+#' @param goi a driver gene-of-interest's uniprot ID
 #' @param qval_thres a q-value threshold for significance
 plot_overlap_between_subgroups <- function(list_of_master_dfs, goi, qval_thres) {
-  sig_hits <- lapply(list_of_master_dfs, function(m) 
-    m[(m$R_i.name == goi) & (m$q.value < qval_thres), 'T_k.name'])
-  
+  sig_hits <- lapply(1:length(list_of_master_dfs), function(i) {
+    m <- list_of_master_dfs[[i]]
+    #m[(m$R_i.name == goi) & (m$q.value < qval_thres), 'T_k.name'])
+    sig_hits <- as.character(unlist(m[((grepl(goi, m$term)) & (m$q.value < qval_thres)), 'T_k.name']))
+    print(paste(names(list_of_master_dfs)[i], length(sig_hits)))
+    return(sig_hits)
+  })
+
   plt <- venn.diagram(sig_hits, category.names = names(list_of_master_dfs), 
                       filename = NULL, output = TRUE, lwd = 2, lty = 'blank', 
-                      fill = c("#0072B5FF", "#BC3C29FF", "#20854EFF", "#E18727FF"), cex = 2, fontface = "bold",
+                      fill = c("#0072B5FF", "#BC3C29FF", "#20854EFF"), #"#E18727FF"), 
+                      cex = 2, fontface = "bold",
                       fontfamily = "sans", cat.cex = 2, cat.fontface = "bold", cat.fontfamily = "sans")
   #cat.default.pos = "outer", cat.pos = c(180, 180, 180, 180)) #, cat.fontfamily = "sans", rotation = 1)
   grid::grid.draw(plt)
 }
 
 
-plot_overlap_between_subgroups(list_of_master_dfs, "TP53", 0.1)
+#plot_overlap_between_subgroups(list_of_master_dfs, "TP53", 0.1)
+plot_overlap_between_subgroups(list_of_master_dfs, "P04637", 0.2)
 
+list_of_master_dfs <- list("BLCA" = blca_metabolic_res, "BRCA" = brca_metabolic_res, 
+                           "CESC" = cesc_metabolic_res, "COAD" = coad_metabolic_res, 
+                           "GBM" = gbm_metabolic_res, "HNSC" = hnsc_metabolic_res, 
+                           "KICH" = kich_metabolic_res, "LGG" = lgg_metabolic_res, 
+                           "LIHC" = lihc_metabolic_res, "LUAD" = luad_metabolic_res, 
+                           "LUSC" = lusc_metabolic_res, "THCA" = thca_metabolic_res, 
+                           "UCEC" = ucec_metabolic_res)
 
 # PART E: BETA HISTOGRAM WITH NUMBER OF SIGNIFICANT CORRELATIONS LABELED
 
@@ -335,6 +358,246 @@ plot_beta_histograms_by_subtype <- function(list_of_master_dfs, goi, qval_thres)
 
 
 plot_beta_histograms_by_subtype(list_of_master_dfs, "TP53", 0.1)
+
+
+# FOR PER-CANCER RESULTS: CREATE A BAR CHART SHOWING THE NUMBER OF SIGNIFICANT HITS 
+# FOR EACH CANCER TYPE AT A GIVEN Q-VALUE THRESHOLD
+#' @param list_of_master_dfs a list of master DFs, with the name being the cancer type or subtype
+#' @param goi optional: a driver gene-of-interest's uniprot ID (count only hits for this GOI)
+#' @param qval_thres a q-value threshold for significance
+create_per_ct_sig_hits_barplot <- function(list_of_master_dfs, goi, qval_thres) {
+  sig_hits_dts <- lapply(1:length(list_of_master_dfs), function(i) {
+    m <- list_of_master_dfs[[i]]
+    #m[(m$R_i.name == goi) & (m$q.value < qval_thres), 'T_k.name'])
+    sig_hits <- length(unlist(m[(m$q.value < qval_thres), 'T_k.name']))
+    if(!is.na(goi)) {
+      sig_hits <- length(unlist(m[((grepl(goi, m$term)) & (m$q.value < qval_thres)), 'T_k.name']))
+    }
+    return(data.table("Cancer.Type" = names(list_of_master_dfs)[i], "Num.Sig.Hits" = sig_hits))
+  })
+  sig_hits_dt_full <- do.call(rbind, sig_hits_dts)
+  
+  print(sig_hits_dt_full)
+  
+  p <- ggplot(sig_hits_dt_full, aes(x = reorder(Cancer.Type, Num.Sig.Hits), 
+                            y = Num.Sig.Hits)) +
+    geom_col(width = 0.7, fill = "#0072B5FF") + coord_flip() + theme_minimal() + 
+    theme(legend.position = "none", axis.title = element_text(face = "bold", size = 14), 
+          axis.text = element_text(face = "bold", size = 12)) + 
+    ylab(paste("Number of hits at q <", qval_thres)) + xlab("Cancer Type") 
+  #+ scale_fill_manual(values = color_palette)
+  #+ scale_fill_nejm() 
+  
+  p
+}
+
+
+# ANOTHER OPTION: NETWORK REPRESENTATION
+
+#' Generate results graph display for a driver of interest 
+#' This graphical display takes confidence interaction relationships from 
+#' a network like STRING or HumanBase, and displays these relationships
+#' as a graph. The graph will only include hits with a q-value below the
+#' given threshold (and any intermediate genes?). The edges and genes
+#' are colored by whether activation or repression is predicted when the 
+#' driver is mutated. 
+#' @param master_df an output DF from linear_model.R
+#' @param goi the name(s) of the driver gene(s) of interest
+#' @param qval_thres a q-value threshold, below which a target-driver
+#' pairing is considered significant
+#' @param network a table with the network information from either 
+#' HumanBase or STRING
+#' @param network_label either "STRING" or "HumanBase" to denote 
+#' what type of network this is
+#' @param conf_thres a confidence threshold for a connection between two 
+#' genes in the given network
+create_graphical_representation <- function(master_df, goi, qval_thres, 
+                                            network, network_label, conf_thres) {
+  
+  # Subset the master DF to the given goi and q-value threshold
+  master_df_sub <- master_df[(master_df$R_i.name == goi) & (master_df$q.value < qval_thres),]
+  nodes <-  c(goi, unique(master_df_sub$T_k.name))
+  
+  network_model_targs <- NA
+
+  # Subset the network to the significant targets, plus the GOI
+  if(network_label == "STRING") {
+    network_model_targs <- network[(network$node1_name %fin% c(goi, master_df_sub$T_k.name)) & 
+                                     (network$node2_name %fin% c(goi, master_df_sub$T_k.name)),]
+  } else if (network_label == "HumanBase") {
+    #network_model_targs <- network[(network$GENE1 %fin% c(goi, master_df_sub$T_k.name)) & 
+    #                                 (network$GENE2 %fin% c(goi, master_df_sub$T_k.name)),]
+    #colnames(network_model_targs) <- c("node1_name", "node2_name", "combined_score")
+    network_model_targs <- network[(network$node1_name %fin% c(goi, master_df_sub$T_k.name)) & 
+                                     (network$node2_name %fin% c(goi, master_df_sub$T_k.name)),]
+    
+  } else {
+    print("Error in given network label. Only implemented for STRING and HumanBase networks.")
+  }
+  print(head(network_model_targs))
+
+  # Remove cases where nodes 1 and 2 are the same, or rows where the values in the row are
+  # duplicated in a different order. Divide all confidence scores by 1000
+  network_model_targs <- subset(network_model_targs, node1_name != node2_name & 
+                                  !duplicated(cbind(pmin(node1_name, node2_name), 
+                                                    pmax(node1_name, node2_name))))
+  if(network_label == "STRING") {
+    network_model_targs$combined_score <- network_model_targs$combined_score / 1000
+  }
+
+  #nodes_sub <- unique(c(network_model_targs$node1_name, network_model_targs$node2_name))
+
+  # For each of the targets, get its a) directionality (up- or down-regulated), 
+  # b) confidence score in the given network, in relation to the driver (and/or to the other targets?)
+  edge_rows <- lapply(1:nrow(network_model_targs), function(i) {
+    conf <- network_model_targs[i, 'combined_score']   
+    if(conf > conf_thres) {
+      g1 <- network_model_targs[i, 'node1_name']
+      g2 <- network_model_targs[i, 'node2_name']
+      return(data.frame("src" = g1, "target" = g2, 
+                        "conf" = as.numeric(conf)))
+    } else {return (NA)}
+  })
+  edge_rows <- edge_rows[!is.na(edge_rows)]
+  edge_table <- do.call(rbind, edge_rows)
+  print(edge_table)
+  
+  unique_nodes <- unique(c(edge_table$src, edge_table$target))
+  node_table <- as.data.frame(unique_nodes)
+  colnames(node_table) <- "nodes"
+  node_table$dir <- as.factor(unlist(lapply(unique_nodes, function(n) {
+    dir <- NA
+    if(n == goi) {dir <- 0}
+    else {
+      dir <- ifelse(as.numeric(master_df_sub[master_df_sub$T_k.name == n, 'estimate'])[1] > 0, 1, -1)
+      #dir <- ifelse(master_df_sub[(master_df_sub$R_i.name %in% c(g1, g2)) & 
+       #                             (master_df_sub$T_k.name %in% c(g1, g2)), 'estimate'] > 0, 1, 2)
+    }
+    return(dir)
+  })))
+  print(node_table)
+
+  #links <- unique(edge_table[c("src", "target")])
+  #links <- mutate(links, dir = edge_table$dir, weight = edge_table$conf)
+  
+  # Convert to ggraph format
+  network_table <- tbl_graph(nodes = node_table, 
+                             edges = edge_table, 
+                             directed = FALSE)
+  
+  print(network_table)
+  
+  # Create ggraph
+  driver_targ_network <- ggraph(network_table, layout = "fr") +   # other options: stress
+    geom_edge_link0(aes(edge_width = conf), edge_colour = "grey66") +
+    scale_edge_width(range = c(0.5, 1.25)) +
+    geom_node_point(size = 6, aes(color = dir)) +        
+    geom_node_label(aes(label = nodes), repel = TRUE, show.legend = F, label.size = 0.25) +
+    #geom_node_text(aes(label = unique_nodes), nudge_y = 0.1, nudge_x = 0.05)+ 
+    theme_graph() +
+    scale_color_manual(values = c("#BC3C29FF", "#0072B5FF", "#20854EFF"), 
+                       labels = c("Pred.Downreg", "Driver", "Pred.Upreg")) +
+    theme(legend.title = element_text(face = "bold", size = 14),
+          legend.text = element_text(size = 12))
+  print(driver_targ_network)
+  # Render the network
+  show(driver_targ_network)
+}
+
+# Import the String network file and adjust it
+string_nw <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/STRING/string.9606.protein.links.v11.5.txt",
+                      header = TRUE)
+colnames(string_nw) <- c("node1", "node2", "combined_score")
+string_nw$index <- 1:nrow(string_nw)
+
+string_nw_info <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/STRING/string.9606.protein.info.v11.5.txt", 
+                             header = T, sep = "\t")
+
+string_nw_pt1 <- merge(string_nw[, c('node1', 'combined_score', 'index')], string_nw_info[, c('string_protein_id', 'preferred_name')], 
+                       by.x = 'node1', by.y = 'string_protein_id')
+colnames(string_nw_pt1) <- c("node1", "combined_score", "index", "node1_name")
+string_nw_pt1 <- string_nw_pt1[order(string_nw_pt1$index),]
+
+string_nw_pt2 <- merge(string_nw[, c('node2', 'combined_score', 'index')], string_nw_info[, c('string_protein_id', 'preferred_name')], 
+                       by.x = 'node2', by.y = 'string_protein_id')
+colnames(string_nw_pt2) <- c("node2", "combined_score", "index", "node2_name")
+string_nw_pt2 <- string_nw_pt2[order(string_nw_pt2$index),]
+
+string_nw_full <- merge(string_nw_pt1, string_nw_pt2, by = c('combined_score', 'index'))
+
+string_nw_full$node1 <- unlist(lapply(string_nw_full$node1, function(x) unlist(strsplit(x, ".", fixed = T))[2]))
+string_nw_full$node2 <- unlist(lapply(string_nw_full$node2, function(x) unlist(strsplit(x, ".", fixed = T))[2]))
+
+fwrite(string_nw_full, "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/STRING/string.9606.protein.links.v11.5.namesAdded.txt")
+
+# Read back
+string_nw_full <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/STRING/string.9606.protein.links.v11.5.namesAdded.txt")
+
+# Import the HumanBase tissue-specific networks and adjust
+
+# Import the network interaction files for the genes of interest
+nw_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Network_Data/"
+nw_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/"
+
+
+# BREAST
+goi <- "TP53"
+goi <- "PIK3CA"
+
+tp53_mamm_epi_nw <- read.table(paste0(nw_path, "hb_mammary_epithelium_tp53_network.txt"), 
+                               header = TRUE, sep = ",")
+tp53_mamm_gl_nw <- read.table(paste0(nw_path, "hb_mammary_gland_tp53_network.txt"), 
+                              header = TRUE, sep = ",")
+pik3ca_mamm_epi_nw <- read.table(paste0(nw_path, "hb_mammary_epithelium_pik3ca_network.txt"), 
+                                 header = TRUE, sep = ",")
+pik3ca_mamm_gl_nw <- read.table(paste0(nw_path, "hb_mammary_gland_pik3ca_network.txt"), 
+                                header = TRUE, sep = ",")
+
+tp53_mamm_epi_nw <- as.data.frame(lapply(tp53_mamm_epi_nw, trimws))
+tp53_mamm_gl_nw <- as.data.frame(lapply(tp53_mamm_gl_nw, trimws))
+pik3ca_mamm_epi_nw <- as.data.frame(lapply(pik3ca_mamm_epi_nw, trimws))
+pik3ca_mamm_gl_nw <- as.data.frame(lapply(pik3ca_mamm_gl_nw, trimws))
+
+conf_thres <- 0.4
+tp53_mamm_epi_nw_sig <- tp53_mamm_epi_nw[tp53_mamm_epi_nw$WEIGHT > conf_thres,]
+tp53_mamm_gl_nw_sig <- tp53_mamm_gl_nw[tp53_mamm_gl_nw$WEIGHT > conf_thres,]
+pik3ca_mamm_epi_nw_sig <- pik3ca_mamm_epi_nw[pik3ca_mamm_epi_nw$WEIGHT > conf_thres,]
+pik3ca_mamm_gl_nw_sig <- pik3ca_mamm_gl_nw[pik3ca_mamm_gl_nw$WEIGHT > conf_thres,]
+
+tp53_nw_sig <- rbind(tp53_mamm_epi_nw_sig, tp53_mamm_gl_nw_sig)
+pik3ca_nw_sig <- rbind(pik3ca_mamm_epi_nw_sig, pik3ca_mamm_gl_nw_sig)
+
+# Full network
+hb_mammary_epithelium <- read.table(paste0(nw_path, "HumanBase/mammary_epithelium.txt"))
+colnames(hb_mammary_epithelium) <- c("node1_entrez", "node2_entrez", "combined_score")
+hb_mammary_epithelium_conf <- hb_mammary_epithelium[hb_mammary_epithelium$combined_score >= 0.4, ]
+
+print(length(unique(c(hb_mammary_epithelium_conf$node1_entrez, hb_mammary_epithelium_conf$node2_entrez))))
+unique_ids <- unique(c(hb_mammary_epithelium_conf$node1_entrez, hb_mammary_epithelium_conf$node2_entrez))
+mapping <- data.frame("entrez" = unique_ids)
+mapping$gene_name <- unlist(lapply(mapping$entrez, function(e)
+  tryCatch({
+    return(bitr(e, fromType = "ENTREZID", toType = c("SYMBOL"), OrgDb = org.Hs.eg.db)[['SYMBOL']])
+  }, error = function(cond) {
+    print(cond)
+    return(NA)
+  })))
+
+hb_mammary_epithelium_conf$node1_name <- unlist(lapply(hb_mammary_epithelium_conf$node1_entrez, function(e)
+  return(mapping[mapping$entrez == e, 'gene_name'])))
+hb_mammary_epithelium_conf$node2_name <- unlist(lapply(hb_mammary_epithelium_conf$node2_entrez, function(e)
+  return(mapping[mapping$entrez == e, 'gene_name'])))
+write.csv(hb_mammary_epithelium_conf, paste0(nw_path, "HumanBase/mammary_epithelium_0.4conf.csv"))
+
+# Call function
+create_graphical_representation(top_drivers_0.05_brca, "TP53", 0.2, string_nw_full, "STRING", 0.4)
+create_graphical_representation(top_drivers_0.05_brca, "TP53", 0.2, tp53_nw_sig, "HumanBase", 0.4)
+
+# TESTER VERSION
+nodes <- c("ATV", "MTV", "ETX", "MMH", "ELOV", "READ")
+network_model_targs <- data.frame("node1" = sample(nodes, size = 24, replace = TRUE), 
+                                  "node2" = sample(nodes, size = 24, replace = TRUE), 
+                                  "combined_score" = runif(24), "estimate" = runif(24, min = -1, max = 1))
 
 
 ##############################################################################
@@ -395,16 +658,30 @@ create_heat_map <- function(results_table) {
 #' @param results_table
 create_regprot_v_genetarg_matrix <- function(results_table) {
   # Create the regulatory protein vs. gene target table
-  matrix <- data.frame(matrix(ncol = length(unique(results_table$R_i.name)),
+  #matrix <- data.frame(matrix(ncol = length(unique(results_table$R_i.name)),
+                              #nrow = length(unique(results_table$T_k.name))))
+  matrix <- data.frame(matrix(ncol = length(unique(results_table$term)),
                               nrow = length(unique(results_table$T_k.name))))
-  colnames(matrix) <- unique(results_table$R_i.name)
+  unique_ri_terms <- unique(results_table$term)
+  r_i.names <- unlist(lapply(unique_ri_terms, function(x) {
+    regprot <- unlist(strsplit(x, "_", fixed = TRUE))[1]
+    name <- unique(unlist(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == regprot, 
+                                            'external_gene_name']))
+    return(name)
+  }))
+  mapping <- data.frame("swissprot" = unlist(lapply(unique_ri_terms, function(x)
+    unlist(strsplit(x, "_", fixed = TRUE))[1])), "name" = r_i.names)
+  colnames(matrix) <- r_i.names
   rownames(matrix) <- unique(results_table$T_k.name)
   
   # Fill in this table with t-statistics
   for (i in 1:nrow(results_table)) {
     #tstat <- results_table$statistic[i]
     beta <- results_table$estimate[i]
-    regprot <- results_table$R_i.name[i]
+    #regprot <- results_table$R_i.name[i]
+    regprot_uniprot <- unlist(strsplit(results_table$term[i], "_", fixed = TRUE))[1]
+    regprot <- mapping[mapping$swissprot == regprot_uniprot, 'name']
+    print(regprot)
     targ <- results_table$T_k.name[i]
     
     tryCatch({
@@ -416,7 +693,7 @@ create_regprot_v_genetarg_matrix <- function(results_table) {
     })
   }
   # NOTE: leave all the unfilled pairings as NA
-  
+  print(matrix)
   # Replace NA/NaN with 0, or alternatively use na.omit
   #matrix[is.na(matrix)] <- 0
   #matrix[is.nan(matrix)] <- 0
@@ -505,14 +782,15 @@ create_heatmap_with_clustering(example_df, height = 2)
 #' Create a volcano plot for a given GOI in a particular cancer type or subtype,
 #' with significant hits highlighted and labeled
 #' @param master_df a data frame produced by the model
-#' @param goi a driver gene-of-interest
+#' @param goi a driver gene-of-interest uniprot ID
 #' @param qval_thres a q-value threshold for significance
 create_volcano_plot <- function(master_df, goi, qval_thres) {
   
   # Subset to the GOI 
-  master_df <- master_df[master_df$R_i.name == goi,]
+  #master_df <- master_df[master_df$R_i == goi,]
+  master_df <- master_df[grepl(goi, master_df$term),]
   master_df <- na.omit(master_df)
-
+  
   # Get the log2(Beta), which we are considering here to be like log2(fold change)
   log2_beta <- unlist(lapply(master_df$estimate, function(e) { 
     if((is.nan(e)) | (length(e) == 0)) {return(0)}
@@ -555,12 +833,14 @@ create_volcano_plot <- function(master_df, goi, qval_thres) {
     ylab("-log10(q-value)") + theme_minimal() + 
     geom_hline(yintercept = -log10(qval_thres), linetype = "dashed") +
     scale_fill_manual(values = cols) + scale_alpha_manual(values = alphas) + 
-    theme(legend.position = "none") + geom_text_repel()
+    theme(legend.position = "none", axis.title = element_text(face = "bold", size = 14),
+          axis.text = element_text(size = 12)) + geom_text_repel()
   
   p
 }
 
 create_volcano_plot(allgenes_p53, "TP53", 0.1)
+create_volcano_plot(allgenes_p53, "P04637", 0.1)
 
 
 # PART C: INDIVIDUAL BOX OR VIOLIN PLOTS FOR A SPECIFIC PATHWAY OF INTEREST
@@ -708,9 +988,13 @@ create_driver_target_boxplot(expression_df_quantile_norm, mutation_regprot_df,tp
 #' @param silent_df OPT: an additional, corresponding DF with silent mutation results
 plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cutout_thres, silent_df) {
   
+  master_df <- master_df[order(master_df$q.value),]
+  silent_df <- silent_df[order(silent_df$q.value),]
+  
   # For each source, create a 0 and 1 vector for each  target hit to indicate if it 
   # is a a hit in that source
   target_set_vector_list <- lapply(target_sets_list, function(source) {
+    source <- setdiff(source, setdiff(source, master_df$T_k.name))
     vect <- unlist(lapply(1:nrow(master_df), function(i) {
       x <- master_df[i, 'T_k.name']
       return(ifelse(x %fin% source, 1, 0))
@@ -719,7 +1003,7 @@ plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cu
   })
   
   target_set_vector_list_silent <- NA
-  if(!is.na(silent_df)) {
+  if(length(silent_df) > 1) {
     names(target_set_vector_list) <- paste0("MN.", names(target_sets_list))
     silent_df$T_k.name <- as.factor(silent_df$T_k.name)
     target_set_vector_list_silent <- lapply(target_sets_list, function(source) {
@@ -740,7 +1024,7 @@ plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cu
   # Use helper function to get fraction of genes at given rank
   target_set_fraction_df <- get_frac_of_genes_at_rank(target_set_vector_list, master_df)
   target_set_fraction_df_silent <- NA
-  if(!is.na(silent_df)) {
+  if(length(silent_df) > 1) {
     target_set_fraction_df_silent <- get_frac_of_genes_at_rank(target_set_vector_list_silent,
                                                                silent_df)
     target_set_fraction_df <- merge(target_set_fraction_df, target_set_fraction_df_silent, by = "Rank")
@@ -761,19 +1045,19 @@ plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cu
   # Create inset plot
   p2 <- ggplot(target_sets_fraction_df_m[target_sets_fraction_df_m$Rank %in% 1:cutout_thres,], 
                mapping = aes(x = Rank, y = Frac, color = Source)) + 
-    geom_line(aes(linetype=Mutation.Type), size = 1.25) +
+    geom_line(aes(linetype=Mutation.Type, alpha = Mutation.Type), size = 1.25) +
     #geom_point(size = 1) + 
     scale_x_continuous(limits = c(1,cutout_thres)) + 
-    #scale_color_nejm() + 
-    #scale_alpha_manual(values=c(0.9,0.9,0.4,0.4)) +
-    #scale_color_manual(values = c("#BC3C29FF", "#0072B5FF", "#BC3C29FF", "#0072B5FF")) + 
+    scale_color_nejm() + 
+    scale_alpha_manual(values=c(0.9,0.9,0.4,0.4)) +
+    scale_color_manual(values = c("#BC3C29FF", "#0072B5FF", "#BC3C29FF", "#0072B5FF")) + 
     theme(legend.position = "none", axis.title.x = element_blank(), axis.title.y = element_blank(),
           panel.grid.minor = element_blank(), axis.text.x = element_text(size = 14, face = "bold"), 
           axis.text.y =  element_text(size = 14, face = "bold"))
   
   p <- ggplot(target_sets_fraction_df_m[target_sets_fraction_df_m$Rank %in% 1:thres,], 
               mapping = aes(x = Rank, y = Frac, color = Source)) + 
-    geom_line(aes(linetype=Mutation.Type), size = 1.25) +
+    geom_line(aes(linetype=Mutation.Type, alpha = Mutation.Type), size = 1.25) +
     #theme_minimal() +
     theme(axis.text = element_text(size = 16, face = "bold"), 
           axis.title = element_text(size = 18, face = "bold"), #panel.grid.major = element_blank(), 
@@ -784,10 +1068,10 @@ plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cu
     #ggtitle(paste("Fraction of Model-Prioritized Target Genes in", paste(goi, "Sourced Targets"))) +
     xlab("Gene Rank") + ylab("Fraction in Set of Known Targets") + 
     scale_x_continuous(limits = c(1,thres)) +
-    #scale_color_nejm() + 
-    #scale_alpha_manual(values=c(0.9,0.9,0.4,0.4)) +
-    #scale_color_manual(values = c("#BC3C29FF", "#0072B5FF", "#BC3C29FF", "#0072B5FF"),
-    #labels = c(names(target_sets_list), rep("", times = length(names(target_sets_list))))) + 
+    scale_color_nejm() + 
+    scale_alpha_manual(values=c(0.9,0.9,0.4,0.4)) +
+    scale_color_manual(values = c("#BC3C29FF", "#0072B5FF", "#BC3C29FF", "#0072B5FF"),
+    labels = c(names(target_sets_list), rep("", times = length(names(target_sets_list))))) + 
     annotation_custom(ggplotGrob(p2), xmin =(thres-round(thres/1.5)), xmax = thres, ymin = 0.30, ymax = 1.0) +
     geom_rect(data=target_sets_fraction_df_m[1:cutout_thres,], 
               aes(xmin = 1, xmax = cutout_thres, ymin = 0, ymax = 1, fill = "gray"),
@@ -921,7 +1205,7 @@ perform_gsea <- function(results_table, n, sort_by, output_path) {
     regprot.gsea.ncg[[regprot]] <- gse.ncg
     regprot.gsea.go[[regprot]] <- gse.go
     #regprot.gsea.kegg[[regprot]] <- gse.kegg
-    res_tab <- data.table()
+    res_tab <- NA
     
     
     # plot GSEA for top N upregulated and top N downregulated terms
@@ -988,8 +1272,9 @@ create_gsea_barchart <- function(results_gsea, n, db) {
   p <- ggplot(input_df, aes(x = reorder(Enriched.Pathway, negLog10_pvalues), 
                             y = Neg.Log10.Pval)) +
     geom_col(width = 0.7, fill = "#0072B5FF") + coord_flip() + theme_minimal() + 
-    theme(legend.position = "none") +  ylab("-log10(adj.pvalue)") + 
-    xlab(paste("Enriched", paste(db, "Pathway")))
+    theme(legend.position = "none", axis.title = element_text(face = "bold", size = 14), 
+          axis.text = element_text(face = "bold", size = 12)) + 
+    ylab("-log10(adj.pvalue)") + xlab(paste("Enriched", paste(db, "Pathways"))) 
     #+ scale_fill_manual(values = color_palette)
     #+ scale_fill_nejm() 
   
@@ -998,6 +1283,38 @@ create_gsea_barchart <- function(results_gsea, n, db) {
 
 # Call function
 create_gsea_barchart(results_gsea, 25, "GO")
+
+
+# Version for STRINGdB results:
+create_gsea_barchart <- function(results_gsea, n, db) {
+  # Subset the results table based on the number of pathways
+  results_gsea_sub <- results_gsea[1:n, ]
+  results_gsea_sub <- results_gsea_sub[!is.na(results_gsea_sub$description),]
+  
+  # Convert the p-values to -log10(pvalue)
+  negLog10_pvalues <- -log10(results_gsea_sub$fdr)
+  
+  # Create an input data frame for ggplot
+  input_df <- data.frame("Enriched.Pathway" = results_gsea_sub$description,
+                         "Neg.Log10.Pval" = negLog10_pvalues)
+  
+  #color_palette <- rep(pal_nejm("default")(8), times = ceiling(n/8))
+  
+  p <- ggplot(input_df, aes(x = reorder(Enriched.Pathway, negLog10_pvalues), 
+                            y = Neg.Log10.Pval)) +
+    geom_col(width = 0.7, fill = "#0072B5FF") + coord_flip() + theme_minimal() + 
+    theme(legend.position = "none", axis.title = element_text(face = "bold", size = 14),
+          axis.text = element_text(size = 12)) + 
+    ylab("-log10(adj.pvalue)") + xlab(paste("Enriched", paste(db, "Pathways"))) 
+  #+ scale_fill_manual(values = color_palette)
+  #+ scale_fill_nejm() 
+  
+  p
+}
+
+# Instantiate the string DB object 
+#string_db <- STRINGdb$new(version="11.5", species=9606, score_threshold=0, 
+                          #input_directory="")
 
 
 # OPTION 3: GENE SET ENRICHMENT PATHWAY MAP (TODO)
@@ -1088,6 +1405,17 @@ plot_pvalue_histograms_real_and_random <- function(real_master_df, random_master
 plot_pvalue_histograms_real_and_random(allgenes_p53, allgenes_p53_random, "TP53", 0.1)
 
 
+# A non-overlaid version
+ggplot(allgenes_p53, aes(x = p.value)) + 
+       geom_histogram(alpha = 1, position = "identity", bins = 50, fill = "#0072B5FF") + 
+       theme_minimal() + xlab("P-Value") + ylab("Frequency") + 
+       labs(fill = "") + theme(axis.title = element_text(face = "bold", size = 14),
+                                                             axis.text = element_text(face = "bold", size = 12),
+                                                             legend.text = element_text(size=12),
+                                                             legend.title = element_text(face = "bold", size = 14)) +
+       geom_vline(xintercept = 0.05, linetype='dashed', size = 1)+
+       annotate("text", y = 1000, x = 0.01, label = "p < 0.05", hjust = -0.5, size = 5, fontface = "bold")
+
 # PART D: PLOTTING OVERLAP WITH METABRIC RESULTS
 #' Creates a Venn diagram with the overlapping significant hits when model is 
 #' run on the same GOI using two independent data sources
@@ -1097,17 +1425,43 @@ plot_pvalue_histograms_real_and_random(allgenes_p53, allgenes_p53_random, "TP53"
 #' @param qval_thres a q-value threshold for significance
 plot_hit_overlap_between_data_sources <- function(master_df_list, goi, qval_thres) {
   
-  # Get the significant hits for each
-  sig_hits_list <- lapply(master_df_list, function(df) df[df$q.value < qval_thres, 'T_k.name'])
+  target_sets <- lapply(master_df_list, function(df) unique(df$T_k.name))
+  target_overlap <- intersect(target_sets[[1]], target_sets[[2]])
+  print(length(target_overlap))
+  
+  # Limit just to genes found in both sets, then get the significant hits for each
+  sig_hits_list <- lapply(master_df_list, function(df) {
+    df <- df[df$T_k.name %in% target_overlap, ]
+    df[df$q.value < qval_thres, 'T_k.name']
+  })
   names(sig_hits_list) <- names(master_df_list)
   #print(head(sig_hits_list))
   
+  # Calculate whether overlap is significant using an approx. of an exact hypergeometric test
+  len_hits1 <- length(sig_hits_list[[1]])
+  len_hits2 <- length(sig_hits_list[[2]])
+  len_ol <- length(intersect(sig_hits_list[[1]], sig_hits_list[[2]]))
+  n <- length(target_overlap)
+  
+  # n is size of urn; hits1 is the number of genes from set 1. Say we were to draw
+  # the number of balls the size of hits2 (# of genes from set 2), w/o replacement. 
+  # M of these balls are also found in hits2. What are the odds that M >= len_ol?
+  phyper_res <- phyper(len_ol-1, len_hits1, n-len_hits1, len_hits2, 
+                       lower.tail = FALSE, log.p = FALSE)
+  print(paste("p-value:", phyper_res))
+  
   # Plot Venn Diagram
-  ggVennDiagram(sig_hits_list, label_alpha = 0, category.names = names(sig_hits_list),
-                set_size = 9, label_size = 9, edge_size = 0, 
-                label = "count", set_color = rep("black", times = length(sig_hits_list))) +
-    scale_fill_gradient(low="#FFDC91FF", high = "#0072B5FF") + labs(fill = paste("# Hits, q<", qval_thres)) +
-    scale_color_manual(values = rep("black", times = length(sig_hits_list)))
+  g <- ggVennDiagram(sig_hits_list, label_alpha = 0, category.names = names(sig_hits_list),
+                     set_size = 9, label_size = 9, edge_size = 0, 
+                     label = "count", set_color = rep("black", times = length(sig_hits_list))) +
+    theme(legend.position = "none") +
+    scale_fill_gradient(low="#FFDC91FF", high = "#0072B5FF") + #labs(fill = paste("# Hits, q<", qval_thres)) +
+    #scale_fill_manual(values = c("#FFDC91FF", "#0072B5FF")) + # "#E18727FF"
+    scale_color_manual(values = rep("black", times = length(sig_hits_list))) +
+    labs(title = paste("q <", paste(qval_thres, paste(", HG p=", format(phyper_res, digits = 4, scientific = TRUE)))))
+  print(g)
+  #text(labels = paste("HG p=", format(phyper_res, digits = 4, scientific = TRUE)),
+       #x = 0.1, y = 0.1)
 }
 
 # Import relevant results
@@ -1119,7 +1473,11 @@ master_df_list <- list("TCGA" = allgenes_p53, "METABRIC" = allgenes_p53_metabric
 # Call function
 plot_hit_overlap_between_data_sources(master_df_list, "TP53", 0.1)
 
-
+# Hack to look at the top 5% of hits in both
+allgenes_p53_top5perc <- allgenes_p53[1:as.integer(nrow(allgenes_p53) * 0.05),]
+allgenes_metabric_top5perc <- allgenes_p53_metabric[1:as.integer(nrow(allgenes_p53_metabric) * 0.05),]
+master_df_list_top5perc <- list("TCGA" = allgenes_p53_top5perc, "METABRIC" = allgenes_p53_metabric_top5perc)
+plot_hit_overlap_between_data_sources(master_df_list_top5perc, "TP53", 1)
 
 
 # PART E: PLOTTING ENRICHMENT IN LI. ET AL. TARGETS
@@ -1350,8 +1708,9 @@ tp53_mut_df_genes_overlap_names <- unique(unlist(lapply(tp53_mut_df_genes_overla
 plot_target_assoc_w_metabol_enrichment(master_df_mut, tp53_mut_df_genes_overlap_names, 0.1, 2.0)
 
 
-
-
+# PART F: BETA CLUSTERING BY CANCER TYPE (HEATMAP? OR PCA OF BETAS PLOTTED BY PC1 V. PC2?)
+# We expected to see molecularly similar cancer types e.g. BRCA and UV, GBM and LGG, COAD and READ, etc. be more
+# similar in their correlations to each other relative to members of other pairs
 
 
 
@@ -1409,7 +1768,7 @@ plot_mutational_overlap <- function(patient_set, mut_count_matrix, gene1, gene2)
     ggplot2::scale_fill_gradient(low="cornsilk1", high = "cadetblue3")
 }
 
-patient_set <- read.table(paste0(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt"), header = TRUE)[,1]
+patient_set <- read.table(paste0(main_path, "Linear Model/Tumor_Only/intersecting_ids_washu.txt"), header = TRUE)[,1]
 patient_set_lt20pamp <- intersect(read.table(paste0(main_path, "Patient Subsets/LessThan20PercAmp_patient_ids.txt"), header = TRUE)[,1], patient_set)
 patient_set_lumA <- intersect(read.table(paste0(main_path, "Patient Subsets/Luminal.A_patient_ids.txt"), header = TRUE)[,1], patient_set)
 patient_set_lumB <- intersect(read.table(paste0(main_path, "Patient Subsets/Luminal.B_patient_ids.txt"), header = TRUE)[,1], patient_set)
@@ -1464,7 +1823,7 @@ create_heat_map <- function(results_table) {
   # Clusters by default using hclust, but can specify others using param 'hclustfun'
   hm <- heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
                   density.info = "none", dendrogram = "row", Colv = FALSE, 
-                  Rowv = TRUE, key = TRUE, key.title = NA, key.xlab = "Beta") 
+                  Rowv = TRUE, key = TRUE, key.title = NA, key.xlab = "T-statistic") 
   #plot(hm)
   #heatmap.2(matrix, scale = "none", col = bluered(100), trace = "none",
   #density.info = "none", labCol = "", dendrogram = c("row"), 
@@ -1495,6 +1854,18 @@ create_heat_map <- function(results_table) {
 #' Helper function to create regprot vs. gene target matrix and fill with Beta values 
 #' @param results_table
 create_regprot_v_genetarg_matrix <- function(results_table) {
+  if(!("R_i.name" %in% colnames(results_table))) {
+    mapping <- data.frame("uniprot" = unlist(lapply(unique(results_table$term), function(x) 
+      unlist(strsplit(x, "_", fixed = TRUE))[1])))
+    mapping$name <- unlist(lapply(mapping$uniprot, function(x) 
+      unique(unlist(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == x, 'external_gene_name']))))
+    results_table$R_i.name <- unlist(lapply(results_table$term, function(term) {
+      u <- unlist(strsplit(term, "_", fixed = TRUE))[1]
+      mapping[mapping$uniprot == u, 'name']
+    }))
+  }
+  print(head(results_table))
+  
   # Create the regulatory protein vs. gene target table
   matrix <- data.frame(matrix(ncol = length(unique(results_table$R_i.name)),
                               nrow = length(unique(results_table$T_k.name))))
@@ -1503,21 +1874,21 @@ create_regprot_v_genetarg_matrix <- function(results_table) {
   
   # Fill in this table with t-statistics
   for (i in 1:nrow(results_table)) {
-    #tstat <- results_table$statistic[i]
-    beta <- results_table$estimate[i]
+    tstat <- results_table$statistic[i]
+    #beta <- results_table$estimate[i]
     regprot <- results_table$R_i.name[i]
     targ <- results_table$T_k.name[i]
     
     tryCatch({
-      #matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
-      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- beta
+      matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- tstat
+      #matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- beta
     }, error=function(cond){
       print(cond)
       matrix[rownames(matrix) == targ, colnames(matrix) == regprot] <- 0
     })
   }
   # NOTE: leave all the unfilled pairings as NA
-  
+  print(head(matrix))
   # Replace NA/NaN with 0, or alternatively use na.omit
   #matrix[is.na(matrix)] <- 0
   #matrix[is.nan(matrix)] <- 0
@@ -1557,7 +1928,7 @@ create_heatmap_with_clustering <- function(master_df, height) {
   matrix <- create_heat_map(master_df)
   print(head(matrix))
   hm <- heatmap.2(matrix, scale = "none", col = bluered(1000), trace = "none",
-                  density.info = "none", key = TRUE, key.title = NA, key.xlab = "Beta")
+                  density.info = "none", key = TRUE, key.title = NA, key.xlab = "T-statistic")
   rownames(matrix)[hm$rowInd]
   row_clust <- hclust(dist(matrix, method = "euclidean"), method = 'ward.D2')
   plot(row_clust)
@@ -1600,7 +1971,7 @@ create_heatmap_with_clustering <- function(master_df, height) {
   # Plot the new and improved heatmap
   new_hm <- heatmap.2(matrix, scale = "none", col = bluered(1000), trace = "none", 
                       density.info = "none", dendrogram = "row", Rowv = dendrogram, 
-                      Colv = "none", key.title = NA, key.xlab = "Beta", 
+                      Colv = "none", key.title = NA, key.xlab = "T-statistic", 
                       RowSideColors = col_labels, colRow = col_labels) 
   # col = brewer.pal(n = 100, name = "YlGnBu")
   print(new_hm)
@@ -1625,6 +1996,8 @@ master_df_mut_lt20pamp <- read.csv(paste0(main_path, "Linear Model/PIK3CA_TP53/e
 # Call this function
 create_heatmap_with_clustering(master_df_mut, height = 2)
 
+master_df_mut_sigTargs <- master_df_mut[master_df_mut$q.value < 0.2, 'T_k.name']
+master_df_mut_onlySigTargs <- master_df_mut[master_df_mut$T_k.name %in% master_df_mut_sigTargs,]
 
 ##############################################################################
 ### COMBINED SUBTYPE MODEL RESULT HEAT MAPS
@@ -1646,8 +2019,12 @@ create_subtype_partitioned_heatmap <- function(master_df_lumA, master_df_lumB,
     master_df_lumA <- master_df_lumA[master_df_lumA$q.value < 0.2,]
     master_df_lumB <- master_df_lumB[master_df_lumB$q.value < 0.2,]
     master_df_basal <- master_df_basal[master_df_basal$q.value < 0.2,]
-    master_df_her2 <- master_df_her2[master_df_her2$q.value < 0.2,]
+    #master_df_her2 <- master_df_her2[master_df_her2$q.value < 0.2,]
   }
+  
+  matrix_lumA <- NA
+  matrix_lumB <- NA
+  matrix_basal <- NA
   
   # User helper function to create an input matrix for each master DF
   lumA_incl <- FALSE
@@ -1663,33 +2040,58 @@ create_subtype_partitioned_heatmap <- function(master_df_lumA, master_df_lumB,
     matrix_lumB <- create_regprot_v_genetarg_matrix(master_df_lumB)
     matrix_lumB <- cbind(matrix_lumB, rep(2, times = nrow(matrix_lumB)))
     colnames(matrix_lumB)[ncol(matrix_lumB)] <- "subtype"
+    matrix_lumB <- cbind(matrix_lumB, as.matrix(data.table("CDH1" = rep(0, times = nrow(matrix_lumB)))))
     lumB_incl <- TRUE
   }
   
   basal_incl <- FALSE
-  if((nrow(master_df_basal) > 0) & (length(unique(master_df_basal$R_i.name)) >= 2)) {
+  if((nrow(master_df_basal) > 0)) { #& (length(unique(master_df_basal$R_i.name)) >= 2)) {
     matrix_basal <- create_regprot_v_genetarg_matrix(master_df_basal)
     matrix_basal <- cbind(matrix_basal, rep(3, times = nrow(matrix_basal)))
     colnames(matrix_basal)[ncol(matrix_basal)] <- "subtype"
+    matrix_basal<- cbind(matrix_basal, as.matrix(data.table("PIK3CA" = rep(0, times = nrow(matrix_basal)))))
+    matrix_basal <- cbind(matrix_basal, as.matrix(data.table("CDH1" = rep(0, times = nrow(matrix_basal)))))
+    matrix_basal <- cbind(matrix_basal, as.matrix(data.table("KMT2C" = rep(0, times = nrow(matrix_basal)))))
     basal_incl <- TRUE
   }
   
-  her2_incl <- FALSE
-  if((nrow(master_df_her2) > 0) & (length(unique(master_df_her2$R_i.name)) >= 2)) {
-    matrix_her2 <- create_regprot_v_genetarg_matrix(master_df_her2)
-    matrix_her2 <- cbind(matrix_her2, rep(4, times = nrow(matrix_her2)))
-    colnames(matrix_her2)[ncol(matrix_her2)] <- "subtype"
-    her2_incl <- TRUE
-  }
+  # her2_incl <- FALSE
+  # if((nrow(master_df_her2) > 0) & (length(unique(master_df_her2$R_i.name)) >= 2)) {
+  #   matrix_her2 <- create_regprot_v_genetarg_matrix(master_df_her2)
+  #   matrix_her2 <- cbind(matrix_her2, rep(4, times = nrow(matrix_her2)))
+  #   colnames(matrix_her2)[ncol(matrix_her2)] <- "subtype"
+  #   her2_incl <- TRUE
+  # }
   
   
   # Combine all these into one
-  matrices <- list(matrix_lumA, matrix_lumB, matrix_basal, matrix_her2)
-  incl_vect <- c(lumA_incl, lumB_incl, basal_incl, her2_incl)
-  incl_vect_num <- unlist(lapply(1:length(incl_vect), function(i) ifelse(incl_vect[i] == TRUE, i, NA)))
+  matrices <- list(matrix_lumA, matrix_lumB, matrix_basal) #, matrix_her2)
+  incl_vect <- c(lumA_incl, lumB_incl, basal_incl) #, her2_incl)
+  incl_vect_num <- unlist(lapply(1:length(incl_vect), function(i) 
+    ifelse(incl_vect[i] == TRUE, i, NA)))
   incl_vect_num <- incl_vect_num[!is.na(incl_vect_num)]
   matrices_to_keep <- matrices[incl_vect_num]
-  print(matrices_to_keep)
+  
+  # Ensure all columns are the same
+  #unique_cols <- unique(c(unlist(lapply(matrices, function(m) return(colnames(m))))))
+  #print(unique_cols)
+  #matrices <- lapply(matrices, function(m) {
+  #  if(length(m) > 1) {
+  #    if(length(unique_cols) != ncol(m)) {
+  #      missing_cols <- setdiff(unique_cols, colnames(m))
+  #      print(missing_cols)
+  #      missing_df <- data.frame(matrix(nrow = nrow(m), ncol = length(missing_cols)))
+  #      missing_df[is.na(missing_df)] <- 0
+  #      colnames(missing_df) <- missing_cols
+  #      m <- cbind(m, missing_df)
+  #      print(head(m))
+  #    }
+  #    return(m)
+  #  }
+  #})
+  
+  
+  print(head(matrices_to_keep))
   master_matrix <- do.call(rbind, matrices_to_keep)
   print(head(master_matrix))
   print(unique(master_matrix[,'subtype']))
@@ -1697,13 +2099,12 @@ create_subtype_partitioned_heatmap <- function(master_df_lumA, master_df_lumB,
   
   # Get row clustering
   #row_dend <- hclust(dist(master_matrix[,1:2]))
-  
   hm_annot <- HeatmapAnnotation(df = data.frame(subtype = c(rep("Luminal A", nrow(matrix_lumA)), 
                                                             rep("Luminal B", nrow(matrix_lumB)),
-                                                            rep("Basal", nrow(matrix_basal)),
-                                                            rep("HER2", nrow(matrix_her2)))),
-                                col = list(subtype = c("Luminal A" = "pink", "Luminal B" = "lightblue",
-                                                       "Basal" = "orange", "HER2" = "lightgreen")),
+                                                            rep("Basal", nrow(matrix_basal)))),
+                                                            #rep("HER2", nrow(matrix_her2)))),
+                                col = list(subtype = c("Luminal A" = "#BC3C29FF", "Luminal B" = "#0072B5FF",
+                                                       "Basal" = "#20854EFF")), #, "HER2" = "#E18727FF")),
                                 show_legend = TRUE, annotation_name_side = "right")
   draw(hm_annot)
   
@@ -1717,7 +2118,7 @@ create_subtype_partitioned_heatmap <- function(master_df_lumA, master_df_lumB,
 }
 
 create_subtype_partitioned_heatmap(res_metabol_lumA_mut, res_metabol_lumB_mut, res_metabol_basal_mut,
-                                   res_metabol_her2_mut, TRUE)
+                                   res_metabol_her2_mut, FALSE)
 
 ##############################################################################
 ### SPEARMAN CORRELATION PLOTS

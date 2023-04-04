@@ -19,9 +19,10 @@ library(TCGAbiolinks)
 library(data.table)
 library(Rfast)
 library(parallel)
+library(dplyr)
 
 path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
-#path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TCGA Data (ALL)/"
+#path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/"
 
 output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/CNV/"
 #output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/CNV/"
@@ -252,12 +253,15 @@ ascat2_filenames <- list.files(paste(path, "CNV_Data/Gene-Level Copy Number Raw/
 # Import the list of patient IDs that have all four data types (the '2' indicates that they were created using the raw CNV
   # files rather than the GISTIC2 score CNV files)
 patient_id_list <- read.table(paste(path, "unique_brca_patient_ids_2.txt", sep = ""), header = TRUE)[,1]
-#patient_id_list <- read.table(paste(path, "unique_patient_ids_2.txt", sep = ""), header = FALSE)[,2]
+#patient_id_list <- read.table(paste(path, "unique_patient_ids_2.txt", sep = ""), header = T)[,1]
 
 # Import Biospecimen information to do the sample-patient ID conversions
 biosp_df <- read.csv(paste(path, "CNV_Data/Gene-Level Copy Number Raw/aliquot.csv", sep = ""), header = TRUE, na.strings = "\'--")
 # biosp_df <- read.csv(paste(path, "aliquot.csv", sep = ""), header = TRUE, na.strings = "\'--")
 
+# All genes we are interested in
+allgene_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/allgene_targets.csv", 
+                            header = TRUE, row.names = 1, check.names = FALSE)
 
 ############################################################
 # MAKE PER-GENE OUTPUT DATAFRAME
@@ -270,8 +274,9 @@ biosp_df <- read.csv(paste(path, "CNV_Data/Gene-Level Copy Number Raw/aliquot.cs
 #' @param patient_id_list a vector of patient 4-letter/number TCGA IDs with all 
 #' four data types of interest
 #' @param biosp_df the biospecimen information for sample-patient ID conversions
+#' @param allgene_targets the genes we are specifically interested in profiling
 make_output_cnv_dataframe <- function(path, ascat2_filenames, patient_id_list, 
-                                      biosp_df) {
+                                      biosp_df, allgene_targets) {
 
   # Loop through all patients, to get a column of CNV values for each gene for each patient
   cnv_cols <- lapply(1:length(ascat2_filenames), function(i) {
@@ -284,13 +289,14 @@ make_output_cnv_dataframe <- function(path, ascat2_filenames, patient_id_list,
     samp_submitter_id <- biosp_df[biosp_df$aliquot_id == uuid_aliquot, 'sample_submitter_id']
     #tcga_id <- unique(uuid_barcode_conv[uuid_barcode_conv$uuid he== uuid_case, 'tcga_barcode'])
     patient_id <- unlist(strsplit(samp_submitter_id, "-", fixed = TRUE))[3]
-    #print(patient_id)
-    
+
     if(length(patient_id) == 0) {return(NA)}
     else if (patient_id %fin% patient_id_list) {
       # Upload this CNV file
       cnv_file <- data.table::fread(paste(path, paste("CNV_Data/Gene-Level Copy Number Raw/", filename, sep = ""),
                                           sep = ""), sep = "\t", header = TRUE)
+      gene_ids <- unlist(lapply(cnv_file$gene_id, function(x) unlist(strsplit(x, ".", fixed = T))[1]))
+      cnv_file <- cnv_file[which(gene_ids %fin% allgene_targets$ensg), ]
       
       # Get the copy number info for this
       copy_num_col <- cnv_file$copy_number
@@ -299,7 +305,11 @@ make_output_cnv_dataframe <- function(path, ascat2_filenames, patient_id_list,
       full_patient_id <- paste(unlist(strsplit(samp_submitter_id, "-", fixed = TRUE))[3:4], collapse = "-")
       
       #return(c(patient_id, copy_num_col))
-      return(c(full_patient_id, copy_num_col))
+      copy_num_df <- as.data.frame(copy_num_col)
+      colnames(copy_num_df) <- full_patient_id
+      rownames(copy_num_df) <- cnv_file$gene_id
+
+      return(copy_num_df)
     } 
     else {return(NA)}
   })
@@ -309,27 +319,67 @@ make_output_cnv_dataframe <- function(path, ascat2_filenames, patient_id_list,
     # Rows : Transcription Factors (ENSG ID) OR all genes in genome
     # Columns : Patient TCGA ID (4-digit) OPT: (-Sample ID (01A is tumor, 11A is normal)); double check that the CNA values for normal samples exist
     # Entries : CNA value 
-  output_cnv_df <- as.data.frame(do.call("cbind", cnv_cols))
+  #output_cnv_df <- as.data.frame(do.call("cbind", cnv_cols))
+  
+  #output_cnv_df <- as.data.frame(Reduce(function(x, y) dplyr::full_join(x, y, by = "ensg_id"), cnv_cols))
 
   # Convert the top row to column names (patient IDs)
-  colnames(output_cnv_df) <- as.character(unlist(output_cnv_df[1,]))
-  output_cnv_df <- output_cnv_df[-1,]
-  
-  # Get the gene IDs from a sample to add as rownames
-  cnv_file <- data.table::fread(paste(path, paste("CNV_Data/Gene-Level Copy Number Raw/", ascat2_filenames[1], sep = ""),
-                                      sep = ""), sep = "\t", header = TRUE)
-  rownames(output_cnv_df) <- cnv_file$gene_id
-  
-  return(output_cnv_df)
+  #colnames(output_cnv_df) <- as.character(unlist(output_cnv_df[1,]))
+  #output_cnv_df <- output_cnv_df[-1,]
+
+  #return(output_cnv_df)
+  return(cnv_cols)
 }
 
 # Run the function
-output_cnv_df <- make_output_cnv_dataframe(path, ascat2_filenames, 
-                                           patient_id_list, biosp_df)
+output_cnv_df_cols <- make_output_cnv_dataframe(path, ascat2_filenames, 
+                                           patient_id_list, biosp_df,
+                                           allgene_targets)
+
+if(length(unique(unlist(lapply(output_cnv_df_cols, function(df) nrow(df))))) > 1) {
+  lengths <- unique(unlist(lapply(output_cnv_df_cols, function(df) nrow(df))))
+  output_cnv_dfs_perLength <- lapply(lengths, function(l) {
+    to_keep_l <- unlist(lapply(1:length(output_cnv_df_cols), function(i) 
+      if(nrow(output_cnv_df_cols[[i]]) == l) {return(i)}))
+    output_cnv_df_l <- output_cnv_df_cols[to_keep_l]
+    output_cnv_df_l_full <- do.call(cbind, output_cnv_df_l)
+    output_cnv_df_l_full$ensg_id <- rownames(output_cnv_df_l_full)
+    return(output_cnv_df_l_full)
+  })
+  output_cnv_df_full <- merge(output_cnv_dfs_perLength[[1]],  output_cnv_dfs_perLength[[2]], 
+                              by = 'ensg_id', all = T)   #TODO: this does not combine multiple gene isoforms, which results in many NAs
+  rownames(output_cnv_df_full) <- output_cnv_df_full$ensg_id
+  output_cnv_df_full <- output_cnv_df_full[,!(colnames(output_cnv_df_full) %in% 'ensg_id')]
+  
+} else {
+  output_cnv_df_full <- do.call(cbind, output_cnv_df_cols)
+  rownames(output_cnv_df_full) <- output_cnv_df_full$ensg_id
+  output_cnv_df_full <- output_cnv_df_full[,!(colnames(output_cnv_df_full) %in% 'ensg_id')]
+}
+# Get the gene IDs from a sample to add as rownames
+#cnv_file <- data.table::fread(paste(path, paste("CNV_Data/Gene-Level Copy Number Raw/", ascat2_filenames[1], sep = ""),
+ #                                   sep = ""), sep = "\t", header = TRUE)
+#rownames(output_cnv_df) <- cnv_file$gene_id
 
 # Write the output data frame to a file
-write.csv(output_cnv_df, paste(output_path, "Gene-level Raw/CNV_DF_AllGenes.csv", sep = ""))
+write.csv(output_cnv_df_full, paste(output_path, "Gene-level Raw/CNV_DF_AllGenes.csv", sep = ""))
 
+
+# Check the number of patients that have an ASCAT file
+ascat2_filename_uuids <- unlist(lapply(ascat2_filenames, function(f) unlist(strsplit(f, ".", fixed = T))[2]))
+ascat2_filename_case_ids <- unlist(lapply(ascat2_filename_uuids, function(uuid) 
+  biosp_df[biosp_df$aliquot_id == uuid, 'case_submitter_id']))
+ascat2_filename_patient_ids <- unlist(lapply(ascat2_filename_case_ids, function(id) unlist(strsplit(id, "-", fixed = TRUE))[3]))
+length(unique(ascat2_filename_patient_ids))  # original 8297 files; now 9924 files, pan-cancer; 1054 files BRCA
+
+# what is the intersection with our patient ID list?  # 6123 PC; 732 BRCA
+length(unique(intersect(ascat2_filename_patient_ids, patient_id_list)))
+
+# Are there CNA files we should have that appear to be missing? If so, use these IDs to make sure all files are downloaded
+length(setdiff(patient_id_list, ascat2_filename_patient_ids))
+case_ids_missing_cnv <- unlist(lapply(setdiff(patient_id_list, ascat2_filename_patient_ids), function(x) 
+  unique(cnv_clin_df_sub[grepl(x, cnv_clin_df_sub$case_submitter_id), 'case_submitter_id'])))
+print(paste(case_ids_missing_cnv, collapse = ","))
 
 ############################################################
 # CREATE A BUCKETED CNA FILE

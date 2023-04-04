@@ -27,6 +27,7 @@ library(igraph)
 library(scales)
 library(reshape2)
 library(ggsci)
+library(parallel)
 
 # NEJM color palatte: https://nanx.me/ggsci/reference/pal_nejm.html
 
@@ -149,7 +150,9 @@ visualize_error_distrib <- function(results_table) {
 #' all p-values in order to add a column of q-values. Returns 
 #' the results table with a column for q-values.
 #' @param results_table a master DF produced from run_linear_model()
-mh_correct <- function(results_table) {
+#' @param per_gene a T/F value indicating whether or not we are doing the correction
+#' per-R_i (T) or together across all R_i (F)
+mh_correct <- function(results_table, per_gene) {
   
   # Get the qvalue object
   qobj <- NA
@@ -157,26 +160,48 @@ mh_correct <- function(results_table) {
     # With a small number of pvalues we may not be able to accurately estimate pi0,
     # so we set to 1 (the equivalent of B-H correction)
     qobj <- qvalue(p = results_table$p.value, pi0 = 1)
+    
+    # OPT: plot some useful plots & print some useful information
+    plot(qobj)
+    print(summary(qobj))
+    #print(paste("Pi0 (Propr. of true null hypotheses):", qobj$pi0))
+    
+    qvals <- qobj$qvalues # extract qvalues
+    
+    results_table$q.value <- qvals # add the qvalues back to the data frame
+    
   } else {
-    qobj <- qvalue(p = results_table$p.value)
+    if(per_gene) {
+      unique_drivers <- unique(results_table$R_i)
+      list_of_corrected_tabs <- lapply(unique_drivers, function(d) {
+        res_tab_sub <- results_table[results_table$R_i == d, ]
+        qobj <- qvalue(p = res_tab_sub$p.value)
+        qvals <- qobj$qvalues # extract qvalues
+        res_tab_sub$q.value <- qvals # add the qvalues back to the data frame
+        return(res_tab_sub)
+      })
+      results_table <- do.call(rbind, list_of_corrected_tabs)
+      results_table <- results_table[order(results_table$q.value),]
+    }
+    else {
+      qobj <- qvalue(p = results_table$p.value)
+      # OPT: plot some useful plots & print some useful information
+      plot(qobj)
+      print(summary(qobj))
+      #print(paste("Pi0 (Propr. of true null hypotheses):", qobj$pi0))
+      
+      qvals <- qobj$qvalues # extract qvalues
+      
+      results_table$q.value <- qvals # add the qvalues back to the data frame
+    }
   }
-  
-  # OPT: plot some useful plots & print some useful information
-  plot(qobj)
-  print(summary(qobj))
-  #print(paste("Pi0 (Propr. of true null hypotheses):", qobj$pi0))
-  
-  qvals <- qobj$qvalues # extract qvalues
-  
-  results_table$q.value <- qvals # add the qvalues back to the data frame
-  
   # Return the tidied linear model fit with q-values
   return(results_table)
 }
 
 # Call this function
-master_df_mut_corrected <- mh_correct(master_df_mut)
-master_df_cna_corrected <- mh_correct(master_df_cna)
+master_df_mut_corrected <- mh_correct(master_df_mut, T)
+master_df_cna_corrected <- mh_correct(master_df_cna, T)
 
 #Q-Value Visualization (I-Protein, FPKM, rawCNA, methBeta, iciTotFrac)
 
@@ -191,15 +216,19 @@ master_df_cna_corrected <- mh_correct(master_df_cna)
 #' @param master_df_sig a data.table object produced from the linear_model.R function
 #' @param all_genes_id_conv a bioMart file with conversions between different gene ID types
 add_targ_regprot_gns <- function(master_df_sig, all_genes_id_conv) {
-  master_df_sig$T_k.name <- unlist(lapply(master_df_sig$T_k, function(x) 
+  master_df_sig$T_k.name <- unlist(mclapply(master_df_sig$T_k, function(x) 
     paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
                                    'external_gene_name'])), collapse = ";")))
   
   # Add a column for the regulatory protein name
-  master_df_sig$R_i.name <- unlist(lapply(master_df_sig$R_i, function(x) 
+  unique_ri <- data.frame("R_i" = unique(master_df_sig$R_i))
+  unique_ri$R_i.name <- unlist(lapply(unique_ri$R_i, function(x) 
     paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
                                    'external_gene_name']), collapse = ";")))
-  return(master_df_sig)
+  master_df_sig$R_i.name <- unlist(lapply(master_df_sig$R_i, function(x) 
+    unique_ri[unique_ri$R_i == x, 'R_i.name']))
+  
+    return(master_df_sig)
 }
 
 # Call this function
@@ -259,11 +288,19 @@ fwrite(master_df_cna_sig, paste(main_path, "Linear Model/TP53/Non-Tumor-Normal M
 #' @param list_of_silent_dfs OPT: a corresponding list of silent DFs to include in the chart
 create_num_sig_hits_barplot <- function(list_of_master_dfs, q_thres, list_of_silent_dfs) {
   # Get the number of significant hits for each master DF
-  sig_hits_df <- data.frame("Gene" = names(list_of_master_dfs), 
-                            "Num.Signif.Hits.q" = rep(0, times = length(list_of_master_dfs)))
+  #sig_hits_df <- data.frame("Gene" = names(list_of_master_dfs), 
+  #                          "Num.Signif.Hits.q" = rep(0, times = length(list_of_master_dfs)))
+  #colnames(sig_hits_df)[2] <- paste0(colnames(sig_hits_df)[2], q_thres)
+  #sig_hits_df[,2] <- unlist(lapply(list_of_master_dfs, function(df) {
+  #  return(nrow(df[df$q.value < q_thres,]))
+  #}))
+  df <- list_of_master_dfs[[1]]
+  unique_drivers <- unique(df$R_i.name)
+  sig_hits_df <- data.frame("Gene" = unique_drivers, 
+                            "Num.Signif.Hits.q" = rep(0, times = length(unique_drivers)))
   colnames(sig_hits_df)[2] <- paste0(colnames(sig_hits_df)[2], q_thres)
-  sig_hits_df[,2] <- unlist(lapply(list_of_master_dfs, function(df) {
-    return(nrow(df[df$q.value < q_thres,]))
+  sig_hits_df[,2] <- unlist(lapply(unique_drivers, function(d) {
+      return(nrow(df[(df$q.value < q_thres) & (df$R_i.name == d),]))
   }))
   
   print(head(sig_hits_df))
@@ -292,8 +329,10 @@ create_num_sig_hits_barplot <- function(list_of_master_dfs, q_thres, list_of_sil
     p <- ggplot(sig_hits_df, aes(y = Num.Signif.Hits.q0.1, fill = Gene, 
                                  x = reorder(Gene, -Num.Signif.Hits.q0.1, mean))) + 
       geom_bar(position = "dodge", width = 0.95, stat = "identity", show.legend = FALSE, color = "black") + 
-      scale_fill_manual(values = c("#BC3C29FF", "#0072B5FF", "gray")) + #scale_color_nejm() +
-      xlab("Gene") + ylab(paste0("\n", paste0("Number of hits (q < ", paste0(q_thres, ")")))) +
+      scale_fill_manual(values = c("#BC3C29FF", "#0072B5FF", "gray", "#20854EFF", "#FFDC91FF", 
+                                              "#20854EFF", "#FFDC91FF", "#BC3C29FF", "#0072B5FF", 
+                                              "#20854EFF", "#FFDC91FF", "#BC3C29FF", "#0072B5FF", "gray", "gray")) + #scale_color_nejm() +
+      xlab("Gene") + ylab(paste0("\n", paste0("Number of hits (q < ", paste0(q_thres, ")\n")))) +
       #theme_minimal() +
       theme(axis.text = element_text(face="bold", size = 16), 
             axis.title=element_text(size=18, face="bold"), panel.grid.major = element_blank(),
@@ -723,13 +762,28 @@ create_driver_pie <- function(master_df, tophit_thres, perc_or_qval_or_ss, all_g
     return(driver_gn)
   }))
   names(freq.table) <- unique_driver_names
+  print(freq.table)
   
-  pie(as.integer(freq.table[1,]), labels = colnames(freq.table))
+  #pie(as.integer(freq.table[1,]), labels = colnames(freq.table))
+  
+  freq.table.m <- melt(freq.table)
+  colnames(freq.table.m) <- c("Driver", "Frequency")
+  freq.table.m <- freq.table.m[order(freq.table.m$Frequency, decreasing = TRUE),]
+  print(freq.table.m)
+  
+  ggplot(freq.table.m, aes(x = "", y = Frequency, fill = Driver)) + geom_col(color = "black") +
+    coord_polar(theta = "y") + theme_void() + 
+    geom_text(aes(label = Frequency), position = position_stack(vjust = 0.5),
+              fontface = "bold", size = 6) +
+    scale_fill_manual(values = c("#0072B5FF", "#BC3C29FF", "#20854EFF", "#E18727FF", 
+                                            "#7876B1FF", "#FFDC91FF", "#EE4C97FF")) +#, "gray", "white", "brown", "beige", "cornflowerblue", "lightpink")) +
+    theme(legend.title = element_text(face = "bold", size = 14),
+          legend.text = element_text(size = 12))
   
 }
 
 
-create_driver_pie(master_df, 0.05, "qval", all_genes_id_conv)
+create_driver_pie(master_df, 0.2, "qval", all_genes_id_conv)
 
 
 

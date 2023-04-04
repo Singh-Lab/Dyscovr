@@ -3416,41 +3416,352 @@ eig <- eigen(s)
 plot(eig$vectors[,1], eig$vectors[,2], xlab="PC 1", ylab="PC 2")
 
 
-get_per_samp_randomized_beta_df <- function(x_data, v.group, lambdas, 
-                                            shuffled_input_dfs, ensg, 
-                                            num_randomizations) {
+############################################################
+### SAVE PCA RESULTS TO FILES
+############################################################
+
+
+# Subsampling protocol
+# Get the Betas from the model with the real data
+betas_best_model <- t(data.table(as.numeric(best_model$beta)))
+colnames(betas_best_model) <- colnames(x_data)
+
+# Run this normal model 9 more times in order to get variance
+betas_more_best_models <- lapply(1:9, function(i) {
+  lasso.cv <- cv.gglasso(x_data, y_data, group = v.group, lambda = lambdas, 
+                         loss = "ls")
+  optimal_lambda <- lasso.cv$lambda.min
+  # Run the model with the best lambda
+  n_best_model <- gglasso(x_data, y_data, lambda = optimal_lambda, 
+                          group = v.group, loss = "ls")
+  betas_n <- t(data.table(as.numeric(n_best_model$beta)))
+  colnames(betas_n) <- colnames(x_data)
+  return(betas_n)
+})
+real_betas_df <- rbind(as.data.table(betas_best_model), 
+                       rbindlist(lapply(betas_more_best_models, as.data.table)))
+betas_best_model <- unlist(as.numeric(best_model$beta))
+
+
+
+
+
+#### Old version of looping through targets (not parallelized)
+
+# Loop through all the targets for this protein(s) of interest and create a table 
+# for each of them from this starter DF
+results_df_list <- lapply(1:downstream_target_df[, .N], function(k) {
   
-  # Do the randomization per-target a given number of times and get a 
-  # num_randomizations x ncol(x_data) table of random Betas
-  output_rows <- lapply(1:num_randomizations, function(i) {
-    #print(paste(i, paste("/", num_randomizations)))
-    index <- which(grepl(ensg, expression_df$ensg_id))
-    y_data_rand <- unlist(apply(expression_df[,2:ncol(expression_df), with = FALSE], 
-                                MARGIN = 2,  function(x) dqrng::dqsample(x))[index,])
-    y_data_rand[is.na(y_data_rand)] <- 0
-    y_data_rand <- t(as.matrix(y_data_rand))
-    #if(debug) {print(head(y_data_rand))}
-    #if(debug) {print(dim(y_data_rand))}
-    optimal_lambda <- NA
+  # Get the target t_k's Swissprot & ENSG IDs
+  targ <- unlist(strsplit(downstream_target_df$swissprot[k], ";", fixed = TRUE))
+  targ_ensg <- unlist(strsplit(downstream_target_df$ensg[k], ";", fixed = TRUE))
+  
+  print(paste("Target gene", paste(k, paste("/", downstream_target_df[, .N]))))
+  
+  # OPT: Filter outlier expression for each group (mutated, unmutated) using 
+  # a standard (1.5 x IQR) + Q3 schema
+  #starter_df <- filter_expression_df(expression_df, starter_df, targ_ensg)
+  
+  #if(length(intersect(targ_ensg, regprot_ensg)) == 0) {
+  # Create a full input table to the linear model for this target
+  
+  
+  lm_input_table <- fill_targ_inputs(starter_df = starter_df, targ_k = targ, 
+                                     targ_k_ensg = targ_ensg, 
+                                     mutation_targ_df = mutation_targ_df,
+                                     methylation_df = methylation_df_targ, 
+                                     cna_df = cna_df, expression_df = expression_df, 
+                                     log_expression = log_expression,
+                                     cna_bucketing = cna_bucketing,
+                                     meth_bucketing = meth_bucketing, 
+                                     analysis_type = analysis_type,
+                                     tumNormMatched = tumNormMatched, 
+                                     debug = debug, dataset = dataset)
+  
+  
+  if(length(lm_input_table) == 0) {return(NA)}
+  if (is.na(lm_input_table)) {return(NA)}
+  if(lm_input_table[, .N] == 0) {return(NA)}
+  
+  # First, remove any columns that are entirely NA (e.g., a given driver did not 
+  # have CNA or methylation data reported)
+  lm_input_table <- lm_input_table[, which(unlist(lapply(lm_input_table, function(x)
+    !all(is.na(x))))), with = FALSE]
+  
+  # Then, if a row has NA, remove that whole row and predict without it
+  #lm_input_table <- na.exclude(lm_input_table)
+  lm_input_table <- na.omit(lm_input_table)
+  
+  # Make sure everything is numeric type
+  #lm_input_table[,2:ncol(lm_input_table)] <- sapply(lm_input_table[,2:ncol(lm_input_table)], as.numeric) 
+  
+  if(debug) {
+    print("LM Input Table")
+    print(head(lm_input_table))
+    print(dim(lm_input_table))
+    #new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "lm_input_table", 
+    # sep = "_"), sep = "_"))
+    #fwrite(lm_input_table, paste(outpath, paste(new_fn, ".csv", sep = ""), sep = "/"))
+  }
+  
+  # Randomize expression across cancer and normal, across all samples within given target gene
+  #if (randomize) {
+  #  if(analysis_type == "eQTL") {lm_input_table$ExpStat_k <- sample(lm_input_table$ExpStat_k)}
+  #  else if (analysis_type == "meQTL") {lm_input_table$MethStat_k <- sample(lm_input_table$MethStat_k)}
+  #  else {print(paste("Analysis type is invalid:", analysis_type))}
+  #}
+  
+  formula <- construct_formula(lm_input_table, analysis_type, num_PEER, num_pcs,
+                               cna_bucketing, meth_bucketing, covs_to_incl)
+  
+  lm_fit <- NA
+  summary_table <- NA
+  
+  if ((model_type == "linear") & (regularization == "None")) {
     
-    if(length(lambdas) == 1) {
-      optimal_lambda <- lambdas
-    } else {
-      lasso.cv <- cv.gglasso(x_data, y_data_rand, group = v.group, lambda = lambdas, 
-                             loss = "ls")
-      optimal_lambda <- lasso.cv$lambda.min
+    if(debug) {print(paste("Formula:", formula))}
+    
+    lm_fit <- tryCatch(
+      {
+        speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
+        #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), data = lm_input_table)
+      }, error = function(cond) {
+        message("There was a problem with this linear model run:")
+        message(cond)
+        print(formula)
+        print(head(lm_input_table))
+        return(NA)
+      })
+    
+    if(!is.na(lm_fit)) {
+      summary_table <- tidy(lm_fit)
     }
     
-    # Run the model with the best lambda
-    rand_model <- gglasso(x_data, y_data_rand, lambda = optimal_lambda, 
-                          group = v.group, loss = "ls")
-    betas_rand <- t(data.table(as.numeric(rand_model$beta)))
-    colnames(betas_rand) <- colnames(x_data)
-    return(betas_rand)
-  })
+  } else if ((model_type == "linear") & (regularization == "L2" | regularization == "ridge" | 
+                                         regularization == "L1" | regularization == "lasso")) {
+    
+    expression_df_s <- NA
+    if ((signif_eval_type == "randomization_perTarg") | (signif_eval_type == "randomization_perSamp")) {
+      expression_df_s <- cbind(expression_df$ensg_id, expression_df[,colnames(expression_df) %fin% 
+                                                                      lm_input_table$sample_id, with = FALSE])
+      colnames(expression_df_s)[1] <- "ensg_id"
+    } 
+    # Create a file to hold the lambda values
+    lm_fit <- run_regularization_model(formula = formula, lm_input_table = lm_input_table, 
+                                       type = regularization, debug = debug, meth_bucketing = meth_bucketing, 
+                                       cna_bucketing = cna_bucketing, signif_eval_type = signif_eval_type,
+                                       expression_df = expression_df_s, shuffled_input_dfs = shuffled_input_dfs,
+                                       ensg = targ_ensg, num_randomizations = num_randomizations)
+    summary_table <- lm_fit
+    
+    ## OLD: for cases in which we want to use LASSO as variable selection and input 
+    ## the selected variables into a new linear model
+    #if(!is.na(lm_input_table_new)) {
+    #  formula <- as.character(paste("ExpStat_k", colnames(lm_input_table_new)[2], sep = " ~ "))
+    #  if(ncol(lm_input_table_new) > 2) {
+    #    formula <- as.character(paste(formula, paste(colnames(lm_input_table_new)[3:length(colnames(lm_input_table_new))], collapse = " + "), sep = " + "))
+    #  }
+    #  if(debug) {print(formula)}
+    #  lm_fit <- tryCatch({
+    #    speedglm::speedlm(formula = formula, data = lm_input_table_new)  # Do not include library size as offset
+    #  }, error = function(cond) {
+    #    message("There was a problem with this linear model run:")
+    #    message(cond)
+    #    print(formula)
+    #    print(head(lm_input_table_new))
+    #    return(NA)
+    #  })
+    #}    
+    
+  } else if (model_type == "mixed") {
+    # Our random effects variable is our genotype PCs; if we are not including them,
+    # run the simple linear model instead
+    # TODO: implement for cancer type/ subtype
+    if (num_pcs == 0) {
+      print("No genotype PCs are being used in regression. Random effects variables are currently only
+              implemented for genotype PCs. Running a linear regression.")
+      lm_fit <- tryCatch(
+        {
+          speedglm::speedlm(formula = formula, data = lm_input_table)  # Do not include library size as offset
+          #speedglm::speedlm(formula = formula, offset = log2(Lib_Size), data = lm_input_table)
+        }, error = function(cond) {
+          message("There was a problem with this linear model run:")
+          message(cond)
+          return(NA)
+        })
+    } else {
+      # Build a linear mixed model
+      lm_fit <- tryCatch(
+        {
+          lmer(formula = formula, data = lm_input_table, REML = TRUE)      
+        }, error = function(cond) {
+          message("There was a problem with this linear mixed model run:")
+          message(cond)
+          return(NA)
+        })
+    }
+    if(!is.na(lm_fit)) {
+      summary_table <- tidy(lm_fit)
+    }
+  } else {
+    print("Model only has L1, L2 or None implemented for regularization. Please provide one of these options.")
+  }
   
-  random_beta_df <- rbindlist(lapply(output_rows, as.data.table), use.names = TRUE)
+  # Tidy the output
+  #if(!is.na(lm_fit)) {print(summary(lm_fit))}
   
-  return(random_beta_df)
-}
+  if(inclResiduals & (!(is.na(summary_table)))) {
+    residuals <- as.numeric(lm_input_table$ExpStat_k) - 
+      as.numeric(unlist(predict.speedlm(lm_fit, newdata = lm_input_table)))
+    summary_table$Residual <- paste(residuals, collapse = ";")
+  }
+  
+  # Add a column for the regulatory protein and target gene to ID them
+  if(!is.na(summary_table)) {
+    summary_table$T_k <- paste(targ, collapse = ";")
+    if(!run_query_genes_jointly) {
+      summary_table$R_i <- regprot
+    } else {
+      #print(head(summary_table))
+      #print(dim(summary_table))
+      # Remove rows in which the target and the driver are the same
+      ri <- unlist(lapply(summary_table$term, function(x)
+        unlist(strsplit(x, "_", fixed = TRUE))[1]))
+      rows_to_keep <- unlist(lapply(1:length(ri), function(i) 
+        if(grepl(ri[i], summary_table[i, 'T_k'])) {return(NA)}
+        else {return(i)}))
+      rows_to_keep <- rows_to_keep[!is.na(rows_to_keep)]
+      summary_table <- summary_table[rows_to_keep,]
+    }
+  }
+  
+  if(debug) {
+    print("Summary Table")
+    print(head(summary_table))
+    #new_fn <- str_replace(outfn, "output_results", paste(targ[1], paste(regprot, "summary_table", 
+    # sep = "_"), sep = "_"))
+    #new_fn <- paste(new_fn, ".csv", sep = "")
+    #fwrite(summary_table, paste(outpath, new_fn, sep = "/"))
+  }
+  
+  # Run collinearity diagnostics 
+  if(collinearity_diagn) {
+    print("Running Collinearity Diagnostics")
+    #fit_lm <- lm(formula = formula, data = lm_input_table)
+    fit_lm <- lm(formula = formula, data = lm_input_table)
+    source(paste(getwd(), "run_collinearity_diagnostics.R", sep = "/"), local = TRUE)
+  }
+  
+  # Remove the memory from the input tables
+  rm(lm_input_table)
+  gc()
+  
+  # Return this summary table
+  return(summary_table)
+})
 
+
+
+methylation_df = methylation_df,
+methylation_df_meQTL = methylation_df_meQTL, 
+starter_df = starter_df, mutation_targ_df = mutation_targ_df, 
+cna_df = cna_df, expression_df = expression_df, 
+log_expression = log_expression, cna_bucketing = cna_bucketing, 
+meth_bucketing = meth_bucketing, analysis_type = analysis_type, 
+tumNormMatched = tumNormMatched, debug = debug, dataset = dataset, 
+randomize = randomize, num_PEER = num_PEER, num_pcs = num_pcs,
+covs_to_incl = covs_to_incl, inclResiduals = inclResiduals, 
+removeCis = removeCis, model_type = model_type, 
+collinearity_diagn = collinearity_diagn, regularization = regularization,
+signif_eval_type = signif_eval_type, num_randomizations = num_randomizations, 
+shuffled_input_dfs = shuffled_input_dfs, run_query_genes_jointly = run_query_genes_jointly, 
+regprot = regprot,
+
+
+regprot_i_results_df <- run_linear_model_per_target_gene(downstream_target_df = downstream_target_df, 
+                                                         methylation_df = methylation_df,
+                                                         methylation_df_meQTL = methylation_df_meQTL, 
+                                                         starter_df = starter_df, 
+                                                         mutation_targ_df = mutation_targ_df, 
+                                                         cna_df = cna_df, expression_df = expression_df, 
+                                                         log_expression = log_expression, 
+                                                         cna_bucketing = cna_bucketing, 
+                                                         meth_bucketing = meth_bucketing, 
+                                                         analysis_type = analysis_type, 
+                                                         tumNormMatched = tumNormMatched, 
+                                                         debug = debug, dataset = dataset, 
+                                                         randomize = randomize, 
+                                                         num_PEER = num_PEER, num_pcs = num_pcs, 
+                                                         covs_to_incl = covs_to_incl, 
+                                                         inclResiduals = inclResiduals, 
+                                                         removeCis = removeCis,
+                                                         collinearity_diagn = collinearity_diagn, 
+                                                         model_type = model_type,
+                                                         regularization = regularization, 
+                                                         signif_eval_type = signif_eval_type,
+                                                         num_randomizations = num_randomizations,
+                                                         fixed_lambda_for_rand = fixed_lambda_for_rand,
+                                                         run_query_genes_jointly = run_query_genes_jointly, 
+                                                         regprot = regprot)
+
+
+## OLD: for cases in which we want to use LASSO as variable selection and input 
+## the selected variables into a new linear model
+#if(!is.na(lm_input_table_new)) {
+#  formula <- as.character(paste("ExpStat_k", colnames(lm_input_table_new)[2], sep = " ~ "))
+#  if(ncol(lm_input_table_new) > 2) {
+#    formula <- as.character(paste(formula, paste(colnames(lm_input_table_new)[3:length(colnames(lm_input_table_new))], collapse = " + "), sep = " + "))
+#  }
+#  if(debug) {print(formula)}
+#  lm_fit <- tryCatch({
+#    speedglm::speedlm(formula = formula, data = lm_input_table_new)  # Do not include library size as offset
+#  }, error = function(cond) {
+#    message("There was a problem with this linear model run:")
+#    message(cond)
+#    print(formula)
+#    print(head(lm_input_table_new))
+#    return(NA)
+#  })
+#}   
+
+# Set the methylation DF depending on whether methylation is our outcome variable
+methylation_df_targ <- methylation_df
+if(!is.null(methylation_df_meQTL)) {
+  if(!is.na(methylation_df_meQTL)) {
+    methylation_df_targ <- methylation_df_meQTL
+  }
+} 
+
+
+#if(TRUE %in% grepl("subtype", colnames(subtype_df), ignore.case = TRUE)) {
+#vals <- grepl("subtype", colnames(subtype_df), ignore.case = TRUE)
+#if(length(vals[vals == TRUE]) == 1) {
+#ct <- as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+#                                   grepl("subtype", colnames(subtype_df), 
+#                                       ignore.case = TRUE)]))
+#} 
+
+# Use mRNA-based clusters (rather than histological subtypes) as a last resort, if it exists
+#} else {
+#st <- as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+#grepl("mRNA", colnames(subtype_df), 
+#ignore.case = TRUE)]))
+#}
+#print(ct)
+#ct <- paste(trimws(names(additional_subtype_info)[v]), trimws(ct), sep = ".")
+
+if(TRUE %in% grepl("subtype", colnames(subtype_df), ignore.case = TRUE)) {
+  vals <- grepl("subtype", colnames(subtype_df), ignore.case = TRUE)
+  if(length(vals[vals == TRUE]) == 1) {
+    unique_sub <- unique(as.character(unlist(subtype_df[ ,grepl("subtype", colnames(subtype_df),  
+                                                                ignore.case = TRUE)])))
+  } else {
+    unique_sub <- unique(as.character(unlist(subtype_df[ ,grepl("MSI_status", colnames(subtype_df),  
+                                                                ignore.case = TRUE)])))
+  }
+} else {
+  unique_sub <- unique(as.character(unlist(subtype_df[ ,grepl("mRNA cluster", colnames(subtype_df),  
+                                                              ignore.case = TRUE)])))
+}
+#unique_sub <- unique_sub[!(is.na(unique_sub) | (unique_sub == "NA"))]
+#unique_sub <- paste(names(additional_subtype_info)[i], unique_sub, sep = ".")

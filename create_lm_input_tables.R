@@ -36,7 +36,6 @@ source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Sara_Linea
 source(paste(source_path, "general_important_functions2.R", sep = "/"))
 source(paste(source_path, "linear_model_helper_functions2.R", sep = "/"))
 
-
 ############################################################
 # SET UP PARSER ARGUMENTS
 ############################################################
@@ -107,9 +106,9 @@ parser$add_argument("--methylation_df_meQTL", default = "methylation_Beta_Cancer
 parser$add_argument("--mutation_targ_df", default = "mut_count_matrix_missense_CancerOnly_IntersectPatients.csv", 
                     type = "character",
                     help = "The name of the mutation target data frame input. [default %(default)s]")
-parser$add_argument("--mutation_regprot_df", default = "iprotein_results_missense_CancerOnly_IntersectPatients.csv", 
-                    type = "character",
-                    help = "The name of the mutation regulatory protein data frame input. [default %(default)s]")
+#parser$add_argument("--mutation_regprot_df", default = "iprotein_results_missense_CancerOnly_IntersectPatients.csv", 
+                    #type = "character",
+                    #help = "The name of the mutation regulatory protein data frame input. [default %(default)s]")
 parser$add_argument("--cna_df", default = "CNA_AllGenes_CancerOnly_IntersectPatients.csv", 
                     type = "character",
                     help = "The name of the CNA data frame input. [default %(default)s]")
@@ -208,17 +207,18 @@ runRegprotsJointly <- str2bool(args$run_query_genes_jointly)
 input_file_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/"
 
 if(args$cancerType == "BRCA") {
-  prot_path <- paste(input_file_path, "BRCA/", sep = "")
   targ_path <- paste(input_file_path, "BRCA/target_lists/", sep = "")
   
   if(args$dataset == "METABRIC") {
     main_path <- paste0(input_file_path, "METABRIC/")
+    prot_path <- paste(input_file_path, "METABRIC/", sep = "")
   } else {
     if(!tumNormMatched) {
       main_path <- paste(input_file_path, "BRCA/tumor_only/", sep = "")
     } else {
       main_path <- paste(input_file_path, "BRCA/tumor_normal_matched/", sep = "") 
     }
+    prot_path <- paste(input_file_path, "BRCA/", sep = "")
   }
 } else {
   prot_path <- paste(input_file_path, "PanCancer/", sep = "")
@@ -229,6 +229,8 @@ if(args$cancerType == "BRCA") {
     main_path <- paste(input_file_path, "PanCancer/tumor_normal_matched/", sep = "")
   }
 }
+
+if(debug) {print(main_path)}
 
 # If we are looking at tester targets, we need to go one directory deeper
 #if(grepl("curated", args$targets_name)) {
@@ -342,17 +344,17 @@ if(debug) {
 ############################################################
 # IMPORT REGULATORY PROTEIN MUTATION FILES
 ############################################################
-mutation_regprot_df <- fread(paste(main_path, paste("regprot_mutation/", args$mutation_regprot_df, sep = ""), sep = ""),
-                             header = TRUE)
-if(unlist(strsplit(args$mutation_regprot_df, "_", fixed = TRUE))[1] == "iprotein") {
-  mutation_regprot_df <- mutation_regprot_df[,5:ncol(mutation_regprot_df)]   # remove first few meaningless columns, if necessary
-}
-mutation_regprot_df <- mutation_regprot_df[!duplicated(mutation_regprot_df),] # remove any duplicate rows
+#mutation_regprot_df <- fread(paste(main_path, paste("regprot_mutation/", args$mutation_regprot_df, sep = ""), sep = ""),
+#                             header = TRUE)
+#if(unlist(strsplit(args$mutation_regprot_df, "_", fixed = TRUE))[1] == "iprotein") {
+#  mutation_regprot_df <- mutation_regprot_df[,5:ncol(mutation_regprot_df)]   # remove first few meaningless columns, if necessary
+#}
+#mutation_regprot_df <- mutation_regprot_df[!duplicated(mutation_regprot_df),] # remove any duplicate rows
 
-if(debug) {
-  print("Mutation Regprot DF")
-  print(head(mutation_regprot_df))
-}
+#if(debug) {
+#  print("Mutation Regprot DF")
+#  print(head(mutation_regprot_df))
+#}
 
 
 
@@ -424,7 +426,7 @@ if(ncol(targets_DF) > 2) {
 # Regardless of method, limit targets to only those that overlap the genes in the expression 
 # and methylation DFs
 methylation_ensg_ids <- unlist(lapply(methylation_df$ensg_ids, function(ids) 
-  unlist(strsplit(ids, ";", fixed = TRUE))))
+  unlist(strsplit(as.character(ids), ";", fixed = TRUE))))
 rows_to_keep <- unlist(lapply(1:length(targets_DF$ensg), function(i) {
   targs <- unlist(strsplit(as.character(targets_DF[i,'ensg']), ";", fixed = TRUE))
   if (any(targs %fin% expression_df$ensg_id)) {
@@ -437,6 +439,7 @@ targets_DF <- targets_DF[rows_to_keep,]
 
 if(debug) {
   print("Targets DF")
+  
   print(head(targets_DF))
 }
 
@@ -468,8 +471,6 @@ if(useNumFunctCopies) {
 #' of mutations, treated or not)
 #' @param mutation_df_targ table of mutation counts for each patient, for each 
 #' gene in the genome
-#' @param mutation_df_regprot a dataframe of which patients have mutations at 
-#' a given level of specificity in particular regulatory proteins
 #' @param methylation_df table of methylation results (rows are proteins, columns 
 #' are patients, entries are methylation values)
 #' @param methylation_df_meQTL OPTIONAL: table of methylation results (rows are 
@@ -525,8 +526,8 @@ if(useNumFunctCopies) {
 #' we are referencing/ specific data types we are using
 #' @param filename_labels a list of labels used for appropriate filename generation
 create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_df, 
-                                  mutation_df_targ, mutation_df_regprot, methylation_df, 
-                                  methylation_df_meQTL, cna_df, expression_df, num_funct_copies_df,
+                                  mutation_df_targ, methylation_df, methylation_df_meQTL, 
+                                  cna_df, expression_df, num_funct_copies_df,
                                   neighboring_cna_df, is_rank_or_quant_norm, log_expression, analysis_type, 
                                   tumNormMatched, randomize, cna_bucketing, meth_bucketing, 
                                   useNumFunctCopies, num_PEER, num_pcs, debug, outpath, 
@@ -565,7 +566,7 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
       regprot_i_df <- fill_regprot_inputs(patient_df = patient_df,
                                           regprot_i_uniprot = regprot, 
                                           regprot_i_ensg = regprot_ensg, 
-                                          mutation_regprot_df = mutation_df_regprot, 
+                                          mutation_targ_df = mutation_df_targ, 
                                           methylation_df = methylation_df, 
                                           cna_df = cna_df,
                                           num_funct_copies_df = num_funct_copies_DF,
@@ -665,8 +666,8 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
            tryCatch({
              lm_input_table_fn <- create_lm_input_table_filename(TRUE, regprot, filename_labels[["run_name"]], 
                                                                  targ, filename_labels[["expression_df_name"]],
-                                                                 cna_bucketing, filename_labels[["mutation_regprot_df_name"]], 
-                                                                 meth_bucketing, filename_labels[["meth_type"]], 
+                                                                 cna_bucketing, meth_bucketing, 
+                                                                 filename_labels[["meth_type"]], 
                                                                  filename_labels[["patient_df_name"]], num_PEER, 
                                                                  num_pcs, randomize, filename_labels[["patients_to_incl_label"]], 
                                                                  removeCis, removeMetastatic)
@@ -703,7 +704,7 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
       regprot_i_df <- fill_regprot_inputs(patient_df = patient_df,
                                           regprot_i_uniprot = regprot, 
                                           regprot_i_ensg = regprot_ensg, 
-                                          mutation_regprot_df = mutation_df_regprot, 
+                                          mutation_targ_df = mutation_df_targ, 
                                           methylation_df = methylation_df, 
                                           cna_df = cna_df,
                                           num_funct_copies_df = num_funct_copies_DF,
@@ -814,8 +815,7 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
             # Create an output file name for this LM input table
             lm_input_table_fn <- create_lm_input_table_filename(filename_labels[["test"]], filename_labels[["tester"]], 
                                                                 filename_labels[["run_name"]], targ, filename_labels[["expression_df_name"]],
-                                                                cna_bucketing, filename_labels[["mutation_regprot_df_name"]], 
-                                                                meth_bucketing, filename_labels[["meth_type"]], 
+                                                                cna_bucketing, meth_bucketing, filename_labels[["meth_type"]], 
                                                                 filename_labels[["patient_df_name"]], num_PEER, 
                                                                 num_pcs, randomize, filename_labels[["patients_to_incl_label"]], 
                                                                 removeCis, removeMetastatic)
@@ -851,7 +851,7 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
 #' @param patient_df the starter DF with all of the patient/ sample information
 #' @param regprot_i_uniprot the uniprot ID of regulatory protein i
 #' @param regprot_i_ensg the ensembl ID of regulatory protein i
-#' @param mutation_regprot_df the mutation DF for regulatory proteins 
+#' @param mutation_targ_df the mutation DF for all proteins 
 #' @param methylation_df the methylation DF
 #' @param cna_df the copy number alteration DF
 #' @param num_funct_copies_df a data frame with the number of functional copies 
@@ -875,21 +875,22 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
 #' use additional prints
 #' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3', to denote what columns
 #' we are referencing/ specific data types we are using
-fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg, mutation_regprot_df, 
+fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg, mutation_targ_df, 
                                 methylation_df, cna_df, num_funct_copies_df,
                                 useNumFunctCopies, cna_bucketing, meth_bucketing, tumNormMatched, 
                                 incl_nextMutDriver, run_query_genes_jointly, debug, dataset) {
   
   # Filter the data frames to look at only this regulatory protein
-  mutation_regprot_df_sub <- mutation_regprot_df[Swissprot %like% regprot_i_uniprot]
-  cna_df_sub <- filter_cna_by_ensg(cna_df, regprot_i_ensg)   #TODO: try and make this faster
-  methylation_df_sub <- filter_meth_by_ensg(methylation_df, regprot_i_ensg)  #TODO: try and make this faster
+  mutation_targ_df_sub <- mutation_targ_df[grepl(regprot_i_uniprot, mutation_targ_df$Swissprot),]
+  print(dim(mutation_targ_df_sub))
+  cna_df_sub <- filter_cna_by_ensg(cna_df, regprot_i_ensg)   
+  methylation_df_sub <- filter_meth_by_ensg(methylation_df, regprot_i_ensg)  
   
   #print(paste("REGPROT_i ENSG:", regprot_i_ensg))
   
   # Optionally, add mutation, CNA status covariates for PIK3CA if regprot is TP53 and vice versa 
   if(incl_nextMutDriver & !(run_query_genes_jointly)) {
-    tp53_pik3ca_dfs <- get_next_mut_driver_dfs(regprot_i_ensg, cna_df, mutation_regprot_df)
+    tp53_pik3ca_dfs <- get_next_mut_driver_dfs(regprot_i_ensg, cna_df, targ_df)  # TODO: fix this function if we end up needing it again
     cna_df_pik3ca <- tp53_pik3ca_dfs[[1]]
     mutation_regprot_df_pik3ca <- tp53_pik3ca_dfs[[2]]
     cna_df_tp53 <- tp53_pik3ca_dfs[[3]]
@@ -904,14 +905,20 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg, m
   regprot_rows <- mclapply(1:patient_df2[, .N], function(i) {
     sample <- patient_df2$sample_id[i]
     if (debug) {print(paste("Sample:", sample))}
-    
+    #print(paste("Sample:", sample))
     # Is this regulatory protein mutated in this sample at the given level of specificity?
     # OPT 1: FOR I-DOMAIN & I-BINDING POSITION:
     #if (nrow(mutation_regprot_df %>% filter(Patient == sample)) > 0) {mut_stat <- 1}
     # OPT 2: FOR I-PROTEIN:
-    mutation_regprot_df_sub <- mutation_regprot_df_sub[Patient %like% sample]
-    if(mutation_regprot_df_sub[, .N] > 0) {mut_stat <- 1}
-    else {mut_stat <- 0}
+    #mutation_regprot_df_sub <- mutation_regprot_df_sub[Patient %like% sample]
+    #if(mutation_regprot_df_sub[, .N] > 0) {mut_stat <- 1}
+    #else {mut_stat <- 0}
+    # OPT 3: FOR MUT COUNT MATRIX
+    #print(which(colnames(mutation_targ_df_sub) == sample))
+    val <- as.integer(unlist(mutation_targ_df_sub[,which(colnames(mutation_targ_df_sub) == sample), with = F]))
+    if(length(val) == 0) {mut_stat <- NA}
+    else if(val == 0) {mut_stat <- 0}
+    else {mut_stat <- 1}
     
     # Does this regulatory protein have a CNA in cancer?
     cna_stat <- get_cna_stat(cna_df_sub, sample, cna_bucketing, dataset)
@@ -1041,6 +1048,7 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg, m
 
 #' Helper function if we are including TP53- and PIK3CA-specific covariates in
 #' breast cancer to obtain TP53 and PIK3CA CNA and mutation regulatory protein DFs
+#' CURRENTLY DEFUNCT AS OF FEB 2023
 #' @param regprot_i_ensg the ensg ID for the current regulatory protein of interest
 #' @param cna_df the full CNA input DF, to be subsetted
 #' @param mutation_regprot_df the full regulatory protein mutation DF, to be subsetted
@@ -1070,6 +1078,7 @@ get_next_mut_driver_dfs <- function(regprot_i_ensg, cna_df, mutation_regprot_df)
 
 #' Helper function that will get stats for TP53 or PIK3CA if we are adding them
 #' as covariates as well 
+#' CURRENTLY DEFUNCT AS OF FEB 2023
 #' @param regprot_i_ensg the ensg ID for the current regulatory protein of interest
 #' @param cna_df_sub the CNA DF, subsetted to the regulatory protein of interest
 #' @param cna_df_altern the CNA DF, subsetted to the next mutated driver gene (either 
@@ -1159,7 +1168,7 @@ if(debug) {
 gene_name_index <- length(unlist(strsplit(args$run_name, "_", fixed = TRUE))) + 3
 if(args$patientsOfInterest != "") {
   gene_name_index <- gene_name_index + 1
-  outpath <- paste0(outpath, "/subtype_files")
+  outpath <- paste0(outpath, paste0("/subtype_files", args$patientOfInterestLabel))
 }
 targets_DF <- limit_to_targets_wo_existing_files(outpath, targets_DF, gene_name_index)
 
@@ -1206,7 +1215,7 @@ gc()
 
 # Get the labels needed for dynamic filename creation and add to a list
 filename_labels <- list("expression_df_name" = args$expression_df,
-                        "mutation_regprot_df_name" = args$mutation_regprot_df,
+                        #"mutation_targ_df_name" = args$mutation_targ_df,
                         "meth_type" = args$meth_type,
                         "patient_df_name" = args$patient_df,
                         "test" = test, "tester_name" = args$tester_name, 
@@ -1222,7 +1231,7 @@ if(is.na(patient_cancer_mapping)) {
     
     patient_df <- subset_by_intersecting_ids(patients_of_interest, patient_df, FALSE, tumNormMatched, args$dataset)
     mutation_targ_df <- subset_by_intersecting_ids(patients_of_interest, mutation_targ_df, TRUE, tumNormMatched, args$dataset)
-    mutation_regprot_df <- subset_regprot_df_by_intersecting_ids(patients_of_interest, mutation_regprot_df, tumNormMatched, args$dataset)
+    #mutation_regprot_df <- subset_regprot_df_by_intersecting_ids(patients_of_interest, mutation_regprot_df, tumNormMatched, args$dataset)
     methylation_df <- subset_by_intersecting_ids(patients_of_interest, methylation_df, TRUE, tumNormMatched, args$dataset)
     if(!is.na(methylation_df_meQTL)) {
       methylation_df_meQTL <- subset_by_intersecting_ids(patients_of_interest, methylation_df_meQTL, TRUE, tumNormMatched, args$dataset)
@@ -1236,7 +1245,7 @@ if(is.na(patient_cancer_mapping)) {
   if(removeMetastatic == TRUE) {
     patient_df <- remove_metastatic_samples(patient_df, FALSE)
     mutation_targ_df <- remove_metastatic_samples(mutation_targ_df, TRUE)
-    mutation_regprot_df <- remove_metastatic_samples_regprot(mutation_regprot_df)
+    #mutation_regprot_df <- remove_metastatic_samples_regprot(mutation_regprot_df)
     methylation_df <- remove_metastatic_samples(methylation_df, TRUE)
     if(!is.na(methylation_df_meQTL)) {
       methylation_df_meQTL <- remove_metastatic_samples(methylation_df_meQTL, TRUE)
@@ -1251,7 +1260,7 @@ if(is.na(patient_cancer_mapping)) {
                                           downstream_target_df = targets_DF, 
                                           patient_df = patient_df,
                                           mutation_df_targ =  mutation_targ_df,
-                                          mutation_df_regprot = mutation_regprot_df, 
+                                          #mutation_df_regprot = mutation_regprot_df, 
                                           methylation_df = methylation_df, 
                                           methylation_df_meQTL = methylation_df_meQTL,
                                           cna_df = cna_df,
@@ -1297,7 +1306,7 @@ if(is.na(patient_cancer_mapping)) {
     # Subset files using patient_ids (using helper function)
     patient_df_sub <- subset_by_intersecting_ids(patient_ids, patient_df, FALSE, tumNormMatched, args$dataset)
     mutation_targ_df_sub <- subset_by_intersecting_ids(patient_ids, mutation_targ_df, TRUE, tumNormMatched, args$dataset)
-    mutation_regprot_df_sub <- subset_regprot_df_by_intersecting_ids(patient_ids, mutation_regprot_df, tumNormMatched, args$dataset)
+    #mutation_regprot_df_sub <- subset_regprot_df_by_intersecting_ids(patient_ids, mutation_regprot_df, tumNormMatched, args$dataset)
     methylation_df_sub <- subset_by_intersecting_ids(patient_ids, methylation_df, TRUE, tumNormMatched, args$dataset)
     if(!is.na(methylation_df_meQTL)) {
       methylation_df_meQTL_sub <- subset_by_intersecting_ids(patient_ids, methylation_df_meQTL, TRUE, tumNormMatched, args$dataset)
@@ -1310,7 +1319,7 @@ if(is.na(patient_cancer_mapping)) {
     if(removeMetastatic == TRUE) {
       patient_df <- remove_metastatic_samples(patient_df, FALSE)
       mutation_targ_df <- remove_metastatic_samples(mutation_targ_df, TRUE)
-      mutation_regprot_df <- remove_metastatic_samples_regprot(mutation_regprot_df)
+      #mutation_regprot_df <- remove_metastatic_samples_regprot(mutation_regprot_df)
       methylation_df <- remove_metastatic_samples(methylation_df, TRUE)
       if(!is.na(methylation_df_meQTL)) {
         methylation_df_meQTL <- remove_metastatic_samples(methylation_df_meQTL, TRUE)
@@ -1325,7 +1334,7 @@ if(is.na(patient_cancer_mapping)) {
                                             downstream_target_df = targets_DF, 
                                             patient_df = patient_df_sub,
                                             mutation_df_targ =  mutation_targ_df_sub,
-                                            mutation_df_regprot = mutation_regprot_df_sub, 
+                                            #mutation_df_regprot = mutation_regprot_df_sub, 
                                             methylation_df = methylation_df_sub, 
                                             methylation_df_meQTL = methylation_df_meQTL_sub,
                                             cna_df = cna_df_sub,

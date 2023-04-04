@@ -3,11 +3,11 @@
 ### Written By: Sara Geraghty, April 2021
 ############################################################
 
+options("install.lock"=FALSE)
 library(dplyr)
 library(VennDiagram)
 library(data.table)
 library(TCGAbiolinks)
-
 
 # This file contains additional pre-processing that is applied to all the data file
 # types that will be input to the linear model function.
@@ -66,9 +66,7 @@ expression_df_tmm <- fread(paste(main_path, "Expression/tmm_normalized_expressio
 colnames(expression_df_tmm)[1] <- 'ensg_id'
 
 # 3. Quantile-Normalized
-expression_df_qn <- fread(paste(main_path, "Expression/expression_quantile_norm_DF.csv", sep = ""),
-                          header = TRUE)
-expression_df_qn <- fread(paste(main_path, "Expression/expression_quantile_norm_DF_sklearn_TO.csv", sep = ""),
+expression_df_qn <- fread(paste(main_path, "Expression/expression_quantile_normalized_sklearn.csv", sep = ""),
                           header = TRUE)
 expression_df_qn <- fread(paste(main_path, "Expression/ALL_CT_expression_quantile_normalized_sklearn.csv", sep = ""),
                           header = TRUE)
@@ -78,6 +76,13 @@ colnames(expression_df_qn)[1] <- 'ensg_id'
 expression_df_rn <- fread(paste(main_path, "Expression/expression_rank_norm_DF.csv", sep = ""),
                           header = TRUE)
 colnames(expression_df_rn)[1] <- 'ensg_id'
+
+
+# For pan-cancer, limit to just cancer TCGA samples
+expression_df_qn_sub <- expression_df_qn[, c(1, (which(grepl("TCGA", colnames(expression_df_qn)[2:ncol(expression_df_qn)]))+1)), with = F]
+colnames(expression_df_qn_sub)[2:ncol(expression_df_qn_sub)] <- unlist(lapply(colnames(expression_df_qn_sub)[2:ncol(expression_df_qn_sub)], function(x)
+  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
+
 
 
 ############################################################
@@ -115,6 +120,13 @@ methylation_df_bucketed_M <- fread(paste(main_path, "Methylation/methylation_DF_
 methylation_df_bucketed_M$Gene_Symbol <- methylation_df_M$Gene_Symbol # If needed
 
 
+# For pan-cancer, make sure we are not missing any BRCA data
+methylation_df_M_brca <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Methylation/methylation_DF_M_cancer_only.csv", header = T)
+missing_brca_cols <- setdiff(colnames(methylation_df_M_brca), colnames(methylation_df_M))
+methylation_df_M_full <- merge(methylation_df_M, methylation_df_M_brca[,which(colnames(methylation_df_M_brca) %in% c("Gene_Symbol", missing_brca_cols)), with = F], by = "Gene_Symbol")
+write.csv(methylation_df_M_full, paste(main_path, "Methylation/methylation_DF_M_cancer_only.csv", sep = ""))
+
+
 ############################################################
 # IMPORT GENE TARGET MUTATION FILES
 ############################################################
@@ -127,16 +139,17 @@ methylation_df_bucketed_M$Gene_Symbol <- methylation_df_M$Gene_Symbol # If neede
 # paste(unique(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'uniprot_gn_id']), collapse = ";")))
 
 ### NON-TUMOR-NORMAL MATCHED ###
-mutation_targ_df <- fread(paste(main_path, "Mutation/Mutation Count Matrices/iprotein_mut_count_matrix_nonsynonymous.csv", sep = ""), 
+mutation_targ_df <- fread(paste(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous_ALL_inclNonmut.csv", sep = ""), 
                              header = TRUE)
+#colnames(mutation_targ_df) <- unlist(lapply(colnames(mutation_targ_df), function(x) str_replace_all(string = x, pattern = " ", repl = "")))
 mutation_targ_df <- mutation_targ_df[,2:ncol(mutation_targ_df)]
-#mutation_targ_df <- fread(paste(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynyonymous_ALL.csv", sep = ""), 
+#mutation_targ_df <- fread(paste(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous_ALL_inclNonmut.csv", sep = ""), 
                           #header = TRUE)
 colnames(mutation_targ_df)[1] <- 'Gene_Symbol'
 #colnames(mutation_targ_df)[2:ncol(mutation_targ_df)] <- unlist(lapply(colnames(mutation_targ_df)[2:ncol(mutation_targ_df)], function(x) 
 #  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-"))) # Fix the sample IDs
 
-# Add the additional un-included genes (those with no mutations in any patient)
+# If needed, add the additional un-included genes (those with no mutations in any patient)
 allgene_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/allgene_targets.csv",
                             header = TRUE, check.names = FALSE, row.names = 1)
 all_gene_names <- unlist(lapply(allgene_targets$ensg, function(x) 
@@ -150,6 +163,26 @@ unincluded_gene_df$Gene_Symbol <- unincluded_genes
 
 mutation_targ_df <- rbind(mutation_targ_df, unincluded_gene_df)
 
+# If needed, add the additional un-included patients (those with no mutations in any gene)
+add_missing_patients_to_mut_count_mat <- function(mut_count_matrix, intersecting_patients) {
+  existing_patients <- unlist(lapply(colnames(mut_count_matrix)[2:ncol(mut_count_matrix)], function(x) 
+    unlist(strsplit(x, "-", fixed = TRUE))[1]))
+  print(head(existing_patients))
+  missing_patients <- setdiff(intersecting_patients, existing_patients)
+  print(length(missing_patients))
+  new_pat_df <- data.frame(matrix(nrow = nrow(mut_count_matrix), ncol = length(missing_patients)))
+  new_pat_df[is.na(new_pat_df)] <- 0
+  colnames(new_pat_df) <- paste0(missing_patients, "-01A")
+  
+  new_mut_count_mat <- cbind(mut_count_matrix, new_pat_df)
+  return(new_mut_count_mat)
+}
+intersecting_patients_brca <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/unique_brca_patient_ids_2.txt", 
+                                         header = TRUE, row.names = 1, check.names = FALSE)[,1]
+intersecting_patients_pc <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/unique_patients_ids_2.txt", 
+                                       header = FALSE, check.names = FALSE)[,1]
+
+mutation_targ_df <- add_missing_patients_to_mut_count_mat(mutation_targ_df, intersecting_patients)
 
 ############################################################
 # IMPORT REGULATORY PROTEIN MUTATION FILES
@@ -196,7 +229,7 @@ mutation_regprot_df <- fread(paste(main_path, "Mutation/ibindingpos_results_miss
       # header = TRUE, row.names = 1)
 
 # Raw Copy Number 
-cna_df_raw <- read.csv(paste(main_path, "CNV/Gene-level Raw/CNV_DF_AllGenes.csv", sep = ""), 
+cna_df_raw <- read.csv(paste(main_path, "CNV/Gene-level Raw/CNV_DF_AllGenes_CancerOnly_MergedIsoforms.csv", sep = ""), 
                        header = TRUE, row.names = 1, check.names = FALSE)
 # Bucketed Copy Number (Incl. Amp)
 cna_df_bucket_inclAmp <- read.table(paste(main_path, "CNV/Gene-level Raw/CNV_DF_bucketed_inclAmp_AllGenes.tsv", sep = ""), 
@@ -205,16 +238,58 @@ cna_df_bucket_inclAmp <- read.table(paste(main_path, "CNV/Gene-level Raw/CNV_DF_
 cna_df_bucket_exclAmp <- read.table(paste(main_path, "CNV/Gene-level Raw/CNV_DF_bucketed_exclAmp_AllGenes.tsv", sep = ""), 
                 header = TRUE, row.names = 1, check.names = FALSE)
 
-#' Adjust the gene names to remove the part after the '.'
+
+# If needed, combine CNA isoforms for pan-cancer
+cna_df_unique_ensg_ids <- unique(unlist(lapply(rownames(cna_df_raw), function(e)
+  unlist(strsplit(e, ".", fixed = T))[1])))
+ensg_id_row_indices <- lapply(cna_df_unique_ensg_ids, function(e) 
+  which(grepl(e, rownames(cna_df_raw))))
+names(ensg_id_row_indices) <- cna_df_unique_ensg_ids
+
+cna_df_new_rows <- mclapply(1:length(ensg_id_row_indices), function(i) {
+  ensg <- names(ensg_id_row_indices)[i]
+  ind <- ensg_id_row_indices[[i]]
+  print(ensg)
+  print(paste(i, paste("/", length(ensg_id_row_indices))))
+  if(length(ind) > 1) {
+    counter <- 1
+    vals <- NA
+    while(counter < length(ind)) {
+      if(is.na(vals)) {
+        row1 <- unlist(cna_df_raw[ind[counter], ])
+        row2 <- unlist(cna_df_raw[ind[counter+1], ])
+        vals <- dplyr::coalesce(row1, row2)
+        counter <- counter + 2
+      } else {
+        row <- unlist(cna_df_raw[ind[counter], ])
+        vals <- dplyr::coalesce(vals, row2)
+      }
+    }
+    return(vals)
+  } else {
+    return(unlist(cna_df_raw[ind,]))
+  }
+})
+cna_df_new <- as.data.frame(do.call(rbind, cna_df_new_rows))
+rownames(cna_df_new) <- cna_df_unique_ensg_ids
+
+write.csv(cna_df_new, paste(main_path, "CNV/Gene-level Raw/CNV_DF_AllGenes_CancerOnly_MergedIsoforms.csv", sep = ""))
+
+cna_df_new <- read.csv(paste(main_path, "CNV/Gene-level Raw/CNV_DF_AllGenes_CancerOnly_MergedIsoforms.csv", sep = ""),
+                       header = T, check.names = F, row.names = 1)
+
+#' If there are no isoforms, just adjust the gene names to remove the part after the '.'
 #' @param cna_df one of the above CNA DFs
 adj_rownams <- function(cna_df) {
-  rownames(cna_df) <- unlist(lapply(rownames(cna_df), function(x) 
-    unlist(strsplit(x, ".", fixed = TRUE))[1]))
+  rownames(cna_df) <- make.names(unlist(lapply(rownames(cna_df), function(x) 
+    unlist(strsplit(x, ".", fixed = TRUE))[1])), unique = T)
   return(cna_df)
 }
 cna_df_raw <- adj_rownams(cna_df_raw)
 cna_df_bucket_inclAmp <- adj_rownams(cna_df_bucket_inclAmp)
 cna_df_bucket_exclAmp <- adj_rownams(cna_df_bucket_exclAmp)
+
+
 
 
 ############################################################
@@ -229,11 +304,19 @@ patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/pat
 ### NON-TUMOR-NORMAL MATCHED ###
 #patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm.csv", sep = ""), 
                        #header = TRUE, row.names = 1)
-patient_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_normAge.csv", sep = ""), 
-                       header = TRUE, row.names = 1)
+
+
 
 patient_df_brca_blca_hnsc <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_normAge_inclBRCA.BLCA.HNSCsubtypes.csv", sep = ""), 
                                       header = TRUE, row.names = 1)
+
+patient_df_coad_read <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_normAge_COAD_READ.csv", sep = ""), 
+                                      header = TRUE, row.names = 1)
+# With subtypes
+patient_df_coad_read_subtypes <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_MN_normAge_inclCOADREADsubtypes.csv", sep = ""), 
+                                 header = TRUE, row.names = 1)
+patient_df_coad_read_cmssubtypes <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm_MN_normAge_inclCOADREADcmssubtypes.csv", sep = ""), 
+                                 header = TRUE, row.names = 1)
 
 # If BRCA, eliminate the gender column
 is_brca <- TRUE
@@ -304,7 +387,7 @@ sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/samp
 #' patient characteristics are columns)
 #' @param sample_df the sample data frame (patient samples are
 #' rows, sample characteristics are columns)
-#' @param dataset either 'tcga', 'metabric', 'icgc', or 'cptac3'
+#' @param dataset either 'tcga', 'metabric', 'chinese_tn', icgc', or 'cptac3'
 combine_patient_and_samp_dfs <- function(patient_df, sample_df, dataset) {
   # For each sample, retrieve the corresponding patient info
   sample_dfs <- lapply(1:nrow(sample_df), function(i) {
@@ -317,7 +400,7 @@ combine_patient_and_samp_dfs <- function(patient_df, sample_df, dataset) {
     # Get the corresponding row from the patient DF, if tcga
     patient <- sample_barcode
     if(dataset == "tcga") {
-      patient <- unlist(strsplit(sample_barcode, "-", fixed = TRUE))[3]
+      patient <- unlist(strsplit(sample_barcode, "-", fixed = TRUE))[1]
     }
     print(patient)
     
@@ -376,13 +459,37 @@ write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sampl
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_timer_rn_mean_MedGr10_top10k_ntnm.csv", sep = ""))
 
 
+# For per-cancer files (patient files stored in list 'pan_cancer_patient_dfs')
+combined_pat_samp_dfs <- lapply(pan_cancer_patient_dfs, function(pat_df) {
+  comb_df <- combine_patient_and_samp_dfs(pat_df, sample_df_to, 'tcga')
+  comb_df <- comb_df[rowSums(is.na(comb_df)) != ncol(comb_df),]
+  comb_df <- comb_df[,colSums(is.na(comb_df)) != nrow(comb_df)]
+  return(comb_df)
+})
+names(combined_pat_samp_dfs) <- names(pan_cancer_patient_dfs)
+
+# Write to file
+lapply(1:length(combined_pat_samp_dfs), function(i) {
+  cancer_name <- names(combined_pat_samp_dfs)[i]
+  fn <- paste0("Linear Model/Patient and Sample DFs/combined_patient_sample_DF_cibersort_total_frac_normAge_ntnm_", 
+               paste0(cancer_name, "_inclSubtypes.csv"))
+  write.csv(combined_pat_samp_dfs[[i]], paste0(main_path, fn))
+})
+
 #
 #
 #
 
 # Read this back (generic)
-patient_sample_df <- fread(paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF.csv", sep = ""),
-                              header = TRUE)
+patient_sample_df <- read.csv(paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF.csv", sep = ""),
+                              header = TRUE, row.names = 1)
+
+patient_sample_files <- list.files(paste0(main_path, "Linear Model/Patient and Sample DFs/"), pattern = "_inclSubtypes.csv")
+patient_sample_files <- patient_sample_files[grepl("combined", patient_sample_files)]
+patient_sample_dfs <- lapply(patient_sample_files, function(f)
+  read.csv(paste0(main_path, paste0("Linear Model/Patient and Sample DFs/", f)), header = T, row.names = 1))
+names(patient_sample_dfs) <- unlist(lapply(patient_sample_files, function(f) 
+  unlist(strsplit(f, "_", fixed = T))[10]))
 
 ############################################################
 ############################################################
@@ -424,29 +531,36 @@ get_unique_patients <- function(sample_ids) {
 
 # Call this function for all representative data frames (check that other CNA, expression,
 # etc. data frames have the same patients)
-cna_patients <- get_unique_patients(colnames(cna_df_raw))    # 732; 6123
-methylation_patients <- get_unique_patients(colnames(methylation_df)[2:ncol(methylation_df)])  #-1]) # 734; 6411
-exp_samp_ids <- unlist(lapply(colnames(expression_df)[2:ncol(expression_df)], function(x)
-  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
-expression_patients <- get_unique_patients(exp_samp_ids)  # 738; 7424
-mutation_targ_patients <- unlist(get_unique_patients(colnames(mutation_targ_df)[2:(ncol(mutation_targ_df)-1)])) # 978; 10002; #674
+cna_patients <- get_unique_patients(colnames(cna_df_new))    # 732; 7500
+methylation_patients <- get_unique_patients(colnames(methylation_df)[2:ncol(methylation_df)])  #-1]) # 734; 6491
+#exp_samp_ids <- unlist(lapply(colnames(expression_df)[2:ncol(expression_df)], function(x)
+  #paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
+#expression_patients <- get_unique_patients(exp_samp_ids)  # 738; 7375
+expression_patients <- get_unique_patients(colnames(expression_df)[2:ncol(expression_df)])  # 732; 7375
+mutation_targ_patients <- unlist(get_unique_patients(colnames(mutation_targ_df)[!(colnames(mutation_targ_df) %in% c('Swissprot', 'Gene_Symbol'))])) # 978; 7258; #737
 mutation_regprot_patients <- unique(unlist(lapply(mutation_regprot_df$Patient, function(x) 
-  unlist(strsplit(x, ";", fixed = TRUE)))))   # 615; 6732 -- ignore this (6875 with nonsense)
+  unlist(strsplit(x, ";", fixed = TRUE)))))   # 615; 6732 -- ignore this (6875 with nonsense, 6889 with nonsynonymous)
 
 # If needed
 #patient_sample_df <- as.data.frame(patient_sample_df)
 #rownames(patient_sample_df) <- unlist(patient_sample_df[,1]) 
 #patient_sample_df <- patient_sample_df[,2:ncol(patient_sample_df)]
 
-clin_samp_ids <- unlist(lapply(rownames(patient_sample_df), function(x)
-  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
-clinical_patients <- get_unique_patients(clin_samp_ids)  # 613; 7745
+#clin_samp_ids <- unlist(lapply(rownames(patient_sample_df), function(x)
+#  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
+clinical_patients <- get_unique_patients(rownames(patient_sample_df))  # 732; 6960; 313 for COAD/READ
+clinical_patients_perCt <- unique(unlist(lapply(patient_sample_dfs, function(df) get_unique_patients(rownames(df)))))  # 6960
 
 intersecting_patients <- intersect(cna_patients, 
                                    intersect(methylation_patients,
                                              intersect(expression_patients,
                                                        intersect(mutation_targ_patients, clinical_patients))))
-print(length(intersecting_patients)) # 664 in BRCA; 4545 PC (605 using UCSF genotype PCs, 604 if using WashU genotype PCs for BRCA; 3915 if using WashU PCs P-C)
+print(length(intersecting_patients)) # 727 in BRCA (605 using UCSF genotype PCs, 609 if using WashU genotype PCs for BRCA; 5722 if using WashU PCs P-C)
+
+#182 for COAD/READ
+
+# Remove hypermutator patients
+intersecting_patients_hypermutFilt <- intersecting_patients[!(intersecting_patients %in% total_excluded_pats)]
 
 #' Given a list of intersecting patient IDs (XXXX, e.g. A0WY), it subsets a 
 #' given data frame with column names that contain sample IDs (XXXX-XXX, e.g. A0WY-01A)
@@ -506,6 +620,10 @@ rownames(patient_sample_df) <- unlist(lapply(rownames(patient_sample_df), functi
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse= "-")))
 patient_sample_df_sub <- subset_by_intersecting_ids(intersecting_patients, patient_sample_df, FALSE)
 
+# Do this for the per-cancer patient/sample files
+patient_sample_dfs_sub <- lapply(patient_sample_dfs, function(df) 
+  subset_by_intersecting_ids(intersecting_patients, df, F))
+names(patient_sample_dfs_sub) <- names(patient_sample_dfs)
 
 # Handle the regulatory protein DF separately
 regprot_df_new_patient_labels <- lapply(mutation_regprot_df$Patient, function(x) {
@@ -560,6 +678,13 @@ write.csv(expression_df_sub, paste(main_path, "Linear Model/Tumor_Only/Expressio
 write.csv(mutation_targ_df_sub, paste(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_IntersectPatients.csv", sep = ""))
 write.csv(mutation_regprot_df_sub, paste(main_path, "Linear Model/Tumor_Only/Regprot_Mutation/iprotein_results_missense_IntersectPatients.csv", sep = ""))
 write.csv(patient_sample_df_sub, paste(main_path, "Linear Model/Tumor_Only/Patient/combined_patient_sample_IntersectPatients.csv", sep = ""))
+
+lapply(1:length(patient_sample_dfs_sub), function(i) {
+  ct <- names(patient_sample_dfs_sub)[i]
+  fn <- paste0("Linear Model/Tumor_Only/Patient/combined_patient_sample_cibersort_total_frac_", 
+               paste0(ct, "_inclSubtypes_IntersectPatientsWashU.csv"))
+  write.csv(patient_sample_dfs_sub[[i]], paste0(main_path, fn))
+})
 
 #OPT:
 write.table(intersecting_patients, paste(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt", sep = ""))

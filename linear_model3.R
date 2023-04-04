@@ -96,12 +96,13 @@ parser$add_argument("--randomize", default = "FALSE", type = "character",
 parser$add_argument("--expression_df", default = "expression_tmm_CancerOnly_IntersectPatients.csv", 
                     type = "character",
                     help = "The name of the expression data frame input. [default %(default)s]")
-parser$add_argument("--mutation_regprot_df", default = "iprotein_results_missense_CancerOnly_IntersectPatients.csv", 
-                    type = "character",
-                    help = "The name of the mutation regulatory protein data frame input. [default %(default)s]")
+#parser$add_argument("--mutation_regprot_df", default = "iprotein_results_missense_CancerOnly_IntersectPatients.csv", 
+ #                   type = "character",
+  #                  help = "The name of the mutation regulatory protein data frame input. [default %(default)s]")
 parser$add_argument("--patient_df", default = "combined_patient_sample_cibersort_total_frac_tmm_IntersectPatients.csv", 
                     type = "character",
                     help = "The name of the patient sample data frame input. [default %(default)s]")
+
 
 # The decision for if/ how to bucket CNAs and methylation
 parser$add_argument("--cna_bucketing", default = "bucket_inclAmp", 
@@ -138,6 +139,8 @@ parser$add_argument("--collinearity_diagn", default = "FALSE", type = "character
                     help = "A TRUE/ FALSE value indicating whether or not we want detailed collinearity diagnostics. Can be useful but adds to runtime; not suggested for large runs. Default is FALSE.")
 parser$add_argument("--inclResiduals", default = "FALSE", type = "character",
                     help = "A TRUE/FALSE value indicating whether we want to include residuals in the output DF. Default is FALSE.")
+parser$add_argument("--correctPerDriver", default = "TRUE", type = "character",
+                    help = "A TRUE/FALSE value indicating whether we want to do q-value correction per-driver or across drivers. Default is TRUE (per driver).")
 
 # Add a flag for the type of model to use (e.g. a mixed effects model, rather than a simple linear or regularized linear)
 parser$add_argument("--model_type", default = "linear", type = "character",
@@ -211,6 +214,7 @@ runRegprotsJointly <- str2bool(args$run_query_genes_jointly)
 collinearity_diagn <- str2bool(args$collinearity_diagn)
 inclResiduals <- str2bool(args$inclResiduals)
 fixed_lambda_for_rand <- str2bool(args$fixed_lambda_for_rand)
+correct_per_gene <- str2bool(args$correctPerDriver)
 
 
 ############################################################
@@ -414,7 +418,8 @@ run_linear_model <- function(list_of_input_dfs, expression_df, analysis_type, cn
           })
         
         if(!is.na(lm_fit)) {
-          summary_table <- as.data.table(tidy(lm_fit))
+          summary_table <- tidy(lm_fit)
+          summary_table <- as.data.table(summary_table[, colSums(is.na(summary_table)) < nrow(summary_table)])
           rm(lm_fit)
         } 
                             
@@ -583,9 +588,9 @@ if(debug) {
 # Create an appropriate output file name
 outfn <- create_output_filename(test = test, tester_name = args$tester_name, run_name = args$run_name,
                                 targets_name = args$targets_name, expression_df_name = args$expression_df,
-                                cna_bucketing = args$cna_bucketing, mutation_regprot_df_name = args$mutation_regprot_df, 
+                                cna_bucketing = args$cna_bucketing, #mutation_regprot_df_name = args$mutation_regprot_df, 
                                 meth_bucketing = meth_bucketing, meth_type = args$meth_type, 
-                                patient_df_name = args$patient_df, num_PEER = args$num_PEER, 
+                                patient_df_name = args$patient_df[1], num_PEER = args$num_PEER, 
                                 num_pcs = args$num_pcs, randomize = randomize, covs_to_incl_label = args$select_args_label,
                                 patients_to_incl_label = args$patientsOfInterestLabel, removeCis = FALSE,
                                 model_type = args$model_type, removeMetastatic = TRUE, 
@@ -626,17 +631,17 @@ gene_name_index <- length(unlist(strsplit(args$run_name, "_", fixed = TRUE))) + 
 
 if(args$patientsOfInterest != "") {
   gene_name_index <- gene_name_index + 1
-  lm_input_fns <- list.files(input_lm_filepath, pattern = args$patientsOfInterestLabel)
+  lm_input_fns <- list.files(input_lm_filepath, pattern = args$patientsOfInterestLabel, recursive = F)
   
 } else {
-  lm_input_fns <- list.files(input_lm_filepath, pattern = "lm_input_")
+  lm_input_fns <- list.files(input_lm_filepath, pattern = "lm_input_", recursive = F)
   # Check if there are sub-directories in this path that might contain the file
-  dirs_in_path <- list.dirs(input_lm_filepath)
+  dirs_in_path <- list.dirs(input_lm_filepath, recursive = F)
   if(TRUE %in% unlist(lapply(dirs_in_path, function(d) grepl("part_", d)))) {
     dirs_part <- dirs_in_path[grepl("part_", dirs_in_path)]
     gene_name_index <- gene_name_index + 1
     for (d in dirs_part) {
-      files_d <- list.files(paste0(d, "/"), pattern = "lm_input_")
+      files_d <- list.files(paste0(d, "/"), pattern = "lm_input_", recursive = F)
       part <- unlist(strsplit(d, "/", fixed = TRUE))
       the_part <- part[length(part)]
       files_d <- paste(the_part, files_d, sep = "/")

@@ -427,8 +427,6 @@ create_lm_input_file_outpath <- function(cancerType, specificType, test, tester_
 #' @param expression_df_name the string name used to import the expression DF
 #' @param cna_bucketing a string description of how we are bucketing/ handling 
 #' CNA values
-#' @param mutation_regprot_df_name the string name used to import the mutation
-#' regprot DF (used to get the level of specificity of mutations)
 #' @param meth_bucketing a TRUE/ FALSE value indicating if we are in some way 
 #' bucketing our methylation value
 #' @param meth_type 'Beta' or 'M' depending on the type of methylation we are
@@ -447,9 +445,8 @@ create_lm_input_file_outpath <- function(cancerType, specificType, test, tester_
 #' @param removeMetastatic a TRUE/ FALSE value indicating whether or not we have removed 
 #' metastatic samples from the analysis
 create_lm_input_table_filename <- function(test, tester_name, run_name, target_uniprot, expression_df_name,
-                                   cna_bucketing, mutation_regprot_df_name, meth_bucketing,
-                                   meth_type, patient_df_name, num_PEER, num_pcs, randomize,
-                                   patients_to_incl_label, removeCis, removeMetastatic) {
+                                   cna_bucketing, meth_bucketing, meth_type, patient_df_name, num_PEER, 
+                                   num_pcs, randomize, patients_to_incl_label, removeCis, removeMetastatic) {
   outfn <- "lm_input"
   
   # Add the name of the patient population of interest, if there is one
@@ -470,19 +467,18 @@ create_lm_input_table_filename <- function(test, tester_name, run_name, target_u
   expr_norm <- unlist(strsplit(expression_df_name, "_", fixed = TRUE))[2]
   cna_bucketing_lab <- "rawCNA"
   if (cna_bucketing != "rawCNA") {cna_bucketing_lab <- paste("CNA", cna_bucketing, sep = "")}
-  mutation_restr <- unlist(strsplit(mutation_regprot_df_name, "_", fixed = TRUE))[1]
+  #mutation_restr <- unlist(strsplit(mutation_regprot_df_name, "_", fixed = TRUE))[1]
   meth_b_lab <- "Raw"
-  if(meth_bucketing) {
-    meth_b_lab <- "Bucketed"
-  }
+  if(meth_bucketing) {meth_b_lab <- "Bucketed"}
   meth_label <- paste("meth", paste(meth_type, meth_b_lab, sep = ""), sep = "")
   ici_label_spl <- unlist(strsplit(patient_df_name, "_", fixed = TRUE))
   ici_label <- ici_label_spl[4]
   if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
   if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
   
-  outfn <- paste(outfn, paste(mutation_restr, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
-                                                                     sep = "_"), sep = "_"), sep = "_"), sep = "_")
+  outfn <- paste(outfn, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
+                                                                     sep = "_"), sep = "_"), sep = "_")
+  # paste(mutation_restr, , sep = "_")
   
   # Add PEER factors/ PCs if needed
   if(!(num_PEER == 0)) {outfn <- paste(outfn, paste(num_PEER, "PEER", sep = ""), sep = "_")}
@@ -558,8 +554,6 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
 #' @param expression_df_name the string name used to import the expression DF
 #' @param cna_bucketing a string description of how we are bucketing/ handling 
 #' CNA values
-#' @param mutation_regprot_df_name the string name used to import the mutation
-#' regprot DF (used to get the level of specificity of mutations)
 #' @param meth_bucketing a TRUE/ FALSE value indicating if we are in some way 
 #' bucketing our methylation value
 #' @param meth_type 'Beta' or 'M' depending on the type of methylation we are
@@ -584,10 +578,9 @@ create_file_outpath <- function(cancerType, specificType, test, tester_name,
 #' @param signif_eval_type if regularization is not "None", provides additional info on how
 #' we generated significance metrics
 create_output_filename <- function(test, tester_name, run_name, targets_name, expression_df_name,
-                                   cna_bucketing, mutation_regprot_df_name, meth_bucketing,
-                                   meth_type, patient_df_name, num_PEER, num_pcs, randomize,
-                                   covs_to_incl_label, patients_to_incl_label, model_type, removeCis, 
-                                   removeMetastatic, regularization, signif_eval_type) {
+                                   cna_bucketing, meth_bucketing, meth_type, patient_df_name, 
+                                   num_PEER, num_pcs, randomize, covs_to_incl_label, patients_to_incl_label, 
+                                   model_type, removeCis, removeMetastatic, regularization, signif_eval_type) {
   outfn <- "res"
   
   # Add the name of the patient population of interest, if there is one
@@ -608,7 +601,7 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   expr_norm <- unlist(strsplit(expression_df_name, "_", fixed = TRUE))[2]
   cna_bucketing_lab <- "rawCNA"
   if (cna_bucketing != "rawCNA") {cna_bucketing_lab <- paste("CNA", cna_bucketing, sep = "")}
-  mutation_restr <- unlist(strsplit(mutation_regprot_df_name, "_", fixed = TRUE))[1]
+  #mutation_restr <- unlist(strsplit(mutation_regprot_df_name, "_", fixed = TRUE))[1]
   meth_b_lab <- "Raw"
   if(meth_bucketing) {
     meth_b_lab <- "Bucketed"
@@ -619,8 +612,9 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
   if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
   
-  outfn <- paste(outfn, paste(mutation_restr, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
-                                                                     sep = "_"), sep = "_"), sep = "_"), sep = "_")
+  outfn <- paste(outfn, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
+                                                                     sep = "_"), sep = "_"), sep = "_")
+  # paste(mutation_restr, , sep = "_")
   
   # Add PEER factors/ PCs if needed
   if(!(num_PEER == 0)) {outfn <- paste(outfn, paste(num_PEER, "PEER", sep = ""), sep = "_")}
@@ -733,8 +727,7 @@ combine_tab <- function(x_tab, y_tab, expected_col_num = 7) {
       print(cond)
       return(x_tab)
     })
-  print(dim(comb_dt))
-  print(head(comb_dt))
+
   return(comb_dt)
 }
 
@@ -961,7 +954,7 @@ limit_to_targets_wo_existing_files <- function(outpath, targets_DF, gene_name_in
   files_in_outpath <- list.files(paste0(outpath, "/"), pattern = "lm_input_")
   
   # Check if there are sub-directories in this path that might contain the file
-  dirs_in_path <- list.dirs(outpath)
+  dirs_in_path <- list.dirs(outpath, recursive = F)
   if(TRUE %in% unlist(lapply(dirs_in_path, function(d) grepl("part_", d)))) {
     dirs_part <- dirs_in_path[grepl("part_", dirs_in_path)]
     for (d in dirs_part) {
@@ -1462,8 +1455,6 @@ subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched, d
     if (dataset == "TCGA") {
       if(!tumNormMatched) {
         df_adj_label_col_indices <- which(colnames(df_adj) %fin% column_names_to_keep)
-        print(df_adj_label_col_indices)
-        print(which(grepl("-0", colnames(df_adj), fixed = TRUE)))
         df_adj <- df_adj[, c(df_adj_label_col_indices, which(grepl("-0", colnames(df_adj), 
                                                                    fixed = TRUE)))]
       }
@@ -1604,8 +1595,8 @@ remove_metastatic_samples <- function(df, colNames) {
 ############################################################
 #' Removes metastatic samples from a given regprot data frame (sample ID will be
 #' -06 or -07 to indicate metastasis) - only for TCGA
-#' @param df the regprot data frame to remove metastatic samples from
-remove_metastatic_samples_regprot <- function(df) {
+#' @param mutation_regprot_df the regprot data frame to remove metastatic samples from
+remove_metastatic_samples_regprot <- function(mutation_regprot_df) {
 
   # Adjust each row to remove metastatic samples
   regprot_df_new_patient_labels <- lapply(mutation_regprot_df$Patient, function(x) {

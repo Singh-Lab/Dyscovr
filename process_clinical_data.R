@@ -17,7 +17,7 @@ library(ggplot2)
 path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/"
 
 input_path <- paste(path, "Input Data Files/BRCA Data/", sep = "")
-#input_path <- paste(path, "Input Data Files/TCGA Data (ALL)/", sep = "")
+#input_path <- paste(path, "Input Data Files/Pan-Cancer/", sep = "")
 
 ############################################################
 # RETAIN ONLY PATIENTS WITH ALL DATATYPES IN GIVEN CLINICAL FILE
@@ -41,7 +41,7 @@ meth_clin_file <- read.csv(paste(input_path, "Methylation_Data/meth_clinical_dat
 # NOTE: no way to use TCGA biolinks to get pan-cancer information. Have to just get all the clinical files and 
 # find the intersecting IDs. Save this to file. Otherwise, file originated from analyses in TCGAbiolinks_assay.R
 unique_patient_ids <- get_common_patients(input_path, mut_clin_file, exp_clin_file, cnv_clin_file, meth_clin_file) # Length: 7,864; OR
-unique_patient_ids <- read.table(paste(input_path, "unique_brca_patient_ids.txt", sep = ""), header = FALSE)[,1] # Length: 747 (OPT. 1) or 732 (OPT. 2)
+unique_patient_ids <- read.table(paste(input_path, "unique_brca_patient_ids_2.txt", sep = ""), header = FALSE)[,1] # Length: 747 (OPT. 1) or 732 (OPT. 2)
 
 #' Takes clinical files (with a column for tcga_barcode) and identifies 
 #' a list of unique TCGA patient identifiers common across all of them. 
@@ -71,19 +71,27 @@ get_common_patients <- function(path, mut_clin_file, exp_clin_file, cnv_clin_fil
 
 #' Creates a subsetted clinical file from a given clinical file, containing 
 #' only the given patients
-#' @param clin_file a clinical file (with a column for tcga_barcode)
+#' @param clin_df a clinical file (with a column for tcga_barcode)
 #' @param unique_patient_ids a list of patient IDs for patients that have all data types of interest
-subset_clin_file_by_patient_ids <- function(clin_file, unique_patient_ids) {
-  clin_df_sub <- data.frame(matrix(nrow = 0, ncol = ncol(clin_file)))
-  colnames(clin_df_sub) <- colnames(clin_file)
+subset_clin_file_by_patient_ids <- function(clin_df, unique_patient_ids) {
+  clin_df_sub_rows <- lapply(1:nrow(clin_df), function(i) {
+    barcode <- unlist(strsplit(clin_df[i, 'case_submitter_id'], split = "-", fixed = T))[3]
+    if(barcode %fin% unique_patient_ids) {return(clin_df[i, ])}
+    else {return(NA)}
+  })
+  clin_df_sub_rows <- clin_df_sub_rows[!is.na(clin_df_sub_rows)]
+  clin_df_sub <- do.call(rbind, clin_df_sub_rows)
   
-  for (i in 1:nrow(clin_file)) {
-    barcode <- clin_file$case_submitter_id[i]
-    patient_id <- unlist(strsplit(barcode, split = "-", fixed = TRUE))[3]
-    if (patient_id %fin% unique_patient_ids) {
-      clin_df_sub <- rbind(clin_df_sub, clin_file[i,])
-    }
-  }
+  #clin_df_sub <- data.frame(matrix(nrow = 0, ncol = ncol(clin_file)))
+  #colnames(clin_df_sub) <- colnames(clin_file)
+  
+  #for (i in 1:nrow(clin_file)) {
+  #  barcode <- clin_file$case_submitter_id[i]
+  #  patient_id <- unlist(strsplit(barcode, split = "-", fixed = TRUE))[3]
+  #  if (patient_id %fin% unique_patient_ids) {
+  #    clin_df_sub <- rbind(clin_df_sub, clin_file[i,])
+  #  }
+  #}
   return(clin_df_sub)
 }
 
@@ -91,17 +99,17 @@ subset_clin_file_by_patient_ids <- function(clin_file, unique_patient_ids) {
 # patients that have all data types of interest
 mut_clin_df_sub <- subset_clin_file_by_patient_ids(mut_clin_file, unique_patient_ids)
   # Original BRCA file: 2089, Subset BRCA file: 1494 (all patients have 2 samples)
-  # Original Pan-Cancer file: 19730, Subset Pan-Cancer file: 15728
+  # Original Pan-Cancer file: 19730, Subset Pan-Cancer file: 15500
 exp_clin_df_sub <- subset_clin_file_by_patient_ids(exp_clin_file, unique_patient_ids)
   # Original BRCA file: 2182, Subset BRCA file: 1494 (all patients have 2 samples)
-  # Original Pan-Cancer file: 21642, Subset Pan-Cancer file: 17222
+  # Original Pan-Cancer file: 21642, Subset Pan-Cancer file: 15506
 cnv_clin_df_sub <- subset_clin_file_by_patient_ids(cnv_clin_file, unique_patient_ids)
   # OPT 1: Original BRCA file: 2176, Subset BRCA file: 1492 (all but 2 patients have 2 samples)
   # OPT 2: Original BRCA file: 2110, Subset BRCA file: 1464 (all patients have 2 samples)
-  # Original Pan-Cancer file: 21968, Subset Pan-Cancer file: 15728
+  # Original Pan-Cancer file: 21968, Subset Pan-Cancer file: 15500
 meth_clin_df_sub <- subset_clin_file_by_patient_ids(meth_clin_file, unique_patient_ids)
   # Original BRCA file: 1581, Subset BRCA file: 1490 (all but 4 patients have 2 samples)
-  # Original Pan-Cancer file: 16779, Subset Pan-Cancer file: 15731
+  # Original Pan-Cancer file: 16779, Subset Pan-Cancer file: 15503
 
 
 ############################################################
@@ -149,10 +157,19 @@ write.csv(meth_clin_df_sub, paste(input_path, "Methylation_Data/meth_clinical_da
 # Print the remaining columns with greater than N% non-null entries
 colnames(mut_clin_df_sub)
 
-# We will only use one clinical file for the linear model, since these should all
-# now be mostly identical (excepting a few patients lacking a matched tumor-normal for
-# a particular datatype) -- we will use the most conservative file
-clinical_df <- mut_clin_df_sub 
+# Merge these files together, using shared column names
+mut_exp_shared_colnames <- intersect(colnames(mut_clin_df_sub), colnames(exp_clin_df_sub))
+mut_exp_shared_colnames <- mut_exp_shared_colnames[!(mut_exp_shared_colnames %in% c("X", "x"))]
+mut_exp_clin_df <- merge(mut_clin_df_sub, exp_clin_df_sub, by = mut_exp_shared_colnames)
+
+mut_exp_cna_shared_colnames <- intersect(colnames(mut_exp_clin_df), colnames(cnv_clin_df_sub))
+mut_exp_cna_shared_colnames <- mut_exp_cna_shared_colnames[!(mut_exp_cna_shared_colnames %in% c("X", "x"))]
+mut_exp_cna_df <- merge(mut_exp_clin_df, cnv_clin_df_sub, by = mut_exp_cna_shared_colnames)
+
+mut_exp_cna_meth_shared_colnames <- intersect(colnames(mut_exp_cna_df), colnames(meth_clin_df_sub))
+mut_exp_cna_meth_shared_colnames <- mut_exp_cna_meth_shared_colnames[!(mut_exp_cna_meth_shared_colnames %in% c("X", "x"))]
+mut_exp_cna_meth_df <- merge(mut_exp_cna_df, meth_clin_df_sub, by = mut_exp_cna_meth_shared_colnames)
+
 write.csv(clinical_df, paste(input_path, "clinical_data_subset.csv", sep = ""))
 
 # When retrieving this information, use:

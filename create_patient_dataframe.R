@@ -16,10 +16,12 @@ library(TCGAbiolinks)
 
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/cBioPortal/METABRIC/"
+#main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/TripleNeg_Chinese/"
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
 
 input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
 #input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_metabric/"
+#input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/TripleNeg_Chinese/"
 #input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/"
 
 
@@ -27,19 +29,12 @@ input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input D
 # IMPORT CLINICAL DATA
 ############################################################
 ### TCGA ###
-# Tumor-Normal Matched
-clinical_df_tnm <- read.csv(paste(input_path, "clinical_data_subset.csv", sep = ""), 
-                        header = TRUE, row.names = 1, check.names = FALSE)
-# Non-Tumor-Normal Matched
-clinical_df_ntnm <- read.csv(paste(input_path, "clinical_wMutCounts.csv", sep = ""), 
-                        header = TRUE, check.names = FALSE)
-# For missense + nonsense 
-clinical_df_ntnm <- read.csv(paste(input_path, "clinical_data_w_MN_MutCounts.csv", sep = ""), 
+clinical_df_ntnm <- read.csv(paste(input_path, "clinical_data_subset_wNonsynMut_hyperMutRm.csv", sep = ""), 
                              header = TRUE, check.names = FALSE)
 
-# For nonsynonymous
-clinical_df_ntnm <- read.csv(paste(input_path, "clinical_data_w_Nonsyn_MutCounts.csv", sep = ""), 
-                             header = TRUE, check.names = FALSE)
+# For pan-cancer, use the full one
+clinical_df_original <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/clinical.csv", 
+                            header = T, check.names = F)
 
 ### METABRIC ###
 clinical_df <- read.table(paste0(input_path, "data_clinical_patient_sub.txt"), 
@@ -48,6 +43,11 @@ clinical_df <- read.table(paste0(input_path, "data_clinical_patient_sub.txt"),
 sample_df <- read.table(paste0(input_path, "data_clinical_sample_sub.txt"), 
                         header = TRUE, check.names = FALSE, sep = ",")
 clinical_df <- merge(clinical_df, sample_df[,c('PATIENT_ID', "TMB_NONSYNONYMOUS")], by = 'PATIENT_ID')
+
+### CHINESE TN BRCA ###
+clinical_df <- read.csv(paste0(main_path, "clinical.csv"), header = T, check.names = F)
+# Limit to female patients
+clinical_df <- clinical_df[clinical_df$Sex %in% c("Female", "Female "),]
 
 
 ############################################################
@@ -63,10 +63,12 @@ is_pc <- FALSE
 ############################################################
 # IMPORT SUBTYPE INFORMATION (TCGA)
 ############################################################
+# Useful resource for compilation of TCGA molecular subtypes: https://bioconductor.org/packages/release/bioc/vignettes/TCGAbiolinks/inst/doc/subtypes.html
 general_cancer_types <- c("ACC", "BRCA", "BLCA", "CESC", "CHOL", "COAD", "ESCA",
                           "GBM", "HNSC", "KICH", "KIRC", "KIRP", "LGG", "LIHC",
                           "LUAD", "LUSC", "PAAD", "PCPG", "PRAD", "READ", "SKCM",
                           "SARC", "STAD", "THCA", "UCEC", "UCS", "UVM")
+cancer_types_no_subtype_info <- c("DLBC", "MESO", "THYM", "OV", "TGCT", "LAML")
 
 import_subtype_information <- function(general_cancer_types) {
   subtype_files <- lapply(general_cancer_types, function(type) {
@@ -86,6 +88,16 @@ pc_subtype <- import_subtype_information(general_cancer_types)
 
 # Or, if just using BRCA:
 brca_subtype <- TCGAquery_subtype(tumor = "BRCA")
+
+coad_subtype <- TCGAquery_subtype(tumor = "COAD")
+#read_subtype <- TCGAquery_subtype(tumor = "READ")
+#coad_read_subtype <- rbind(coad_subtype, read_subtype)
+
+# Import colorectal subtype information from: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4636487/#SD10
+coad_subtype_cms <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/cms_labels_public_all_colorectal_subtypes.txt", 
+                               header = T, check.names = F)
+coad_subtype_cms_tcga <- coad_subtype_cms[coad_subtype_cms$dataset == 'tcga',]
+coad_subtype <- merge(coad_subtype, coad_subtype_cms_tcga, by.x = "patient", by.y = "sample")
 
 
 ############################################################
@@ -117,12 +129,8 @@ cna_neighbor_df <- fread(paste0(main_path, "CNV/cna_neighbor_df_full.csv"))
 # CREATE SAMPLE DATA FRAME FOR LM
 ############################################################
 ### TCGA ###
-brca_patient_df_tnm <- create_patient_dataframe(clinical_df_tnm, is_brca, brca_subtype, 
-                                                is_pc, NA, NA, FALSE, 'tcga')
 brca_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, brca_subtype, 
                                                  is_pc, NA, NA, FALSE, 'tcga')
-pc_patient_df_tnm <- create_patient_dataframe(clinical_df_tnm, is_brca, pc_subtype, 
-                                              is_pc, NA, NA, FALSE, 'tcga')
 pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, pc_subtype, 
                                                is_pc, NA, NA, FALSE, 'tcga')
 
@@ -131,6 +139,10 @@ pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca,
                                                pc_subtype, is_pc, list("BRCA" = brca_subtype), 
                                                NA, FALSE, 'tcga')
 
+clinical_df_ntnm_coad_read <- clinical_df_ntnm[clinical_df_ntnm$tcga_barcode %in% coad_subtype$patient,]
+coad_read_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm_coad_read, is_brca, coad_subtype,
+                                                 is_pc, NA, NA, FALSE, 'tcga')
+
 # Get subtypes for multiple cancer types
 blca_subtype <- TCGAquery_subtype(tumor = "BLCA")
 hnsc_subtype <- TCGAquery_subtype(tumor = "HNSC")
@@ -138,10 +150,16 @@ colnames(hnsc_subtype)[2] <- "subtype"
 colnames(blca_subtype)[which(colnames(blca_subtype) == "Histologic subtype")] <- "histology"
 
 additional_subtype_info_list <- list("BRCA" = brca_subtype, "BLCA" = blca_subtype, "HNSC" = hnsc_subtype)
+additional_subtype_info_list <- list("COAD" = coad_subtype[grepl("Colon", coad_subtype$histological_type),], 
+                                     "READ" = coad_subtype[grepl("Rectal", coad_subtype$histological_type),])
+additional_subtype_info_list <- list("COAD.READ" = coad_subtype)
+
 pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
                                                pc_subtype, is_pc, additional_subtype_info_list, 
                                                NA, FALSE, 'tcga')
-
+pc_patient_df_ntnm_new <- create_patient_dataframe(clinical_df, is_brca, 
+                                                   NA, is_pc, pc_subtype, 
+                                                   NA, FALSE, 'tcga')
 
 # Write this to a CSV
 write.csv(brca_patient_df_tnm, paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_tnm.csv", sep = ""))
@@ -150,15 +168,55 @@ write.csv(pc_patient_df_tnm, paste(main_path, "Linear Model/Patient and Sample D
 write.csv(pc_patient_df_ntnm, paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_ntnm.csv", sep = ""))
 
 
+# Run individually for each cancer type, get back a list of patient DFs with subtype information
+pan_cancer_patient_dfs <- lapply(1:length(pc_subtype), function(i) {
+  st_df <- list(pc_subtype[[i]])
+  cancer_name <- names(pc_subtype)[i]
+  names(st_df) <- cancer_name
+  
+  clin_df_sub <- clinical_df[grepl(cancer_name, clinical_df$project_id),]
+  
+  if(!((length(clin_df_sub) == 0) | (nrow(clin_df_sub) == 0))) {
+    pat_df <- create_patient_dataframe(clin_df_sub, is_brca, NA, is_pc, st_df, NA, F, 'tcga')
+    return(pat_df)
+  }
+  return(NA)
+})
+names(pan_cancer_patient_dfs) <- names(pc_subtype)
+
+# Run for cancer types without subtype information
+pan_cancer_patient_dfs_pt2 <- lapply(cancer_types_no_subtype_info, function(cancer_name){
+  clin_df_sub <- clinical_df[grepl(cancer_name, clinical_df$project_id),]
+  if(!((length(clin_df_sub) == 0) | (nrow(clin_df_sub) == 0))) {
+    pat_df <- create_patient_dataframe(clin_df_sub, is_brca, NA, is_pc, NA, NA, F, 'tcga')
+    return(pat_df)
+  }
+})
+names(pan_cancer_patient_dfs_pt2) <- cancer_types_no_subtype_info
+
+pan_cancer_patient_dfs_full <- c(pan_cancer_patient_dfs, pan_cancer_patient_dfs_pt2)
+
+# Write to files
+lapply(1:length(pan_cancer_patient_dfs), function(i) {
+  fn <- paste0("patient_dataframe_ntnm_normAge_", paste0(names(pan_cancer_patient_dfs)[i], "_inclSubtypes.csv"))
+  write.csv(pan_cancer_patient_dfs[[i]], paste0(main_path, paste0("Linear Model/Patient and Sample DFs/", fn)))
+})
+
+
 ### METABRIC ###
 brca_patient_df<- create_patient_dataframe(clinical_df, is_brca, NA, is_pc, 
-                                           NA, FALSE, 'metabric')
+                                           NA, NA, FALSE, 'metabric')
 
 # Write to CSV
 write.csv(brca_patient_df, paste(main_path, "Patient and Sample DFs/patient_dataframe.csv", sep = ""))
 
 
+### CHINESE TRIPLE NEGATIVE ###
+brca_patient_df <- create_patient_dataframe(clinical_df, is_brca, NA, is_pc, 
+                                            NA, NA, FALSE, 'chinese_tn')
 
+# Write to CSV
+write.csv(brca_patient_df, paste(main_path, "Patient and Sample DFs/patient_dataframe.csv", sep = ""))
 
 ############################################################
 
@@ -180,11 +238,12 @@ write.csv(brca_patient_df, paste(main_path, "Patient and Sample DFs/patient_data
 #' sample, created from running smartpca. NA if not using.
 #' @param age_bucketing a TRUE/FALSE value to indicate whether or not we are bucketing
 #' age (if not, we are normalizing it to be between 0 and 1)
-#' @param dataset either 'tcga', 'metabric', 'icgc' or 'cptac3'; to refer to proper column names
+#' @param dataset either 'tcga', 'metabric', 'chinese_tn', icgc' or 'cptac3'; 
+#' to refer to proper column names
 create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc, 
                                      additional_subtype_info, smartpca_output,
                                      age_bucketing, dataset) {
-  
+
   # Create relational data frame to hold patient-dependent inputs to linear model
   # Columns: Linear model input variables 
   # Rows: Samples that have all necessary data types 1...j...L (Unique 4-digit ID)
@@ -198,9 +257,11 @@ create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc,
                                  "Prior_malig", "Treatment_rad", "Treatment_pharm",
                                  "Tot_Mut_b1", "Tot_Mut_b2", "Tot_Mut_b3", "PC1", "PC2", "PC3")
   }
-
-  patient_characteristics <- add_cancer_type(patient_characteristics, is_pc, subtype_file,
-                                             additional_subtype_info, clinical_df, dataset)
+  if(length(subtype_file) > 1) {
+    patient_characteristics <- add_cancer_type(patient_characteristics, is_pc, subtype_file,
+                                               additional_subtype_info, clinical_df, dataset)
+  }
+  print(patient_characteristics)
   
   unique_patient_ids <- c()
   if(dataset == 'tcga') {
@@ -208,7 +269,9 @@ create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc,
       unlist(strsplit(x, split = "-", fixed = TRUE))[3])))
   } else if (dataset == "metabric") {
     unique_patient_ids <- unique(clinical_df$PATIENT_ID)
-  } else {print("Only implemented for TCGA and METABRIC datasets.")}
+  } else if (dataset == "chinese_tn") {
+    unique_patient_ids <- unique(clinical_df$Project_ID)
+  } else {print("Only implemented for TCGA, METABRIC, and Chinese TN datasets.")}
   
   patient_dataframe <- data.frame(matrix(ncol = length(patient_characteristics), 
                                          nrow = length(unique_patient_ids)))
@@ -250,12 +313,13 @@ create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc,
 #' sample, created from running smartpca
 #' @param age_bucketing a TRUE/FALSE value to indicate whether or not we are bucketing
 #' age (if not, we are normalizing it to be between 0 and 1)
-#' @param dataset either 'tcga', 'metabric', 'icgc' or 'cptac3'; to refer to proper column names
+#' @param dataset either 'tcga', 'metabric', 'chinese_tn', icgc' or 'cptac3'; 
+#' to refer to proper column names
 input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_file, 
                                         is_pc, additional_subtype_info, smartpca_output, 
                                         age_bucketing, dataset) {
   input_dataframe_updated <- input_df
-  
+
   # GENDER
   if (!is_brca) {
     gender_vect <- c()
@@ -263,7 +327,9 @@ input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_
       gender_vect <- clinical_df$gender[seq(1, length(clinical_df$gender), 2)] 
     } else if (dataset == "metabric") {
       gender_vect <- clinical_df$SEX
-    } else {print("Only implemented for TCGA and METABRIC.")}
+    } else if (dataset == "chinese_tn") {
+      gender_vect <- clinical_df$Sex
+    } else {print("Only implemented for TCGA, METABRIC, and Chinese TN.")}
     gender_vect_binary <- ifelse((gender_vect == "male") | (gender_vect == "Male"), 0, 1)
     input_dataframe_updated[,'Gender'] <- gender_vect_binary
   } 
@@ -274,6 +340,8 @@ input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_
       age_bin_df <- convert_age_to_bins(clinical_df$age_at_index, dataset)
     } else if (dataset == 'metabric') {
       age_bin_df <- convert_age_to_bins(clinical_df$AGE_AT_DIAGNOSIS, dataset)
+    } else if (dataset == "chinese_tn") {
+      gender_vect <- clinical_df$Age_at_surgery
     }
     input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
                                                            age_bin_df) 
@@ -283,11 +351,13 @@ input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_
       age_vect <- as.numeric(clinical_df$age_at_index)[seq(1, length(clinical_df$age_at_index), 2)] / 100
     } else if (dataset == 'metabric') {
       age_vect <- clinical_df$AGE_AT_DIAGNOSIS / 100
+    } else if (dataset == "chinese_tn") {
+      age_vect <- clinical_df$Age_at_surgery / 100
     }
     input_dataframe_updated[,'Age'] <- age_vect
   }
   
-  # RACE (NOTE: METABRIC Clinical Info does not include race)
+  # RACE (NOTE: METABRIC is entirely European; Chinese TN cohort is entirely Chinese)
   if(dataset == 'tcga') {
     race_bin_df <- convert_race_to_bins(clinical_df$race, clinical_df$ethnicity)
     input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
@@ -302,7 +372,8 @@ input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_
   } else if (dataset == 'metabric') {
     input_dataframe_updated[,'Prior_malig'] <- unlist(lapply(clinical_df$RFS_STATUS, function(x) 
       unlist(strsplit(x, ":", fixed = TRUE))[1]))
-  }
+    # NOTE: no information about prior malignancy for the Chinese TN cohort.
+  } 
   
   # TREATMENT
   treatment_bin_df <- data.frame()
@@ -313,20 +384,18 @@ input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_
                                                    treatment_type_vect)
   } else if (dataset == 'metabric') {
     treatment_bin_df <- convert_treatments_to_bins_metabric(clinical_df)
-  }
+  } else if (dataset == "chinese_tn") {
+    treatment_bin_df <- convert_treatments_to_bins_chinese_tn(clinical_df)
+  } else {print("Only implemented for TCGA, METABRIC, and Chinese TN.")}
   input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
                                                          treatment_bin_df)
-  # CANCER TYPE OR SUBTYPE
-  cancer_type_bin_df <- convert_ct_to_bins(subtype_file, clinical_df, input_dataframe_updated, 
-                                           is_pc, additional_subtype_info, dataset)
-  input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated,
-                                                         cancer_type_bin_df)
+
   # TOTAL NUM MUTATIONS
-  if(dataset == 'tcga') {
+  if((dataset == 'tcga') | (dataset == 'chinese_tn')) {
     tot_num_mut_df <- convert_tot_num_mut_to_bins(clinical_df$Total.Num.Muts, dataset)
   } else if (dataset == 'metabric') {
-    tot_num_mut_df <- convert_tot_num_mut_to_bins(log2(clinical_df$TMB_NONSYNONYMOUS +1), dataset)
-  }
+    tot_num_mut_df <- convert_tot_num_mut_to_bins(log2(clinical_df$TMB_NONSYNONYMOUS + 1), dataset)
+  } else {print("Only implemented for TCGA, METABRIC, and Chinese TN.")}
   input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated, 
                                                          tot_num_mut_df)
   # SMARTPCA PCs
@@ -341,8 +410,15 @@ input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_
   # CNA NEIGHBORING DRIVERS
   #cna_neighbor_df_binned <- convert_cna_neighbors_to_bins(cna_neighbor_df)
   #input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated,
-                                                         #cna_neighbor_df_binned)
-
+  #cna_neighbor_df_binned)
+  
+  # CANCER TYPE OR SUBTYPE
+  if(length(subtype_file) >= 1) {
+    cancer_type_bin_df <- convert_ct_to_bins(subtype_file, clinical_df, input_dataframe_updated, 
+                                             is_pc, additional_subtype_info, dataset)
+    input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated,
+                                                           cancer_type_bin_df)
+  }
   return(input_dataframe_updated)
 }
 
@@ -551,6 +627,26 @@ convert_treatments_to_bins_metabric <- function(clinical_df) {
 }
 
 
+############################################################ 
+
+#' Chinese TN-specific function for converting treatment to bins. Though there
+#' is information about surgical treatment as well, currently only includes information
+#' about radiation and chemotherapy
+#' @param clinical_df a patient clinical DF from METABRIC
+convert_treatments_to_bins_chinese_tn <- function(clinical_df) {
+  treatment_df <- data.frame(matrix(nrow = nrow(clinical_df), ncol = 2))
+  rownames(treatment_df) <- clinical_df$Project_ID
+  colnames(treatment_df) <- c("Treatment_rad", "Treatment_pharm")
+  
+  for(i in 1:nrow(clinical_df)) {
+    # Get radiation status
+    treatment_df[i, 'Treatment_rad'] <- ifelse(clinical_df[i, 'Radiotherapy'] == "TRUE", 1, 0)
+    # Get pharmacological status
+    treatment_df[i, 'Treatment_pharm'] <- ifelse(clinical_df[i, 'Chemotherapy'] == "TRUE", 1, 0)
+  }
+  return(treatment_df)
+}
+
 ############################################################
 
 #' Takes the vector of patient characteristics and adds buckets for the 
@@ -572,28 +668,23 @@ add_cancer_type <- function(patient_characteristics, is_pc, subtype_file,
   # Pan-Cancer: look at cancer type
   if (is_pc) {
     # Find how many unique cancer types there are in total
-    #unique_cts <- unique(subtype_file$cancer.type)
-    #length_cts <- length(unique_cts)
     unique_cts <- unique(clinical_df$project_id)
-    print(head(unique_cts))
-    
+    unique_cts <- unlist(lapply(unique_cts, function(ct) unlist(strsplit(ct, "-", fixed = TRUE))[2]))
+
     # If we are including additional cancer subtypes with our other cancer types, do this now
-    if(!is.na(additional_subtype_info)) {
+    if(length(additional_subtype_info) >= 1) {
       # Remove the broader "cancer type" label for the cancer types that have subtype information we want to include
       unique_cts <- unique_cts[!grepl(paste(names(additional_subtype_info), collapse = "|"), unique_cts)]
-      unique_subtypes <- unlist(lapply(1:length(additional_subtype_info), function(i) {
+      unique_subtypes <- unique(unlist(lapply(1:length(additional_subtype_info), function(i) {
         subtype_df <- additional_subtype_info[[i]]
-        if(grepl("subtype", colnames(subtype_file), ignore.case = TRUE)) {
-          unique_sub <- unique(unlist(subtype_file[ ,grepl("subtype", colnames(subtype_file),  
-                                                                ignore.case = TRUE)]))
-        } else {
-          unique_sub <- unique(unlist(subtype_file[ ,grepl("mRNA cluster", colnames(subtype_file),  
-                                                                ignore.case = TRUE)]))
-        }
-        unique_sub <- unique_sub[!(is.na(unique_sub) | unique_sub == "NA")]
-        return(unique_sub)
-      }))
+        cancer_name <- names(additional_subtype_info)[i]
+        subtypes <- get_subtype(NA, subtype_df, cancer_name)
+        subtypes_full <- paste(trimws(cancer_name), trimws(subtypes), sep = ".")
+        return(subtypes_full)
+      })))
       unique_cts <- c(unique_cts, unique_subtypes)
+      #unique_cts <- unique(unique_subtypes)
+      print(unique_cts)
     }
     length_cts <- length(unique_cts)
   }
@@ -604,18 +695,23 @@ add_cancer_type <- function(patient_characteristics, is_pc, subtype_file,
     
     if (dataset == 'tcga') {
       if(TRUE %in% grepl("subtype", colnames(subtype_file), ignore.case = TRUE)) {
-        unique_subtypes <- unique(unlist(subtype_file[ ,grepl("subtype", colnames(subtype_file),  
-                                                              ignore.case = TRUE)]))
+        vals <- grepl("subtype", colnames(subtype_file), ignore.case = TRUE)
+        if(length(vals[vals == TRUE]) == 1) {
+          unique_subtypes <- unique(as.character(unlist(subtype_file[ ,grepl("subtype", colnames(subtype_file),  
+                                                           ignore.case = TRUE)])))
+        } else {
+          unique_sub <- unique(as.character(unlist(subtype_file[ ,grepl("MSI_status", colnames(subtype_file),  
+                                                           ignore.case = TRUE)])))
+        }
       } else {
-        unique_subtypes <- unique(unlist(subtype_file[ ,grepl("mRNA cluster", colnames(subtype_file),  
-                                                              ignore.case = TRUE)]))
+        unique_subtypes <- unique(as.character(unlist(subtype_file[ ,grepl("mRNA cluster", colnames(subtype_file),  
+                                                              ignore.case = TRUE)])))
       }
     } else if (dataset == 'metabric') {
       unique_subtypes <- unique(unlist(clinical_df[, 'CLAUDIN_SUBTYPE']))
       unique_subtypes <- unique_subtypes[unique_subtypes != "claudin-low"]
       
     } else {print("Only implemented for TCGA and METABRIC.")}
-    
     unique_subtypes <- unique_subtypes[!(is.na(unique_subtypes) | unique_subtypes == "NA")]
     length_cts <- length(unique_subtypes)
     
@@ -638,7 +734,7 @@ add_cancer_type <- function(patient_characteristics, is_pc, subtype_file,
 #' in that bin, 1 if they are)
 #' @param subtype_file a file from TCGAbiolinks that has information about subtypes
 #' or, alternatively (if pan-cancer) a file that identifies the cancer type of 
-#' each sample (TODO: make this file!)
+#' each sample 
 #' @param clinical_df clinical data file from the TCGA for the given patient cohort
 #' @param input_dataframe_updated the work-in-progress input data frame with all
 #' the patient characteristics for the linear model
@@ -657,20 +753,42 @@ convert_ct_to_bins <- function(subtype_file, clinical_df, input_dataframe_update
                                  bucket_num = 1:ncol(cancer_type_bin_df))
 
   patients_w_subtype_info <- c()
-  if(!is.na(additional_subtype_info)) {
-    patients_w_subtype_info <- unlist(lapply(additional_subtype_info, function(x) {
-      pats <- unlist(lapply(as.character(x$patient), function(p) 
-        unlist(strsplit(p, "-", fixed = TRUE))[3]))
-      return(pats)                       
-    }))
+  cancer_types_no_subtype_info <- NA
+  
+  if(length(additional_subtype_info) >= 1) {
+    if(length(additional_subtype_info) == 1) {
+      if(!is.na(additional_subtype_info)) {
+        patients_w_subtype_info <- unlist(lapply(additional_subtype_info, function(x) {
+          pats <- unlist(lapply(as.character(x$patient), function(p) 
+            unlist(strsplit(p, "-", fixed = TRUE))[3]))
+          return(pats)                       
+        }))
+      } 
+    } else {
+      patients_w_subtype_info <- unlist(lapply(additional_subtype_info, function(x) {
+        pats <- unlist(lapply(as.character(x$patient), function(p) 
+          unlist(strsplit(p, "-", fixed = TRUE))[3]))
+        return(pats)                       
+      }))
+    }
+    
+    if(is_pc) {
+      cancer_types_no_subtype_info <- setdiff(unique(unlist(lapply(clinical_df$project_id, function(x) 
+        unlist(strsplit(x, "-", fixed = TRUE))[2]))), names(additional_subtype_info))
+    }
   }
+  print(length(patients_w_subtype_info))
+  print(nrow(cancer_type_bin_df))
+  print(cancer_type_bin_df)
   
   # Go through each patient and find their subtype/type info, then add to the appropriate bucket
   for (i in 1:nrow(cancer_type_bin_df)) {
     patient_id <- rownames(cancer_type_bin_df)[i]
     #print(patient_id)
     
-    ct <- NA
+    ct <- as.character(unlist(clinical_df[grepl(patient_id, clinical_df$case_submitter_id), 
+                                                'project_id']))
+    ct <- unlist(strsplit(ct, "-", fixed = TRUE))[2]
     
     # Pan-cancer: get the cancer type
     if (is_pc) {
@@ -679,39 +797,40 @@ convert_ct_to_bins <- function(subtype_file, clinical_df, input_dataframe_update
         pat_found <- 0
         for(v in 1:length(additional_subtype_info)) {
           subtype_df <- additional_subtype_info[[v]]
-          if(TRUE %in% grepl(patient_id, subtype_df$patient)) {
-            if(TRUE %in% grepl("subtype", colnames(subtype_file), ignore.case = TRUE)) {
-              ct <- as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
-                                                   grepl("subtype", colnames(subtype_df), 
-                                                         ignore.case = TRUE)]))
-            } else {
-              ct <- as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
-                                                   grepl("mRNA cluster", colnames(subtype_df), 
-                                                         ignore.case = TRUE)]))
-            }
-            ct <- paste(names(additional_subtype_info)[v], ct, collapse = ".")
+          cancer_name <- names(additional_subtype_info)[v]
+          if((TRUE %in% grepl(patient_id, subtype_df$patient)) | (TRUE %in% grepl(patient_id, subtype_df$sample))) {
+            st <- get_subtype(patient_id, subtype_df, cancer_name)[1]
+            ct <- paste(trimws(cancer_name), trimws(st), sep = ".")
             pat_found <- 1
           }
         }
         if(pat_found == 0) {
-          ct <- as.character(unlist(clinical_df[grepl(patient_id, clinical_df$case_submitter_id), 
-                                                'project_id']))
-          ct <- unlist(strsplit(ct, "-", fixed = TRUE))[2]
-        }
-      } else {
-        ct <- as.character(unlist(clinical_df[grepl(patient_id, clinical_df$case_submitter_id), 
-                                              'project_id']))
-        ct <- unlist(strsplit(ct, "-", fixed = TRUE))[2]
-      }
+          print("Patient not found in additional subtype info")
+          if(!(ct %in% cancer_types_no_subtype_info)) {
+            ct <- paste(ct, "NA", sep = ".")
+          }
+          #ct <- "Not Evaluable"
+          #ct <- paste(ct, "NA", sep = ".")
+        } 
+      } 
+      if(length(ct) == 0) {ct <- "Not Evaluable"}
       print(paste("CT:", ct))
     } 
     # Not pan-cancer: get the cancer subtype
     else {
       if(dataset == "tcga") {
         if(TRUE %in% grepl("subtype", colnames(subtype_file), ignore.case = TRUE)) {
-          ct <- as.character(unlist(subtype_file[grepl(patient_id, subtype_file$patient), 
-                                                 grepl("subtype", colnames(subtype_file), 
-                                                       ignore.case = TRUE)]))
+          vals <- grepl("subtype", colnames(subtype_file), ignore.case = TRUE)
+          if(length(vals[vals == TRUE]) == 1) {
+            ct <- as.character(unlist(subtype_file[grepl(patient_id, subtype_file$patient), 
+                                                   grepl("subtype", colnames(subtype_file), 
+                                                         ignore.case = TRUE)]))
+          } else {
+            ct <- as.character(unlist(subtype_file[grepl(patient_id, subtype_file$patient), 
+                                                   grepl("MSI_status", colnames(subtype_file), 
+                                                         ignore.case = TRUE)]))
+          }
+
         } else {
           ct <- as.character(unlist(subtype_file[grepl(patient_id, subtype_file$patient), 
                                                  grepl("mRNA cluster", colnames(subtype_file), 
@@ -724,7 +843,8 @@ convert_ct_to_bins <- function(subtype_file, clinical_df, input_dataframe_update
       } else {print("Only implemented for TCGA and METABRIC.")}
       
     }
-
+    #print(paste("CT:", ct))
+    
     # If this cancer type isn't already in the cancer type-to-bucket mapping, add it
     if(!(ct %in% ct_to_bucket_map$ct)) {
       # Add a new entry to the map (replace the next NA)
@@ -745,6 +865,127 @@ convert_ct_to_bins <- function(subtype_file, clinical_df, input_dataframe_update
   # Return the newly binned DF (with patient IDs that match the order of the growing
   # input DF)
   return(cancer_type_bin_df)
+}
+
+
+#' Helper function that gets the subtype for a given patient of interest
+#' @param patient_id the patient ID; if patient ID is NA, return all the unique subtypes for the given CT
+#' @param subtype_df the subtype DF for the particular subtype in which the patient is found
+#' @param name the name of the cancer type
+get_subtype <- function(patient_id, subtype_df, name) {
+  if(!is.na(patient_id)) {
+    st <- switch(name,
+                 "COAD" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("MSI", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "READ" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("MSI", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "ESCA" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("MSI", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "ACC" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                        grepl("COC", colnames(subtype_df), 
+                                                              ignore.case = TRUE)])),
+                 "BRCA" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("PAM50", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "BLCA" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("mRNA cluster", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "CESC" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("SAMP:CIMP_call", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "CHOL" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("mRNA-seq", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "PRAD" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("SUBTYPE", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "SKCM" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("RNASEQ.CLUSTER", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "GBM" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                        grepl("Original.Subtype", colnames(subtype_df), 
+                                                              ignore.case = TRUE)])),
+                 "LGG" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                        grepl("Original.Subtype", colnames(subtype_df), 
+                                                              ignore.case = TRUE)])),
+                 "HNSC" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("RNA", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "KICH" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("Histological.Subtype", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "KIRC" = "", # no real subtypes, is already a subtype of RCC
+                 "KIRP" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("tumor_type.KIRP.path.", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "KICH" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("Histological.Subtype", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "LIHC" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("iCluster", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "LUAD" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("iCluster", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "LUSC" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("Expression.Subtype", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "PAAD" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("Histological type by RHH", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "PCPG" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("mRNA Subtype Clusters", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "SARC" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("short histo", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "STAD" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("Molecular.Subtype", colnames(subtype_df), 
+                                                               ignore.case = TRUE)])),
+                 "THCA" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$sample), 
+                                                         (colnames(subtype_df) == "mRNA_Cluster_number")])),
+                 "UCEC" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                         grepl("msi", colnames(subtype_df), ignore.case = TRUE)])),
+                 "UCS" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                        colnames(subtype_df) == "histologic subtype"])),
+                 "UVM" = as.character(unlist(subtype_df[grepl(patient_id, subtype_df$patient), 
+                                                        grepl("mRNA Cluster", colnames(subtype_df), ignore.case = TRUE)])))
+  } else {
+    st <- switch(name,
+                 "COAD" = unique(as.character(unlist(subtype_df[, grepl("MSI", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "READ" = unique(as.character(unlist(subtype_df[, grepl("MSI", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "ESCA" = unique(as.character(unlist(subtype_df[, grepl("MSI", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "ACC" = unique(as.character(unlist(subtype_df[, grepl("COC", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "BRCA" = unique(as.character(unlist(subtype_df[, grepl("PAM50", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "BLCA" = unique(as.character(unlist(subtype_df[, grepl("mRNA cluster", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "CESC" = unique(as.character(unlist(subtype_df[, grepl("SAMP:CIMP_call", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "CHOL" = unique(as.character(unlist(subtype_df[, grepl("mRNA-seq", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "PRAD" = unique(as.character(unlist(subtype_df[, grepl("SUBTYPE", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "SKCM" = unique(as.character(unlist(subtype_df[, grepl("RNASEQ.CLUSTER", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "GBM" = unique(as.character(unlist(subtype_df[, grepl("Original.Subtype", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "LGG" = unique(as.character(unlist(subtype_df[, grepl("Original.Subtype", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "HNSC" = unique(as.character(unlist(subtype_df[, grepl("RNA", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "KICH" = unique(as.character(unlist(subtype_df[, grepl("Histological.Subtype", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "KIRC" = "", # no real subtypes, is already a subtype of RCC
+                 "KIRP" = unique(as.character(unlist(subtype_df[, grepl("tumor_type.KIRP.path.", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "KICH" = unique(as.character(unlist(subtype_df[, grepl("Histological.Subtype", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "LIHC" = unique(as.character(unlist(subtype_df[, grepl("iCluster", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "LUAD" = unique(as.character(unlist(subtype_df[, grepl("iCluster", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "LUSC" = unique(as.character(unlist(subtype_df[, grepl("Expression.Subtype", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "PAAD" = unique(as.character(unlist(subtype_df[, grepl("Histological type by RHH", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "PCPG" = unique(as.character(unlist(subtype_df[, grepl("mRNA Subtype Clusters", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "SARC" = unique(as.character(unlist(subtype_df[, grepl("short histo", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "STAD" = unique(as.character(unlist(subtype_df[, grepl("Molecular.Subtype", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "THCA" = unique(as.character(unlist(subtype_df[, colnames(subtype_df) == "mRNA_Cluster_number"]))),
+                 "UCEC" = unique(as.character(unlist(subtype_df[, grepl("msi", colnames(subtype_df), ignore.case = TRUE)]))),
+                 "UCS" = unique(as.character(unlist(subtype_df[, colnames(subtype_df) == "histologic subtype"]))),
+                 "UVM" = unique(as.character(unlist(subtype_df[, grepl("mRNA Cluster", colnames(subtype_df), ignore.case = TRUE)]))))
+    st <- unique(c(st, "NA"))
+  }
+  return(st)
 }
 
 

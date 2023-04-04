@@ -13,13 +13,13 @@ library(gdata)
 library(matrixStats)
 library(data.table)
 library("gplots")
-library(preprocessCore)
+#library(preprocessCore)
 
 # This file processes the various expression data files for each patient to:
 # Combine the files across various patients into a single data frame that we can 
 # easily access in our linear model
 
-# Format of output dataframe: 
+# Format of output data frame: 
 # Rows : Genes (ENSG ID)
 # Columns : Sample ID 
     # TCGA ID, ex TCGA-AR-A10Z-01A, where "AR" is cohort ID, "A10Z" is patient ID, "01A" is sample ID)
@@ -41,38 +41,36 @@ all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Proje
 
 ############################################################
 ############################################################
+### UPDATED: USE STAR COUNT TSV FILES ###
+############################################################
+############################################################
+
+############################################################
 ### IMPORT PATIENT TCGA IDS & SAMPLE SHEETS ###
 ############################################################
-############################################################
-# Unique patient TCGA IDs
+## BRCA ##
 patient_tcga_ids <- read.table(paste(path, "unique_brca_patient_ids_2.txt", sep = ""), header =  TRUE)[,1]
-# patient_tcga_ids <- read.table(paste(path, "unique_patient_ids_2.txt", sep = ""), header =  TRUE)[,'x']
-
-# IF NEEDED FOR PAN-CANCER: Merge multiple files
-#' This function merges the sample sheets for pan-cancer expression data, if needed
-#' @param path the path to the sample sheets
-merge_ss_files <- function(path) {
-  sample_sheet1 <- read.csv(paste(path, paste("Expression_Data/Counts/", "gdc_sample_sheet.pt1.csv", sep = ""), sep = ""))
-  sample_sheet2 <- read.csv(paste(path, paste("Expression_Data/Counts/", "gdc_sample_sheet.pt2.csv", sep = ""), sep = ""))
-  merged_ss <- rbind(sample_sheet1, sample_sheet2)
-  return(merged_ss)
-}
-# Run function
-sample_sheet <- merge_ss_files(path)
-
-# Write this back to file 
-write.csv(sample_sheet, paste(path, "Expression_Data/Counts/gdc_sample_sheet_total.csv", sep = ""))
 
 # Import the GDC sample sheet for file conversions
-sample_sheet <- read.csv(paste(path, "Expression_Data/Counts/gdc_sample_sheet.csv", sep = ""), header = TRUE, 
-                         check.names = FALSE, row.names = 1)
-#sample_sheet <- read.csv(paste(path, "Expression_Data/Counts/gdc_sample_sheet_total.csv", sep = ""), header = TRUE, 
-                         #check.names = FALSE, row.names = 1)
-#sample_sheet <- read.csv(paste(path, "Expression_Data/FPKM/gdc_sample_sheet.csv", sep = ""), header = TRUE, 
-#check.names = FALSE, row.names = 1)
+sample_sheet <- read.csv(paste(path, "Expression_Data/gdc_sample_sheet.tsv", sep = ""), 
+                         header = TRUE, check.names = FALSE, sep = "\t")
 
-sample_sheet$`File Name` <- unlist(lapply(sample_sheet$`File Name`, function(x) 
-  paste(unlist(strsplit(x, ".", fixed = TRUE))[1:3], collapse = ".")))
+
+## PAN-CANCER ##
+patient_tcga_ids <- read.table(paste(path, "unique_patient_ids_2.txt", sep = ""), header =  TRUE)[,'x']
+sample_sheet <- read.csv(paste(path, "Expression_Data/gdc_sample_sheet_total.csv", sep = ""), header = TRUE, 
+                         check.names = FALSE)   # Combined if split into multiple files during download
+sample_sheet_edgeR <- read.csv(paste(path, "Expression_Data/gdc_sample_sheet_for_edgeR.csv", sep = ""), 
+                               header = TRUE, check.names = FALSE)
+
+# Create a separate version of this sample sheet that aligns with edgeR input: 3 columns,
+# 'files', 'group', and 'description'
+sample_sheet_edgeR <- data.frame("files" = sample_sheet$`File Name`, "description" = sample_sheet$`Sample ID`,
+                                 "group" = sample_sheet$`Sample Type`)
+write.csv(sample_sheet_edgeR, paste0(path, "Expression_Data/gdc_sample_sheet_for_edgeR.csv"))
+
+sample_sheet_subset <- subset_samp_sheet(patient_tcga_ids, sample_sheet, "original")
+sample_sheet_subset_edgeR <- subset_samp_sheet(patient_tcga_ids, sample_sheet_edgeR, "edgeR")
 
 #' Subset sample sheet to only patients of interest
 #' @param patient_tcga_ids vector of the 4-digit patient TCGA IDs of interest
@@ -92,14 +90,306 @@ subset_samp_sheet <- function(patient_tcga_ids, sample_sheet, version) {
   return(sample_sheet_subset)
 }
 
+
+############################################################
+### LIMIT TO CANCER SAMPLES ONLY ###
+############################################################
+# For pan-cancer, combine "Primary Tumor" and "Additional - New Primary" together
+sample_sheet_subset_edgeR[which(sample_sheet_subset_edgeR$group == "Additional - New Primary"), 'group'] <- "Primary Tumor"
+
+# For BRCA and pan-cancer, remove the solid tissue normal samples
+sample_sheet_subset_edgeR_to <- sample_sheet_subset_edgeR[!(sample_sheet_subset_edgeR$group %fin% c('Solid Tissue Normal')), ]  #7890 samples PC
+
+
+############################################################
+### SPLIT PAN-CANCER SAMPLE SHEET BY CANCER TYPES ###
+############################################################
+# If pan-cancer, split apart the file into individual cancer types
+#' Takes a targets object (GDC sample sheet in edgeR-accepted format) and breaks
+#' it into a list of targets objects, each containing only the samples from the same
+#' cancer type
+#' @param targets the targets object created from importing a GDC sample sheet
+#' in edgeR-accepted format
+#' @param dictionary a two-column file that relates each TCGA sample ID to its 
+#' corresponding cancer type
+split_by_ct <- function(targets, dictionary) {
+  # Add a temporary column with the cancer types that we can use to split apart
+  # the data frame
+  targets$cancer.types <- unlist(lapply(targets$description, function(samp_id) {
+    proj_id <- dictionary[dictionary$`Sample ID` == samp_id, 'Project ID']
+    ct <- unlist(strsplit(proj_id, "-", fixed = TRUE))[2]
+    return(ct)
+  }))
+  
+  # Split the data frame based on the cancer type
+  sub_targets <- lapply(unique(targets$cancer.types), function(ct) {
+    sub_t <- targets[targets$cancer.types == ct, c('files', 'group', 'description')]
+    return(sub_t)
+  })
+  
+  # Add the cancer type name to the list
+  names(sub_targets) <- unique(targets$cancer.types)
+  
+  return(sub_targets)
+}
+
+dictionary <- sample_sheet[,c('Sample ID', 'Project ID')]
+list_of_ct_targets <- split_by_ct(sample_sheet_subset_edgeR_to, dictionary)
+
+# Remove any duplicate rows
+list_of_ct_targets <- lapply(list_of_ct_targets, distinct)
+
+
+############################################################
+### PRE-PROCESS STAR FILES TO CREATE COUNT MATRICES ###
+############################################################
+# For BRCA:
+exp_file_path <- paste0(path, "Expression_Data/")
+# For Pan Cancer:
+exp_file_path <- "D:/Pan-Cancer Expression Data/"
+
+expression_files <- list.files(exp_file_path, pattern = "star_gene_counts", recursive = F)
+#column_names <- colnames(fread(paste0(exp_file_path, expression_files[1]), header = T, sep = "\t", 
+                   #check.names = F, skip = 1))
+for (name in expression_files) {
+  print(name)
+  fn <- paste0(exp_file_path, name)
+  file <- fread(fn, header = F, sep = "\t", check.names = F, skip = 6, select = c(1,4))
+  fwrite(file, paste0(path, paste0("Expression_Data/Counts/", name)), col.names = F, sep = "\t")
+}
+
+
+############################################################
+### FILTERING & NORMALIZATION USING EDGER ###
+############################################################
+#' Takes a subsetted gene targets expression data frame (counts) and, using the
+#' edgeR package, TMM normalizes the counts. Returns the TMM-normalized
+#' expression data frame.
+#' @param targets a count expression data frame, subsetted to only include
+#' patients of interest 
+#' @param local_path local path to the directory with the expression files
+normalize_counts_edgeR <- function(targets, local_path) {
+  
+  d <- readDGE(targets, path = local_path, columns = c(1,2))
+  print(dim(d$counts))
+  
+  # Remove MetaTags
+  #meta_tags <- grep("^__", rownames(d))
+  #d <- d[-meta_tags,]
+  #print(dim(d$counts))
+  
+  # Filter out tags that are not expressed in at least four libraries
+  #keep <- rowSums(cpm(d) > 1) >= 4
+  
+  # Alternatively, use edgeR's filterByExpr() function
+  # Function documentation: https://rdrr.io/bioc/edgeR/man/filterByExpr.html
+  keep <- filterByExpr(cpm(d), group = "group") 
+  d <- d[keep,]
+  
+  # Reset the library sizes
+  d$samples$lib.size <- colSums(d$counts)
+  
+  # Reset the colnames to the sample names
+  colnames(d$counts) <- d$samples$description
+  
+  # Perform TMM normalization
+  d <- calcNormFactors(d, method = "TMM")
+  # Alternatively, use the upper-quartile normalization method ("upperquartile") or the relative log
+  # expression normalization method ("RLE")
+  
+  return(d)
+}
+
+# Call this function
+d <- normalize_counts_edgeR(sample_sheet_subset_edgeR_to, paste0(path, "Expression_Data/Counts/"))
+# Or, if we are looking pan-cancer, apply to each list
+d_list <- lapply(list_of_ct_targets, function(x) {
+  tryCatch({
+    d <- normalize_counts_edgeR(x, paste0(path, "Expression_Data/Counts/"))
+    return(d)
+  }, error = function(cond) {
+    print(cond)
+  })
+})
+
+#' DGEList Function to get the TMM-normalized counts using TMM factors
+cpm.DGEList <- function(y, normalized.lib.sizes=TRUE, log=FALSE, prior.count=0.25, ...) {
+  lib.size <- y$samples$lib.size
+  if(normalized.lib.sizes) lib.size <- lib.size * y$samples$norm.factors
+  cpm.default(y$counts, lib.size = lib.size, log = log, prior.count = prior.count)
+}
+
+tmm <- cpm(d)
+# Or, if we are looking pan-cancer, apply to each item in list
+tmm_list <- lapply(d_list, cpm)
+
+# Optionally remove the dot from the ENSG IDs
+rownames(tmm) <- unlist(lapply(rownames(tmm), function(x) 
+  unlist(strsplit(x, ".", fixed = TRUE))[1]))
+# Or, if we are looking pan-cancer, apply to each item in list
+tmm_list <- lapply(tmm_list, function(tmm) {
+  rownames(tmm) <- unlist(lapply(rownames(tmm), function(x) 
+    unlist(strsplit(x, ".", fixed = TRUE))[1]))
+  return(tmm)
+})
+
+############################################################
+### OPT: ESTIMATE & VISUALIZE DISPERSION ###
+############################################################
+#' Estimate and visualize dispersion
+#' @param d edgeR output data structure to visualize
+visualize_dispersion <- function(d) {
+  #d <- estimateCommonDisp(d, verbose = TRUE)
+  # BRCA: Disp = 0.92427 , BCV = 0.9614
+  # Pan-Cancer: 
+  #d <- estimateTagwiseDisp(d, trend="none")
+  #plotBCV(d, cex=0.4)
+  
+  d <- estimateDisp(d)
+  plotBCV(d, cex=0.4)
+  
+  return(d)
+}
+visualize_dispersion(d)
+# Or, if we are looking pan-cancer, apply to each item in list
+lapply(d_list, visualize_dispersion)
+
+
+############################################################
+### WRITE NORMALIZED RESULTS TO FILES ###
+############################################################
+# BRCA #
+write.csv(d$samples, paste(output_path, "samples.csv", sep = ""))
+write.csv(d$counts, paste(output_path, "expression_counts_DF_edgeRfilt_TO.csv", sep = ""))
+write.csv(tmm, paste(output_path, "tmm_normalized_expression_counts.csv", sep = ""))
+
+# PAN-CANCER #
+for (i in 1:length(d_list)) {
+  d <- d_list[[i]]
+  tmm <- tmm_list[[i]]
+  write.csv(d$samples, paste(output_path, paste(names(d_list)[i], "samples.csv", sep = "_"), sep = ""))
+  write.csv(d$counts, paste(output_path, paste(names(d_list)[i], "expression_counts_DF_edgeRfilt_TO.csv", sep = "_"), sep = ""))
+  write.csv(tmm, paste(output_path, paste(names(d_list)[i], "tmm_normalized_expression_counts.csv", sep = "_"), sep = ""))
+}
+
+# Merge count files into master files
+d_list_counts <- lapply(d_list, function(d) as.data.frame(d$counts))
+d_list_counts <- lapply(d_list_counts, tibble::rownames_to_column)
+d_counts_full <- d_list_counts %>% purrr::reduce(full_join, by = 'rowname')
+rownames(d_counts_full) <- d_counts_full$rowname
+d_counts_full <- d_counts_full[,2:ncol(d_counts_full)]
+write.csv(d_counts_full, paste(output_path, "ALL_CT_expression_counts_DF_edgeRfilt_TO.csv", sep = ""))
+
+
+# Also, merge TMM-normalized expression and samples into "master files" and write these as well
+tmm_list <- lapply(tmm_list, as.data.frame)
+tmm_list <- lapply(tmm_list, tibble::rownames_to_column)
+tmm_normalized_full <- tmm_list %>% purrr::reduce(full_join, by = 'rowname')
+rownames(tmm_normalized_full) <- tmm_normalized_full$rowname
+tmm_normalized_full <- tmm_normalized_full[,2:ncol(tmm_normalized_full)]
+write.csv(tmm_normalized_full, paste(output_path, "ALL_CT_tmm_normalized_expression_counts.csv", sep = ""))
+
+samples_list <- lapply(d_list, function(d) return(as.data.frame(d$samples)))
+samples_full <- do.call(rbind, samples_list)
+write.csv(samples_full, paste(output_path, "ALL_CT_tmm_normalized_expression_samples.csv", sep = ""))
+
+samples_full_to <- samples_full[grepl("-0", samples_full$description),]
+write.csv(samples_full_to, paste(output_path, "ALL_CT_tmm_normalized_expression_samples_TO.csv", sep = ""))
+
+
+##### RUN THROUGH QUANTILE-NORMALIZATION PIPELINE USING QUANTILE_NORMALIZE_EXPRESSION.PY SCRIPT #####
+
+
+# Recombine expression files that have been individually quantile-normalized per cancer type 
+# into one file
+qn_expression_fns <- list.files(output_path, pattern = "quantile_normalized_sklearn.csv")
+qn_expression_dfs <- lapply(qn_expression_fns, function(x) {
+  f <- fread(paste0(output_path, x), header = T)
+  colnames(f)[1] <- "ensg_id"
+  return(f)
+})
+qn_expression_df_full <- qn_expression_dfs %>% purrr::reduce(full_join, by = 'ensg_id')
+rownames(qn_expression_df_full) <- qn_expression_df_full$ensg_id
+qn_expression_df_full <- qn_expression_df_full[, which(colnames(qn_expression_df_full) != 'ensg_id'), with = F]
+write.csv(qn_expression_df_full, paste0(output_path, "ALL_CT_expression_quantile_normalized_sklearn.csv"))
+
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+
+############################################################
+############################################################
+### ARCHIVAL: USE HTSEQ COUNT FILES ###
+############################################################
+############################################################
+
+############################################################
+### IMPORT PATIENT TCGA IDS & SAMPLE SHEETS ###
+############################################################
+# Unique patient TCGA IDs
+patient_tcga_ids <- read.table(paste(path, "unique_brca_patient_ids_2.txt", sep = ""), header =  TRUE)[,1]
+# patient_tcga_ids <- read.table(paste(path, "unique_patient_ids_2.txt", sep = ""), header =  TRUE)[,'x']
+
+# Import the GDC sample sheet for file conversions
+sample_sheet <- read.csv(paste(path, "Expression_Data/Counts/gdc_sample_sheet.csv", sep = ""), header = TRUE, 
+                         check.names = FALSE, row.names = 1)
+#sample_sheet <- read.csv(paste(path, "Expression_Data/Counts/gdc_sample_sheet_total.csv", sep = ""), header = TRUE, 
+#check.names = FALSE, row.names = 1)
+#sample_sheet <- read.csv(paste(path, "Expression_Data/FPKM/gdc_sample_sheet.csv", sep = ""), header = TRUE, 
+#check.names = FALSE, row.names = 1)
+
+sample_sheet$`File Name` <- unlist(lapply(sample_sheet$`File Name`, function(x) 
+  paste(unlist(strsplit(x, ".", fixed = TRUE))[1:3], collapse = ".")))
+
+# IF NEEDED FOR PAN-CANCER: Merge multiple files
+#' This function merges the sample sheets for pan-cancer expression data, if needed
+#' @param path the path to the sample sheets
+merge_ss_files <- function(path) {
+  sample_sheet1 <- read.csv(paste(path, paste("Expression_Data/Counts/", "gdc_sample_sheet.pt1.csv", sep = ""), sep = ""))
+  sample_sheet2 <- read.csv(paste(path, paste("Expression_Data/Counts/", "gdc_sample_sheet.pt2.csv", sep = ""), sep = ""))
+  merged_ss <- rbind(sample_sheet1, sample_sheet2)
+  return(merged_ss)
+}
+# Run function
+sample_sheet <- merge_ss_files(path)
+
+# Write this back to file 
+write.csv(sample_sheet, paste(path, "Expression_Data/Counts/gdc_sample_sheet_total.csv", sep = ""))
+
+
+#' Subset sample sheet to only patients of interest
+#' @param patient_tcga_ids vector of the 4-digit patient TCGA IDs of interest
+#' @param sample_sheet the GDC sample sheet we'd like to subset by patients
+#' @param version a string (either "original" or "edgeR") which indicates the 
+#' sample sheet format
+subset_samp_sheet <- function(patient_tcga_ids, sample_sheet, version) {
+  indices_of_int <- unlist(lapply(patient_tcga_ids, function(x) {
+    if (version == "original") {return(which(grepl(x, sample_sheet$Sample.ID)))}
+    else if (version == "edgeR") {return(which(grepl(x, sample_sheet$description)))}
+    else {
+      print(paste("Unknown version,", version))
+      return(NA)
+    }
+  }))
+  sample_sheet_subset <- sample_sheet[indices_of_int,]
+  return(sample_sheet_subset)
+}
+
 sample_sheet_subset <- subset_samp_sheet(patient_tcga_ids, sample_sheet, "original")
 sample_sheet_subset <- subset_samp_sheet(patient_tcga_ids, sample_sheet, "edgeR")
 
 
-############################################################
+
 ############################################################
 ### FILTERING & NORMALIZATION: COUNTS ONLY ###
-############################################################
 ############################################################
 
 ############################################################
@@ -122,18 +412,17 @@ targets_sub <- subset_samp_sheet(patient_tcga_ids, targets, "edgeR")
 # targets_sub$files <- unlist(lapply(targets_sub$files, function(x) 
   #paste(unlist(strsplit(x, ".", fixed = TRUE))[1:2], collapse = "."))
 
-targets_sub$files <- unlist(lapply(targets_sub$files, function(x) {
-   if (endsWith(x, ".htseq.counts.txt")) {
-     begin <- unlist(strsplit(x, ".", fixed = TRUE))[1]
-     return(paste(begin, "htseq.counts", sep = "."))
-   } else {return(x)}
- }))
+#targets_sub$files <- unlist(lapply(targets_sub$files, function(x) {
+#   if (endsWith(x, ".htseq.counts.txt")) {
+#     begin <- unlist(strsplit(x, ".", fixed = TRUE))[1]
+#     return(paste(begin, "htseq.counts", sep = "."))
+#   } else {return(x)}
+# }))
 
 # Limit data frame to only those entries that overlap the files we have
 split_fn <- unlist(lapply(targets_sub$files, function(x) unlist(strsplit(x, "/", fixed = TRUE))[11]))
 targets_sub2 <- targets_sub[which(unlist(lapply(split_fn, function(x) 
-  x %fin% list.files(paste(path, "Expression_Data/Counts/", sep = ""), 
-                     pattern = ".htseq")))),]
+  x %fin% list.files(paste0(path, "Expression_Data/Counts/"), pattern = ".htseq")))),]
 
 # OPTIONAL: also limit DF to only cancer samples
 targets_sub3 <- targets_sub2[targets_sub2$group != 'Solid Tissue Normal',]
@@ -211,7 +500,7 @@ prot_of_interest <- "TP53"  # TP53
 # prot_of_interest <- "PIK3CA"  # PIK3CA
 
 # Import the mutation count DF
-mut_count_matrix <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_missense_nonsense_CancerOnly_IntersectPatients.csv",
+mut_count_matrix <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_nonsynonymous_CancerOnly_IntersectPatients.csv",
                          header = TRUE, check.names = FALSE, row.names = 1)
 
 targets_sub3_groupedByTP53Mut <- group_by_mutation_status(targets_sub3, prot_of_interest, mut_count_matrix)
@@ -219,6 +508,7 @@ targets_sub3_groupedByTP53Mut <- distinct(targets_sub3_groupedByTP53Mut)
 
 targets_sub3_groupedByPIK3CAMut <- group_by_mutation_status(targets_sub3, prot_of_interest, mut_count_matrix)
 targets_sub3_groupedByPIK3CAMut <- distinct(targets_sub3_groupedByPIK3CAMut)
+
 
 ############################################################
 ### USE EDGER FOR COUNT NORMALIZATION (TMM) ###
@@ -246,8 +536,6 @@ normalize_counts_edgeR <- function(targets) {
   # Function documentation: https://rdrr.io/bioc/edgeR/man/filterByExpr.html
   keep <- filterByExpr(cpm(d), group = "group") 
   d <- d[keep,]
-  
-  # BRCA: went from 60482x840 to 24109x840
 
   # Reset the library sizes
   d$samples$lib.size <- colSums(d$counts)
@@ -1053,6 +1341,215 @@ expression_df_tumor_only <- limit_to_tumor_only(expression_df_filt)
 write.csv(expression_df_tumor_only, paste(output_path, "expression_fpkm_filt_gn_DF_TO.csv", sep = ""))
 
 
+############################################################
+############################################################
+### IMPORT AND PROCESS NORMAL GTEx DATA ###
+############################################################
+############################################################
+gtex_reads_breast <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/GTEx/gene_reads_breast_mammary_tissue.gct", 
+                                header = T, check.names = F)
+# Remove the '.' from the ENSG IDs
+gtex_reads_breast$Name <- unlist(lapply(gtex_reads_breast$Name, function(x)
+  unlist(strsplit(x, ".", fixed = TRUE))[1]))
+
+# Limit to only genes found in the output master DF
+gtex_reads_breast_sub <- gtex_reads_breast[gtex_reads_breast$Description %fin% master_df$T_k.name, ]
+gtex_reads_breast_foredgeR <- gtex_reads_breast_sub
+rownames(gtex_reads_breast_foredgeR) <- gtex_reads_breast_foredgeR$Name
+gtex_reads_breast_foredgeR <- gtex_reads_breast_foredgeR[,4:ncol(gtex_reads_breast_foredgeR)]
+
+# TODO: Use edgeR to filter lowly expressed reads and stuff?
+d <- DGEList(counts = gtex_reads_breast_foredgeR)
+
+# Alternatively, use edgeR's filterByExpr() function
+# Function documentation: https://rdrr.io/bioc/edgeR/man/filterByExpr.html
+keep <- filterByExpr(cpm(d)) 
+d <- d[keep,]
+
+# Reset the library sizes
+d$samples$lib.size <- colSums(d$counts)
+
+# Reset the colnames to the sample names
+colnames(d$counts) <- d$samples$description
+
+# Perform TMM normalization
+d <- calcNormFactors(d, method = "TMM")
+
+cpm.DGEList <- function(y, normalized.lib.sizes=TRUE, log=FALSE, prior.count=0.25, ...) {
+  lib.size <- y$samples$lib.size
+  if(normalized.lib.sizes) lib.size <- lib.size * y$samples$norm.factors
+  cpm.default(y$counts, lib.size = lib.size, log = log, prior.count = prior.count)
+}
+
+tmm <- cpm(d)
+colnames(tmm) <- rownames(d$samples)
+
+counts_filtByExpr <- d$counts
+colnames(counts_filtByExpr) <- rownames(d$samples)
+
+# Write to file
+write.csv(counts_filtByExpr, "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/GTEx/gene_reads_breast_mammary_tissue_filtByExpr.csv")
+write.csv(tmm, "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/GTEx/gene_reads_breast_mammary_tissue_filtByExpr_tmm.csv")
+
+# Read back
+counts_filtByExpr <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/GTEx/gene_reads_breast_mammary_tissue_filtByExpr.csv",
+                              header = T, check.names = F, row.names = 1)
+tmm <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/GTEx/gene_reads_breast_mammary_tissue_filtByExpr_tmm.csv",
+                header = T, check.names = F, row.names = 1)
+
+avgGeneExpr <- data.frame("avg.expr" = as.numeric(rowMeans(tmm)), "ensg" = rownames(tmm))
+avgGeneExpr$gene_name <- unlist(lapply(avgGeneExpr$ensg, function(ensg) 
+  gtex_reads_breast_sub[gtex_reads_breast_sub$Name == ensg, 'Description']))
+medianGeneExpr <- data.frame("median.expr" = as.numeric(rowMedians(tmm)), "ensg" = rownames(tmm))
+medianGeneExpr$gene_name <- unlist(lapply(medianGeneExpr$ensg, function(ensg) 
+  gtex_reads_breast_sub[gtex_reads_breast_sub$Name == ensg, 'Description']))
+
+# Multiply these values by the Betas produced from the model, plus the original expression value
+# (for how things change when a driver is mutated)
+mult_expr_by_betas <- function(master_df, goi, geneExpr) {
+  master_df_goi <- master_df[master_df$R_i.name == goi,]
+  colname <- paste("avg.expr.mult.by.betas", goi, sep = ".")
+  geneExpr[,colname] <- unlist(lapply(1:nrow(geneExpr), function(i) {
+    name <- geneExpr$gene_name[i]
+    expr_val <- geneExpr$avg.expr[i]
+    beta <- master_df_goi[master_df_goi$T_k.name == name, 'estimate']
+    val <- ((beta * expr_val)[1]) + expr_val[1]
+    return(val)
+  }))
+  return(geneExpr)
+}
+
+avgGeneExpr <- mult_expr_by_betas(master_df, "TP53", avgGeneExpr)
+avgGeneExpr <- mult_expr_by_betas(master_df, "PIK3CA", avgGeneExpr)
+
+
+#medianGeneExpr$median.expr.mult.by.tp53.betas <- unlist(lapply(1:nrow(medianGeneExpr), function(i) {
+#  name <- medianGeneExpr$gene_name[i]
+#  expr_val <- medianGeneExpr$median.expr[i]
+#  beta <- master_df_p53[master_df_p53$T_k.name == name, 'estimate']
+#  val <- (beta * expr_val)[1]
+#  return(val)
+#}))
+
+# Compare this to the TMM-normalized TCGA cancer expression averages in the TCGA
+expression_df_tmm <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Expression/expression_tmm_DF_filtByExpr_2groups_SDGr1_TO.csv",
+                              header = T, check.names = F, row.names = 1)
+# Limit to just the same set of genes
+expression_df_tmm_sub <- expression_df_tmm[rownames(expression_df_tmm) %fin% avgGeneExpr$ensg,]
+colnames(expression_df_tmm_sub) <- unlist(lapply(colnames(expression_df_tmm_sub), function(x)
+  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
+
+# Limit to just samples with a TP53 mutation
+get_mutant_patients <- function(mutation_regprot_df, regprot_name) {
+  regprot_rows <- which(unlist(lapply(mutation_regprot_df$Query, function(x) 
+    unlist(strsplit(unlist(strsplit(x, "|", fixed = TRUE))[3], "_", fixed = TRUE))[1] == regprot_name)))
+  mutant_patients <- unlist(strsplit(as.character(mutation_regprot_df[regprot_rows, "Patient"]), ";", fixed = TRUE))
+  return(unique(mutant_patients))
+}
+mutation_regprot_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Mutation/iprotein_results_nonsynonymous.csv", 
+                                header = TRUE, row.names = 1, check.names = FALSE)
+tp53_mutant_patients <- get_mutant_patients(mutation_regprot_df, "P53")
+tp53_nonmutant_patients <- setdiff(colnames(expression_df_tmm_sub), tp53_mutant_patients)
+
+pik3ca_mutant_patients <- get_mutant_patients(mutation_regprot_df, "PK3CA")
+pik3ca_nonmutant_patients <- setdiff(colnames(expression_df_tmm_sub), pik3ca_mutant_patients)
+
+expression_df_tmm_sub_p53Mutant <- expression_df_tmm_sub[, colnames(expression_df_tmm_sub) %fin% tp53_mutant_patients]
+expression_df_tmm_sub_p53Nonmutant <- expression_df_tmm_sub[, colnames(expression_df_tmm_sub) %fin% tp53_nonmutant_patients]
+
+expression_df_tmm_sub_pik3caMutant <- expression_df_tmm_sub[, colnames(expression_df_tmm_sub) %fin% pik3ca_mutant_patients]
+expression_df_tmm_sub_pik3caNonmutant <- expression_df_tmm_sub[, colnames(expression_df_tmm_sub) %fin% pik3ca_nonmutant_patients]
+
+avgGeneExpr_Cancer <- data.frame("avg.expr.cancer" = as.numeric(rowMeans(expression_df_tmm_sub_p53Mutant)), 
+                                 "ensg" = rownames(expression_df_tmm_sub_p53Mutant))
+medianGeneExpr_Cancer <- data.frame("median.expr.cancer" = as.numeric(rowMedians(as.matrix(expression_df_tmm_sub_p53Mutant))), 
+                                 "ensg" = rownames(expression_df_tmm_sub_p53Mutant))
+
+avgGeneExpr_Cancer <- data.frame("avg.expr.cancer" = as.numeric(rowMeans(expression_df_tmm_sub_pik3caMutant)), 
+                                 "ensg" = rownames(expression_df_tmm_sub_pik3caMutant))
+medianGeneExpr_Cancer <- data.frame("median.expr.cancer" = as.numeric(rowMedians(as.matrix(expression_df_tmm_sub_pik3caMutant))), 
+                                    "ensg" = rownames(expression_df_tmm_sub_pik3caMutant))
+
+avgGeneExpr_merged <- merge(avgGeneExpr, avgGeneExpr_Cancer, by = "ensg")
+medianGeneExpr_merged <- merge(medianGeneExpr, medianGeneExpr_Cancer, by = "ensg")
+
+# Calculate Spearman correlation and visualize
+log_gtex <- log2(avgGeneExpr_merged$avg.expr.mult.by.tp53.betas+1)
+log_tcga <- log2(avgGeneExpr_merged$avg.expr.cancer+1)
+gtex <- avgGeneExpr_merged$avg.expr.mult.by.tp53.betas
+tcga <- avgGeneExpr_merged$avg.expr.cancer
+
+gtex <- avgGeneExpr_merged$avg.expr.mult.by.betas.PIK3CA
+tcga <- avgGeneExpr_merged$avg.expr.cancer
+
+#log_gtex_median <- log2(medianGeneExpr_merged$median.expr.mult.by.tp53.betas+1)
+#log_tcga_median <- log2(medianGeneExpr_merged$median.expr.cancer+1)
+
+calc_and_plot_spearman <- function(log_gtex, log_tcga, goi) {
+  logFC_spearman_avg <- cor.test(log_gtex, log_tcga, method = "spearman")
+  logFC_spearman_avg_stat <- as.numeric(logFC_spearman_avg$estimate)
+  logFC_spearman_avg_pval <- logFC_spearman_avg$p.value
+  
+  # Print the results
+  print(paste("Correlation of", paste(logFC_spearman_avg_stat, paste(", p-value of", logFC_spearman_avg_pval))))
+  
+  # Create a plot to visualize the correlations
+  plot(log_gtex, log_tcga, pch = 19, col = "lightblue", #main = "logFC Spearman Correlation",
+       xlab = paste("GTEx TMM-Norm Expr in Breast *", paste(goi, "Betas + 1")), 
+       ylab = paste("TCGA TMM-Norm Expr in Breast,", paste(goi, "Mutant Samp")))
+  abline(lm(log_tcga ~ log_gtex), col = "red", lwd = 3)
+  text(labels = paste("Correlation:", paste(round(logFC_spearman_avg_stat, 6), 
+                                            paste(", p-value:", round(logFC_spearman_avg_pval, 6)))), 
+       x = max(log_gtex, na.rm = TRUE) - sd(log_gtex, na.rm = TRUE)*5, 
+       y = max(log_tcga, na.rm = TRUE)-sd(log_tcga, na.rm = TRUE), col = "black")
+  lm_res <- summary(lm(log_tcga ~ log_gtex))
+  r2 <- lm_res$r.squared
+  pval <- as.numeric(lm_res$coefficients[,4])[2]
+  print(paste("R2:", paste(r2, paste(", p-value:", pval))))
+}
+
+# Limit to just significant hits 
+avgGeneExpr_merged_sig <- avgGeneExpr_merged[avgGeneExpr_merged$gene_name %fin% master_df[master_df$q.value < 0.2, 'T_k.name'],]
+
+# Calculate Spearman correlation and visualize
+log_gtex_sig <- log2(avgGeneExpr_merged_sig$avg.expr.mult.by.tp53.betas+1)
+log_tcga_sig <- log2(avgGeneExpr_merged_sig$avg.expr.cancer+1)
+gtex_sig <- avgGeneExpr_merged_sig$avg.expr.mult.by.betas.TP53
+gtex_sig <- avgGeneExpr_merged_sig$avg.expr.mult.by.betas.PIK3CA
+tcga_sig <- avgGeneExpr_merged_sig$avg.expr.cancer
+
+calc_and_plot_spearman(log_gtex_sig, log_tcga_sig)
+calc_and_plot_spearman(gtex_sig, tcga_sig)
+
+
+# Try with patients without a TP53 mutation (ideally should see no correlation)
+avgGeneExpr_Cancer_WT <- data.frame("avg.expr.cancer" = as.numeric(rowMeans(expression_df_tmm_sub_p53Nonmutant)), 
+                                 "ensg" = rownames(expression_df_tmm_sub_p53Nonmutant))
+avgGeneExpr_Cancer_WT <- data.frame("avg.expr.cancer" = as.numeric(rowMeans(expression_df_tmm_sub_pik3caNonmutant)), 
+                                    "ensg" = rownames(expression_df_tmm_sub_pik3caNonmutant))
+avgGeneExpr_merged_WT <- merge(avgGeneExpr, avgGeneExpr_Cancer_WT, by = "ensg")
+avgGeneExpr_merged_WT_sig <- avgGeneExpr_merged_WT[avgGeneExpr_merged_WT$gene_name %fin% master_df[master_df$q.value < 0.2, 'T_k.name'],]
+
+
+# Calculate Spearman correlation and visualize
+log_gtex_p53WT <- log2(avgGeneExpr_merged_p53WT$avg.expr.mult.by.tp53.betas+1)
+log_tcga_p53WT <- log2(avgGeneExpr_merged_p53WT$avg.expr.cancer+1)
+gtex_WT <- avgGeneExpr_merged_WT$avg.expr.mult.by.betas.TP53
+gtex_WT <- avgGeneExpr_merged_WT$avg.expr.mult.by.betas.PIK3CA
+tcga_WT <- avgGeneExpr_merged_WT$avg.expr.cancer
+
+
+calc_and_plot_spearman(log_gtex_p53WT, log_tcga_p53WT)
+calc_and_plot_spearman(gtex_WT, tcga_WT)
+
+log_gtex_p53WT_sig <- log2(avgGeneExpr_merged_p53WT_sig$avg.expr.mult.by.tp53.betas+1)
+log_tcga_p53WT_sig <- log2(avgGeneExpr_merged_p53WT_sig$avg.expr.cancer+1)
+gtex_WT_sig <- avgGeneExpr_merged_WT_sig$avg.expr.mult.by.tp53.betas
+gtex_WT_sig <- avgGeneExpr_merged_WT_sig$avg.expr.mult.by.betas.PIK3CA
+tcga_WT_sig <- avgGeneExpr_merged_WT_sig$avg.expr.cancer
+
+calc_and_plot_spearman(log_gtex_p53WT_sig, log_tcga_p53WT_sig)
+calc_and_plot_spearman(gtex_WT_sig, tcga_WT_sig)
 #
 #
 #

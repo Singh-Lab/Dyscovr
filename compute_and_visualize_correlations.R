@@ -14,6 +14,7 @@ library(stringr)
 library(dplyr)
 library(VennDiagram)
 library("RColorBrewer")
+library(SuppDists)
 
 # Path to output files
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
@@ -77,9 +78,9 @@ compute_and_print_spearman <- function(results_table, ri_1, ri_2) {
     print(paste("Beta correlation of", paste(betas_spearman_stat, paste(", p-value of", betas_spearman_pval))))
     
     # Create a plot to visualize the correlations
-    plot(grp1_Betas, grp2_Betas, pch = 19, col = alpha("lightblue", 0.4), #main = "Betas Spearman Correlation",
+    plot(grp1_Betas, grp2_Betas, pch = 19, col = alpha("#0072B599", 0.4), #main = "Betas Spearman Correlation",
          xlab = paste(ri_1, "Betas"), ylab = paste(ri_2, "Betas"))
-    abline(lm(grp2_Betas ~ grp1_Betas), col = "red", lwd = 3)
+    abline(lm(grp2_Betas ~ grp1_Betas), col = "#BC3C29FF", lwd = 3)
     text(labels = paste("Correlation:", paste(round(betas_spearman_stat, 6), 
                                               paste(", p-value:", round(betas_spearman_pval, 6)))), 
          x = max(grp1_Betas, na.rm = TRUE)-sd(grp1_Betas, na.rm = TRUE)*3, 
@@ -102,35 +103,59 @@ compute_and_print_spearman(master_df, ri_1, ri_2)
 #' @param results_table2 second output master DF from the linear model
 #' @param ri_1 the external gene name of the first protein of interest
 #' @param ri_2 the external gene name of the second protein of interest
-compute_and_print_spearman_multDF <- function(results_table1, results_table2, ri_1, ri_2) {
+#' @param beta_thres a Beta value that the target gene must exceed to be included, optional
+#' @param qval_thres a q-value that the target gene must be below to be included, optional
+compute_and_print_spearman_multDF <- function(results_table1, results_table2, ri_1, ri_2,
+                                              beta_thres, qval_thres) {
+  
+  # Optionally limit to genes with a qval that is below some threshold
+  if(!is.na(qval_thres)) {
+    results_table1 <- results_table1[results_table1$q.value < qval_thres,]
+    results_table2 <- results_table2[results_table2$q.value < qval_thres,]
+  }
+  
   if((ri_1 %fin% results_table1$R_i.name) & (ri_2 %fin% results_table2$R_i.name)) {
     
     target_genes <- intersect(unique(results_table1$T_k.name), unique(results_table2$T_k.name))
-    
+
     # Mini functions to get Betas/t-statistics for each target gene
     #' @param results_table the master DF 
     #' @param target_genes the list of target genes
     #' @param ri the given regulatory protein
     #' @param type "Betas" or "t-statistics" to indicate what value we are returning
-    get_values <- function(results_table, target_genes, ri, type) {
+    get_values <- function(results_table, target_genes, ri, type, beta_thres) {
       vals <- unlist(lapply(target_genes, function(tg) {
         if(type == "Betas") {
           est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "estimate"]
         } else {
           est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "statistic"]
         }
-        if (length(est) == 0) {est <- 0}  # To ensure the lengths of the Beta vectors are the same
+        #print(est)
+        if (length(est) == 0) {est <- NA} 
+        if (!is.na(beta_thres)) {
+          if(abs(est) < beta_thres) {est <- NA}
+        }
         return(est)
       }))
     }
     
-    grp1_Betas <- get_values(results_table1, target_genes, ri_1, "Betas")
-    grp2_Betas <- get_values(results_table2, target_genes, ri_2, "Betas")
+    grp1_Betas <- get_values(results_table1, target_genes, ri_1, "Betas", beta_thres)
+    grp2_Betas <- get_values(results_table2, target_genes, ri_2, "Betas", beta_thres)
+    
+    na_ind <- unique(c(which(is.na(grp1_Betas)), which(is.na(grp1_Betas))))
+    if(length(na_ind) > 0) {
+      grp1_Betas <- grp1_Betas[-na_ind]
+      grp2_Betas <- grp2_Betas[-na_ind]
+    }
+
+    #print(length(grp2_Betas))
     
     # Get Betas spearman
-    betas_spearman <- cor.test(grp1_Betas, grp2_Betas, method = "spearman")
+    betas_spearman <- cor.test(grp1_Betas, grp2_Betas, method = "spearman", exact = F)
     betas_spearman_stat <- as.numeric(betas_spearman$estimate)
     betas_spearman_pval <- betas_spearman$p.value
+    #betas_spearman_precise_pval <- pSpearman()
+    print(betas_spearman)
     
     # Print the results
     print(paste("Spearman results for", paste(ri_1, paste("and", ri_2))))
@@ -138,13 +163,28 @@ compute_and_print_spearman_multDF <- function(results_table1, results_table2, ri
     
     # Create a plot to visualize the correlations
     # "#BC3C29FF", "#0072B5FF"
-    plot(grp1_Betas, grp2_Betas, pch = 19, col = alpha("lightblue", 0.4), #main = "Betas Spearman Correlation",
+    plot(grp1_Betas, grp2_Betas, pch = 19, col = alpha("#0072B599", 0.4), #main = "Betas Spearman Correlation",
          xlab = "", ylab = "", bty="n")
-    abline(lm(grp2_Betas ~ grp1_Betas), col = "red", lwd = 3)
-    text(labels = paste("Correlation:", paste(round(betas_spearman_stat, 6), 
-                                              paste(", p-value:", round(betas_spearman_pval, 6)))), 
+    abline(lm(grp2_Betas ~ grp1_Betas), col = "#BC3C29FF", lwd = 3)
+    
+    # Get R2 and P-value as well
+    lm_res <- summary(lm(grp2_Betas ~ grp1_Betas))
+    r2 <- lm_res$r.squared
+    pval <- as.numeric(lm_res$coefficients[,4])[2]
+    print(paste("R2:", paste(r2, paste(", p-value:", pval))))
+    
+    
+    #text(labels = paste("Correlation:", paste(round(betas_spearman_stat, 4), 
+    #                                          paste(", p-value:", format(betas_spearman_pval, digits = 6, scientific = TRUE)))), 
+    #     x = max(grp1_Betas, na.rm = TRUE)-sd(grp1_Betas, na.rm = TRUE)*3, 
+    #     y = max(grp2_Betas, na.rm = TRUE)-sd(grp2_Betas, na.rm = TRUE), 
+    #     col = "black", font=2)
+    r2_round <- round(r2, 4)
+    pval_formatted <- format(pval, digits = 4, scientific = TRUE)
+    label <- bquote(R^2 ~ "=" ~ .(r2_round) ~ ", p =" ~ .(pval_formatted))
+    text(labels = label, 
          x = max(grp1_Betas, na.rm = TRUE)-sd(grp1_Betas, na.rm = TRUE)*3, 
-         y = max(grp2_Betas, na.rm = TRUE)-sd(grp2_Betas, na.rm = TRUE), 
+         y = max(grp2_Betas, na.rm = TRUE), #-sd(grp2_Betas, na.rm = TRUE), 
          col = "black", font=2)
     mtext(side=1, line=3, paste(ri_1, "Betas"), font=2, cex=1.2)
     mtext(side=2, line=3, paste(ri_2, "Betas"), font=2, cex=1.2)
@@ -158,7 +198,7 @@ ri_1 <- "TP53"
 ri_2 <- "PIK3CA"
 
 # Call function
-compute_and_print_spearman_multDF(master_df1, master_df2, ri_1, ri_2)
+compute_and_print_spearman_multDF(master_df1, master_df2, ri_1, ri_2, NA, NA)
 
 
 #' Compute and print the Spearman correlation of the T-statistics for two separate

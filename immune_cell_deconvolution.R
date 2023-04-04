@@ -22,7 +22,7 @@ library(TCGAbiolinks)
 # http://timer.cistrome.org/infiltration_estimation_for_tcga.csv.gz
 
 path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
-#path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/TCGA Data (ALL)/"
+#path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/"
 
 output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Expression/"
 #output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Expression/"
@@ -39,6 +39,7 @@ expression_dataframe_counts <- read.csv(paste0(output_path, "expression_counts_D
 # For METABRIC, use the unlogged intensity matrix
 #expression_dataframe_counts <- read.table(paste0(path, "cBioPortal/brca_metabric/data_mrna_agilent_microarray_unlogged.txt"), header = TRUE, 
                                         #row.names = 1, check.names = FALSE)
+# For Chinese TN BRCA cohort, use the unfiltered FPKM matrix
 #expression_dataframe_counts <- distinct(expression_dataframe_counts)
 #rownames(expression_dataframe_counts) <- make.names(expression_dataframe_counts$Hugo_Symbol, unique = TRUE)
 #expression_dataframe_counts <- expression_dataframe_counts[, -c(1,2)]

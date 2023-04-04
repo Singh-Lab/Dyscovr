@@ -8,7 +8,7 @@
 
 ############################################################
 #' Use a faster %in% function
-library(fastmatch, lib.loc = library.path)
+library(fastmatch)
 `%fin%` <- function(x, table) {
   stopifnot(require(fastmatch))
   fmatch(x, table, nomatch = 0L) > 0L

@@ -11,8 +11,8 @@
 # Download String networks from website: https://string-db.org/cgi/network?taskId=bSXrcGoHJTto&sessionId=beGJRBX9wxZ4
 ###########################################################################################################
 # Import the String network file
-string_nw <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/Network_Data/string_interactions.csv",
-                      header = TRUE, check.names = FALSE)
+string_nw <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/STRING/string_interactions.tsv",
+                      sep = "\t", header = TRUE, check.names = FALSE)
 colnames(string_nw)[1] <- "node1"
 
 # Limit to given GOI
@@ -203,3 +203,108 @@ tp53_neighborhood <- get_neighborhood(igraph, origin = "9606.ENSP00000269305",
                                       dist_cutoff = 2, weight_cutoff = 5)
 pik3ca_neighborhood <- get_neighborhood(igraph, origin = "9606.ENSP00000269305", 
                                       dist_cutoff = 2, weight_cutoff = 5)
+
+###########################################################################################################
+###########################################################################################################
+### FLOW THROUGH METABOLIC SUBNETWORKS
+###########################################################################################################
+###########################################################################################################
+# Useful tutorial: https://rpubs.com/HWH/913747
+
+all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/all_genes_id_conv.csv", header = TRUE)
+
+# Restrict the network to just the genes in Recon3D and our driver genes of interest
+metabolic_genes <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/metabolic_targets.csv", 
+                            header = TRUE, check.names = FALSE)
+metabolic_genes_uniprot <- unlist(lapply(metabolic_genes$swissprot, function(s) 
+  unlist(strsplit(s, ";", fixed = TRUE))))
+driver_genes <- unique(master_df$R_i)
+
+genes_of_interest <- unique(c(driver_genes, metabolic_genes_uniprot))
+
+metabolic_genes_names <- unlist(lapply(metabolic_genes_uniprot, function(x) 
+  unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == x, 'external_gene_name'])))
+driver_genes <- unique(master_df$R_i.name)
+genes_of_interest_names <- unique(c(metabolic_genes_names, driver_genes))
+
+###########################################################################################################
+# SET UP STRING NETWORK
+###########################################################################################################
+string_db <- STRINGdb$new(version="11.5", species=9606, score_threshold=0, 
+                          input_directory="", protocol = "http")
+
+# Import the Uniprot 2 STRING conversion file to get STRING IDs
+# Conversion files from STRING can be found here: https://string-db.org/mapping_files/
+id_map <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/STRING/human.uniprot_2_string.2018.tsv",
+                     sep = "\t", header = F)
+colnames(id_map) <- c("species_id", "uniprot_gn_id", "ensp_id", "unknown", "string_id")
+genes_of_interest_stringIDs <- unlist(lapply(genes_of_interest, function(g) 
+  id_map[grepl(g, id_map$uniprot_gn_id), 'string_id']))
+
+# Generate a subnetwork using these IDs
+string_metabolic_subnw <- string_db$get_subnetwork(genes_of_interest_stringIDs)
+
+# Visualize this network
+string_db$plot_network(genes_of_interest_stringIDs, required_score = 400)
+subnw_summary <- string_db$get_summary(genes_of_interest_stringIDs, required_score = 400)
+# SUMMARY: 1096 proteins, 6256 interactions, 4019 expected interactions (p-value = 0)
+
+# ALTERNATIVE: USE STRING TABLE 
+string_nw_full <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/STRING/string.9606.protein.links.v11.5.namesAdded.txt")
+
+string_nw_metabolism <- string_nw_full[(string_nw_full$node1_name %in% genes_of_interest_names) |
+                                         (string_nw_full$node2_name %in% genes_of_interest_names),]
+string_nw_metabolism_conf <- string_nw_metabolism[string_nw_metabolism$combined_score > 400,]
+
+# Remove entries that are identical in both directions
+string_nw_metabolism_conf <- subset(string_nw_metabolism_conf, node1_name != node2_name & 
+                                !duplicated(cbind(pmin(node1_name, node2_name), 
+                                                  pmax(node1_name, node2_name))))
+string_nw_metabolism_conf_names <- string_nw_metabolism_conf[, c("node1_name", "node2_name")]
+
+# Infer directionality in some way? Or assume bidirectionality, after signal leaves source node (undirected network)
+
+# Reform into a table that can be used as input to igraph
+string_nw_metabolism_conf_forigraph <- data.frame("from" = string_nw_metabolism_conf$node1_name,
+                                                  "to" = string_nw_metabolism_conf$node2_name,
+                                                  "conf" = string_nw_metabolism_conf$combined_score)
+graph <- igraph::graph_from_data_frame(string_nw_metabolism_conf_forigraph, directed = FALSE,
+                                       vertices = string_nw_metabolism_conf_names)
+print(graph, e=TRUE, v=TRUE)
+
+
+###########################################################################################################
+# SET UP HUMANBASE NETWORK
+###########################################################################################################
+# Mammary Epithelium
+# Link to network download: https://hb.flatironinstitute.org/download ('Top edges')
+
+# Already processed to include gene names and be above confidence of 0.4
+hb_mammary_epithelium_conf <- read.csv(paste0(nw_path, "HumanBase/mammary_epithelium_0.4conf.csv"), 
+                                       header = T, check.names = F)
+
+# Restrict to metabolic genes and drivers
+hb_mammary_epi_metabolism <- hb_mammary_epithelium_conf[(hb_mammary_epithelium_conf$node1_name %in% genes_of_interest_names) |
+                                         (hb_mammary_epithelium_conf$node2_name %in% genes_of_interest_names),]
+
+# Remove entries that are identical in both directions
+hb_mammary_epi_metabolism <- subset(hb_mammary_epi_metabolism, node1_name != node2_name & 
+                                      !duplicated(cbind(pmin(node1_name, node2_name), 
+                                                        pmax(node1_name, node2_name))))
+hb_mammary_epi_metabolism_names <- hb_mammary_epi_metabolism[, c("node1_name", "node2_name")]
+
+# Infer directionality in some way? Or assume bidirectionality, after signal leaves source node (undirected network)
+
+# Reform into a table that can be used as input to igraph
+hb_mammary_epi_metabolism_forigraph <- data.frame("from" = hb_mammary_epi_metabolism$node1_name,
+                                                  "to" = hb_mammary_epi_metabolism$node2_name,
+                                                  "conf" = hb_mammary_epi_metabolism$combined_score)
+graph <- igraph::graph_from_data_frame(hb_mammary_epi_metabolism, directed = FALSE,
+                                       vertices = hb_mammary_epi_metabolism_names)
+print(graph, e=TRUE, v=TRUE)
+
+
+###########################################################################################################
+# 
+###########################################################################################################
+

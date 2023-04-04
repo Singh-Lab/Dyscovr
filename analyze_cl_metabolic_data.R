@@ -22,12 +22,18 @@ cell_line_annot_brca <- cell_line_annot[(grepl("breast", cell_line_annot$Classif
                                            (grepl("female", cell_line_annot$Gender)),]
 brca_cell_lines <- cell_line_annot_brca$Name
 
+cell_line_annot_coad <- cell_line_annot[grepl("colorectal", cell_line_annot$Classifications, ignore.case = TRUE),]
+coad_cell_lines <- cell_line_annot_coad$Name
+
+
 # Clean metabolite data from LCMS
 metabolite_df <- read.csv(paste0(path, "clean_metabolite_data.csv"), 
                           header = TRUE, check.names = FALSE, row.names = 1)
 metabolite_df_cl_names <- unlist(lapply(rownames(metabolite_df), function(x) 
   unlist(strsplit(x, "_", fixed = TRUE))[1]))
 metabolite_df_brca <- metabolite_df[which(metabolite_df_cl_names %in% brca_cell_lines),]
+metabolite_df_coad <- metabolite_df[which(metabolite_df_cl_names %in% coad_cell_lines),]
+
 
 # Mutation, CNA, & methylation correlations to metabolite levels
 mut_metabol_corr <- read.csv(paste0(path, "mutation_metabolite_correlations.csv"), 
@@ -91,6 +97,8 @@ get_mutation_metabol_corr_for_goi <- function(mutation_corr, goi, t_thres, outpa
 
 tp53_mut_df <- get_mutation_metabol_corr_for_goi(mut_metabol_corr, "TP53", 2.0, path)
 pik3ca_mut_df <- get_mutation_metabol_corr_for_goi(mut_metabol_corr, "PIK3CA", 2.0, path)
+kras_mut_df <- get_mutation_metabol_corr_for_goi(mut_metabol_corr, "KRAS", 2.0, path)
+
 
 ################################################################
 # INVESTIGATE CNA CORRELATIONS FOR PARTICULAR GOIS
@@ -165,6 +173,8 @@ tp53_mut_df$Assoc.Genes <- lapply(tp53_mut_df$Metabolite, function(metabol)
   return(get_prots_assoc_w_metabol(gene_to_metabol_mapping, metabol)))
 pik3ca_mut_df$Assoc.Genes <- lapply(pik3ca_mut_df$Metabolite, function(metabol) 
   return(get_prots_assoc_w_metabol(gene_to_metabol_mapping, metabol)))
+kras_mut_df$Assoc.Genes <- lapply(kras_mut_df$Metabolite, function(metabol) 
+  return(get_prots_assoc_w_metabol(gene_to_metabol_mapping, metabol)))
 
 # Add another column with associated gene names
 tp53_mut_df$Assoc.Gene.Names <- unlist(lapply(tp53_mut_df$Assoc.Genes, function(x) {
@@ -185,6 +195,15 @@ pik3ca_mut_df$Assoc.Gene.Names <- unlist(lapply(pik3ca_mut_df$Assoc.Genes, funct
   names_char <- paste(names, collapse = ",")
   return(names_char)
 }))  
+kras_mut_df$Assoc.Gene.Names <- unlist(lapply(kras_mut_df$Assoc.Genes, function(x) {
+  ids <- unlist(strsplit(x, ",", fixed = TRUE))
+  names <- lapply(ids, function(id) {
+    return(paste(unique(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == id, 
+                                          'external_gene_name']), collapse = ";"))
+  })
+  names_char <- paste(names, collapse = ",")
+  return(names_char)
+}))
 
 # Add a column that, for each protein name, annotates whether it's a significant hit
 # from the model
@@ -200,9 +219,17 @@ pik3ca_mut_df$Signif.Hit <- unlist(lapply(pik3ca_mut_df$Assoc.Gene.Names, functi
   in_signif_hits <- unlist(lapply(names, function(n) ifelse(n %in% pik3ca_signif_hits, TRUE, FALSE)))
   return(paste(in_signif_hits, collapse = ","))
 }))
+kras_signif_hits <- unlist(master_df[master_df$q.value < 0.2, 'T_k.name'])
+kras_mut_df$Signif.Hit <- unlist(lapply(kras_mut_df$Assoc.Gene.Names, function(x) {
+  names <- unlist(strsplit(x, ",", fixed = TRUE))
+  in_signif_hits <- unlist(lapply(names, function(n) ifelse(n %in% kras_signif_hits, TRUE, FALSE)))
+  return(paste(in_signif_hits, collapse = ","))
+}))
 
 print(intersect(tp53_signif_hits, unlist(strsplit(as.character(unlist(tp53_mut_df$Assoc.Gene.Names)), ",", fixed = TRUE))))
 print(intersect(pik3ca_signif_hits, unlist(strsplit(as.character(unlist(pik3ca_mut_df$Assoc.Gene.Names)), ",", fixed = TRUE))))
+print(intersect(kras_signif_hits, unlist(strsplit(as.character(unlist(kras_mut_df$Assoc.Gene.Names)), ",", fixed = TRUE))))
+
 
 #' Identify the significant correlations and print them
 #' @param mut_df a metabolism DF for a particular protein of interest 

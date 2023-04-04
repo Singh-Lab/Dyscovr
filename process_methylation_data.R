@@ -70,29 +70,28 @@ outpath_clean <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Save
 ############################################################
 # PRE-DOWNLOAD FILTERING
 ############################################################
-patient_ids <- fread(paste(path, "unique_brca_patient_ids.txt", sep = ""), 
-                          header = TRUE)[,'x']
+### BRCA ###
+patient_ids <- unlist(fread(paste(path, "unique_brca_patient_ids_2.txt", sep = ""), 
+                          header = TRUE)[,2])
 # If needed: patient_ids <- unlist(lapply(patient_ids, function(x) 
         # unlist(strsplit(x, split = " ", fixed = TRUE))[2]))
-# patient_ids <- fread(paste(path, "unique_patient_ids.txt", sep = ""), 
-                           # header = FALSE)[,2]
-# patient_ids <- patient_ids$V2
+
 manifest_filenames <- unlist(fread(paste(path, "Methylation_Data/Level3/MANIFEST.txt", sep = ""), 
                                  header = TRUE, sep = "\t")[,2])
 
+### PAN-CANCER ###
+patient_ids <- unlist(fread(paste(path, "unique_patient_ids_2.txt", sep = ""), header = T)[,2])
+
 # For pan-cancer, combine all manifests into one
 input_path_pc_meth <- "D:/"
-manifest_names <- list.files(paste("Pan-Cancer Methylation Data/Level3/", 
-                                   input_path_pc_meth, sep = ""), pattern = "MANIFEST")
-manifest <- fread(paste(paste("Pan-Cancer Methylation Data/Level3/", 
-                                   input_path_pc_meth, sep = ""), manifest_names[1], sep = ""), 
+manifest_names <- list.files(paste(input_path_pc_meth, "Pan-Cancer Methylation Data/", sep = ""), pattern = "MANIFEST")
+manifest <- fread(paste0(paste0(input_path_pc_meth, "Pan-Cancer Methylation Data/"), manifest_names[1]), 
                        header = TRUE)
 for (i in 2:length(manifest_names)) {
-  mani <- fread(paste(paste("Pan-Cancer Methylation Data/Level3/", input_path_pc_meth, sep = ""), 
+  mani <- fread(paste(paste(input_path_pc_meth, "Pan-Cancer Methylation Data/", sep = ""), 
                            manifest_names[i], sep = ""), header = TRUE)
   manifest <- rbind(manifest, mani)
 }
-
 
 # Write this to a file
 fwrite(manifest, paste(output_path, "pan-cancer_methylation_manifest.csv", sep = ""))
@@ -104,6 +103,9 @@ manifest <- manifest[!(manifest$id == "\\N"),]
 
 manifest_filenames <- manifest$filename
 
+# Import the clinical DF
+meth_clin_df_sub <- read.csv(paste0(path, "Methylation_Data/meth_clinical_data_subset_3.csv"), 
+                             header = T, check.names = F)
 
 
 #' Since methylation files are so large, we want to NOT download any patient 
@@ -113,7 +115,8 @@ manifest_filenames <- manifest$filename
 #' @param manifest the manifest file with all the filenames of individual 
 #' patient methylation files
 #' @param patient_ids a vector of patient TCGA IDs of interest
-get_patient_id_overlap <- function(manifest, patient_ids) {
+#' @param meth_clin_df_sub a clinical DF for methylation
+get_patient_id_overlap <- function(manifest, patient_ids, meth_clin_df_sub) {
   manifest_ids <- unlist(lapply(1:length(manifest), function (i) {
     manifest_barcode <- unlist(strsplit(manifest[i], split = ".", fixed = TRUE))[6]
     manifest_id <- unlist(strsplit(manifest_barcode, split = "-", fixed = TRUE))[3]
@@ -121,7 +124,20 @@ get_patient_id_overlap <- function(manifest, patient_ids) {
   }))
 
   inter_ids <- intersect(manifest_ids, patient_ids)
+  print(length(inter_ids))
   noninter_ids <- setdiff(manifest_ids, patient_ids)
+  print(length(noninter_ids))
+  
+  missing_files <- setdiff(patient_ids, manifest_ids)
+  print(length(missing_files))  # make sure this is 0
+  # if not, print the IDs so that we can download them and try again
+  if(length(missing_files) != 0) {
+    missing_file_barcodes <- unlist(lapply(missing_files, function(f) {
+      unique(meth_clin_df_sub[grepl(f, meth_clin_df_sub$case_submitter_id), 'case_submitter_id'])
+    }))
+    
+    print(paste(missing_file_barcodes, collapse = ","))
+  }
   return(inter_ids)
   #return(noninter_ids)
 }

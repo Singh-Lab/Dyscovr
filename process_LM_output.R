@@ -75,11 +75,13 @@ outfn_vis <- paste(unlist(strsplit(outfn, "_", fixed = TRUE))[2:length(unlist(st
 #' all p-values in order to add a column of q-values. Returns 
 #' the results table with a column for q-values.
 #' @param results_table a master DF produced from run_linear_model()
+#' @param per_gene a T/F value indicating whether or not we are doing the correction
+#' per-R_i (T) or together across all R_i (F)
 #' @param fn_qvalvis a filename with path for a q-value visualization
 #' produced from the qvalue package
 #' @param fn_qvalsum a filename with path for a q-value summary 
 #' with useful information produced from the qvalue package
-mh_correct <- function(results_table, fn_qvalvis, fn_qvalsum) {
+mh_correct <- function(results_table, per_gene, fn_qvalvis, fn_qvalsum) {
   
   # Get the qvalue object
   qobj <- NA
@@ -87,34 +89,57 @@ mh_correct <- function(results_table, fn_qvalvis, fn_qvalsum) {
     # With a small number of pvalues we may not be able to accurately estimate pi0,
     # so we set to 1 (the equivalent of B-H correction)
     qobj <- qvalue(p = results_table$p.value, pi0 = 1)
+    if(per_gene) {
+      print("Too few p-values to do the correction per-driver.")
+    }
+    qvals <- qobj$qvalues # extract qvalues
+    
+    results_table$q.value <- qvals # add the qvalues back to the data frame
   } else {
-    tryCatch({
-      qobj <- qvalue(p = results_table$p.value)
-    }, error = function(cond) {
-      if(grepl("The estimated pi0 <= 0", as.character(cond))) {
-        qobj <- qvalue(p = results_table$p.value, lambda = 0.05)
-      } else {qobj <- NA}
-    })
+    if(per_gene) {
+      unique_drivers <- unique(results_table$R_i)
+      list_of_corrected_tabs <- lapply(unique_drivers, function(d) {
+        res_tab_sub <- results_table[results_table$R_i == d, ]
+        tryCatch({
+          qobj <- qvalue(p = res_tab_sub$p.value)
+        }, error = function(cond) {
+          if(grepl("The estimated pi0 <= 0", as.character(cond))) {
+            qobj <- qvalue(p = res_tab_sub$p.value, lambda = 0.05)
+          } else {qobj <- NA}
+        })
+        qvals <- qobj$qvalues # extract qvalues
+        res_tab_sub$q.value <- qvals # add the qvalues back to the data frame
+        return(res_tab_sub)
+      })
+      results_table <- do.call(rbind, list_of_corrected_tabs)
+      results_table <- results_table[order(results_table$q.value),]
+    } else {
+      tryCatch({
+        qobj <- qvalue(p = results_table$p.value)
+      }, error = function(cond) {
+        if(grepl("The estimated pi0 <= 0", as.character(cond))) {
+          qobj <- qvalue(p = results_table$p.value, lambda = 0.05)
+        } else {qobj <- NA}
+      })
+      # Plot some useful plots & print some useful information
+      png(fn_qvalvis, width = 450, height = 450)
+      plot(qobj)
+      dev.off()
+      
+      png(fn_qvalsum, width = 450, height = 450)
+      print(summary(qobj))
+      dev.off()
+      #print(paste("Pi0 (Propr. of true null hypotheses):", qobj$pi0))
+      
+      qvals <- qobj$qvalues # extract qvalues
+      
+      results_table$q.value <- qvals # add the qvalues back to the data frame
+    }
   }
-  
-  # Plot some useful plots & print some useful information
-  png(fn_qvalvis, width = 450, height = 450)
-  plot(qobj)
-  dev.off()
-  
-  png(fn_qvalsum, width = 450, height = 450)
-  print(summary(qobj))
-  dev.off()
-  
-  #print(paste("Pi0 (Propr. of true null hypotheses):", qobj$pi0))
-  
-  qvals <- qobj$qvalues # extract qvalues
-  
-  results_table$q.value <- qvals # add the qvalues back to the data frame
-  
   # Return the tidied linear model fit with q-values
   return(results_table)
 }
+
 
 # Call this function
 if("p.value" %fin% colnames(master_df_mut)) {
@@ -125,14 +150,14 @@ if("p.value" %fin% colnames(master_df_mut)) {
     fn_cna_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
     
     tryCatch({
-      master_df_mut_corrected <- mh_correct(master_df_mut, fn_mut_qvalvis, fn_mut_qvalsum)
-      master_df_cna_corrected <- mh_correct(master_df_cna, fn_cna_qvalvis, fn_cna_qvalsum)
+      master_df_mut_corrected <- mh_correct(master_df_mut, correct_per_gene, fn_mut_qvalvis, fn_mut_qvalsum)
+      master_df_cna_corrected <- mh_correct(master_df_cna, correct_per_gene, fn_cna_qvalvis, fn_cna_qvalsum)
     }, error = function(cond) {print(cond)})
   } else {
-    fn_fnc_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-    fn_fnc_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    fn_fnc_qvalvis <- paste(output_vis_path, correct_per_gene, paste("Q-ValueVisualiz_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    fn_fnc_qvalsum <- paste(output_vis_path, correct_per_gene, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
     tryCatch({
-      master_df_fnc_corrected <- mh_correct(master_df_fnc, fn_fnc_qvalvis, fn_fnc_qvalsum)
+      master_df_fnc_corrected <- mh_correct(master_df_fnc, correct_per_gene, fn_fnc_qvalvis, fn_fnc_qvalsum)
     }, error = function(cond) {print(cond)})
   }
 } else {
@@ -157,29 +182,28 @@ add_targ_regprot_gns <- function(master_df_sig, all_genes_id_conv, runRegprotsJo
                                           'external_gene_name'])), collapse = ";")))
   
   # Add a column for the regulatory protein name
-  if(!runRegprotsJointly) {
-    # Add a column for the regulatory protein name
-    unique_ri <- data.frame("R_i" = unique(master_df_sig$R_i))
-    unique_ri$R_i.name <- unlist(lapply(unique_ri$R_i, function(x) 
-      paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
-                                     'external_gene_name']), collapse = ";")))
-    master_df_sig$R_i.name <- unlist(lapply(master_df_sig$R_i, function(x) 
-      unique_ri[unique_ri$R_i == x, 'R_i.name']))
-  }
+  unique_ri <- data.frame("R_i" = unique(master_df_sig$R_i))
+  unique_ri$R_i.name <- unlist(lapply(unique_ri$R_i, function(x) 
+    paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == unlist(strsplit(x, ";", fixed = TRUE))[1], 
+                                   'external_gene_name']), collapse = ";")))
+  master_df_sig$R_i.name <- unlist(lapply(master_df_sig$R_i, function(x) 
+    unique_ri[unique_ri$R_i == x, 'R_i.name']))
+
   return(master_df_sig)
 }
 
 if(!useNumFunctCopies) {
   tryCatch({
     # Call this function
+    print(paste("Run regprots jointly:", runRegprotsJointly))
     master_df_mut_corrected <- add_targ_regprot_gns(master_df_mut_corrected, all_genes_id_conv, runRegprotsJointly)
     master_df_cna_corrected <- add_targ_regprot_gns(master_df_cna_corrected, all_genes_id_conv, runRegprotsJointly)
     
     # Write this to a new file
     outfn <- str_replace(outfn, "uncorrected", "corrected") 
     print(paste("NEW FN:", outfn))
-    fwrite(master_df_mut_corrected, paste(outpath_curr, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
-    fwrite(master_df_cna_corrected, paste(outpath_curr, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
+    fwrite(master_df_mut_corrected, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
+    fwrite(master_df_cna_corrected, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
   }, error = function(cond) {print(cond)})
 } else {
   tryCatch({
@@ -189,7 +213,7 @@ if(!useNumFunctCopies) {
     # Write this to a new file
     outfn <- str_replace(outfn, "uncorrected", "corrected") 
     print(paste("NEW FN:", outfn))
-    fwrite(master_df_fnc_corrected, paste(outpath_curr, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
+    fwrite(master_df_fnc_corrected, paste(outpath, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
   }, error = function(cond) {print(cond)})
 }
 
@@ -519,10 +543,10 @@ if(!useNumFunctCopies) {
     #outfn <- str_replace(outfn, "corrected_", "") 
     #outfn <- str_replace(outfn, "res", "sig_res")
     #if(length(master_df_mut_sig) > 0) {
-      #fwrite(master_df_mut_sig, paste(outpath_curr, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
+      #fwrite(master_df_mut_sig, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
     #}
     #if(length(master_df_cna_sig) > 0) {
-      #fwrite(master_df_cna_sig, paste(outpath_curr, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
+      #fwrite(master_df_cna_sig, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
     #}
   }, error = function(cond) {print(cond)})
 } else {
@@ -533,7 +557,7 @@ if(!useNumFunctCopies) {
     #outfn <- str_replace(outfn, "corrected_", "") 
     #outfn <- str_replace(outfn, "res", "sig_res")
     #if(length(master_df_fnc_sig) > 0) {
-      #fwrite(master_df_fnc_sig, paste(outpath_curr, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
+      #fwrite(master_df_fnc_sig, paste(outpath, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
     #}
   }, error = function(cond) {print(cond)})
 }

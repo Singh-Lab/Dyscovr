@@ -4,7 +4,7 @@
 ############################################################
 
 library(grid)
-library(ggpubr)
+#library(ggpubr)
 library("STRINGdb")
 library(igraph)
 library(EnsDb.Hsapiens.v86)
@@ -76,8 +76,9 @@ compute_statistical_enrichment <- function(master_df, known_targs, type) {
     uniform <- 1:length(master_df$T_k.name)
     
     # Get the ranks of the known targets within our ranked list
+    known_targs <- setdiff(known_targs, setdiff(known_targs, master_df$T_k.name))
     ranks_of_targs <- unlist(lapply(known_targs, function(x) {
-      if(x %in% master_df$T_k.name) {return(min(which(master_df$T_k.name == x,)))}
+      if(x %fin% master_df$T_k.name) {return(min(which(master_df$T_k.name == x,)))}
       else {return(NA)}
     }))
     ranks_of_targs <- ranks_of_targs[!(is.infinite(ranks_of_targs) | (is.na(ranks_of_targs)))]
@@ -147,6 +148,7 @@ plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, cu
   # For each source, create a 0 and 1 vector for each  target hit to indicate if it 
   # is a a hit in that source
   target_set_vector_list <- lapply(target_sets_list, function(source) {
+    source <- setdiff(source, setdiff(source, master_df$T_k.name))
     vect <- unlist(lapply(1:nrow(master_df), function(i) {
       x <- master_df[i, 'T_k.name']
       return(ifelse(x %fin% source, 1, 0))
@@ -917,6 +919,12 @@ pik3ca_kegg_pathway_genes_downstrDNA <- c("PCK1", "PCK2", "G6PC1", "G6PC2", "G6P
                                           "CDKN1B", "RBL2", "FASLG", "BCL2L11", "BCL2L1", "BCL2", "MCL1", "MYB", "TP53", 
                                           "AKT", "PDK1")  # 20 genes
 
+kras_kegg_pathway <- read.csv(paste0(nw_path, "KEGG/KEGG_MAPK_SIGNALING_PATHWAY.v2022.1.csv"), 
+                              header = FALSE, check.names = FALSE)
+kras_kegg_pathway_genes <- as.character(unlist(strsplit(kras_kegg_pathway$V2[20], ",", fixed = TRUE)))
+
+
+
 ### HUMANBASE TARGETS ###
 # https://hb.flatironinstitute.org/
 
@@ -932,6 +940,9 @@ pik3ca_mamm_epi_nw <- read.table(paste0(nw_path, "hb_mammary_epithelium_pik3ca_n
 pik3ca_mamm_gl_nw <- read.table(paste0(nw_path, "hb_mammary_gland_pik3ca_network.txt"), 
                                 header = TRUE, sep = ",")
 
+tp53_colon_nw <- read.table(paste0(nw_path, "HumanBase/hb_colon_tp53_network.txt"), 
+                            header = TRUE, sep = ",")
+
 tp53_global_nw <- read.table(paste0(nw_path, "tp53_humanbase_global_top50.txt"), header = TRUE, sep = ",")
 pik3ca_global_nw <- read.table(paste0(nw_path, "pik3ca_humanbase_global_top50.txt"), header = TRUE, sep = ",")
 
@@ -941,6 +952,9 @@ tp53_mamm_gl_nw <- as.data.frame(lapply(tp53_mamm_gl_nw, trimws))
 pik3ca_mamm_epi_nw <- as.data.frame(lapply(pik3ca_mamm_epi_nw, trimws))
 pik3ca_mamm_gl_nw <- as.data.frame(lapply(pik3ca_mamm_gl_nw, trimws))
 
+tp53_colon_nw <- as.data.frame(lapply(tp53_colon_nw, trimws))
+
+
 tp53_global_nw <- as.data.frame(lapply(tp53_global_nw, trimws))
 pik3ca_global_nw <- as.data.frame(lapply(pik3ca_global_nw, trimws))
 
@@ -949,6 +963,9 @@ tp53_mamm_epi_nw <- tp53_mamm_epi_nw[(tp53_mamm_epi_nw$GENE1 == "TP53") | (tp53_
 tp53_mamm_gl_nw <- tp53_mamm_gl_nw[(tp53_mamm_gl_nw$GENE1 == "TP53") | (tp53_mamm_gl_nw$GENE2 == "TP53"),]
 pik3ca_mamm_epi_nw <- pik3ca_mamm_epi_nw[(pik3ca_mamm_epi_nw$GENE1 == "TP53") | (pik3ca_mamm_epi_nw$GENE2 == "PIK3CA"),]
 pik3ca_mamm_gl_nw <- pik3ca_mamm_gl_nw[(pik3ca_mamm_gl_nw$GENE1 == "TP53") | (pik3ca_mamm_gl_nw$GENE2 == "PIK3CA"),]
+
+#tp53_colon_nw <- tp53_colon_nw[(tp53_colon_nw$GENE1 == "TP53") | (tp53_colon_nw$GENE2 == "TP53"),]
+
 
 # Limit the interactions to just those above a specific confidence threshold
 conf_thres <- 0.5
@@ -966,6 +983,8 @@ pik3ca_nw_targs <- unique(c(pik3ca_mamm_epi_nw_sig$GENE1, pik3ca_mamm_epi_nw_sig
                             pik3ca_mamm_gl_nw_sig$GENE1, pik3ca_mamm_gl_nw_sig$GENE2))
 pik3ca_nw_targs <- pik3ca_nw_targs[pik3ca_nw_targs != "PIK3CA"]
 
+tp53_colon_nw_targs <- unique(tp53_colon_nw$SYMBOL)
+tp53_colon_nw_targs <- tp53_colon_nw_targs[tp53_colon_nw_targs != "TP53"]
 
 ### STRING ###
 # https://string-db.org/
@@ -975,6 +994,9 @@ tp53_string_nw_targs <- read.table(paste0(nw_path, "STRING/TP53_interactors_stri
                                    header = FALSE)[,1]
 pik3ca_string_nw_targs <- read.table(paste0(nw_path, "STRING/PIK3CA_interactors_string_top100.txt"),
                                      header = FALSE)[,1]
+kras_string_nw_targs <- unique(unlist(read.csv(paste0(nw_path, "STRING/kras_string_interactions_top100.csv"),
+                                   header = T, check.names = F)[,1:2]))
+kras_string_nw_targs <- kras_string_nw_targs[kras_string_nw_targs != "KRAS"]
 
 # Import the top 500 STRING network targets
 tp53_string_nw_targs_top500 <- read.table(paste0(nw_path, "STRING/tp53_string_interactions_top500.csv"),

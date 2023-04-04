@@ -5,7 +5,7 @@
 
 library(ggplot2)
 library(reshape2)
-library(ggpubr)
+#library(ggpubr)
 library(rstatix)
 library(broom)
 library(ggrepel)
@@ -271,6 +271,8 @@ boxplot(list("TP53 Mut Excl" = ko_score_tp53_mut_excl, "PIK3CA Mut Excl" = ko_sc
 ### IMPORT DEPMAP PORTAL FEATURES ###
 # Link to DepMap downloads: https://depmap.org/portal/download/
 
+
+## BRCA ##
 # Use DepMap features to create an aggregate file for all BRCA cell lines and for a particular gene set of interest
 signif_hits_crispr_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/CRISPR_(DepMap_21Q4_Public+Score,_Chronos)_subsetted.csv",
                                 header = TRUE, check.names = FALSE)
@@ -286,7 +288,6 @@ signif_hits_rnai_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Pro
 
 signif_hits_expression_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Expression_22Q1_Public.csv", header = TRUE, check.names = FALSE)
 
-
 # Get the mutations for TP53 & PIK3CA among these cell lines
 tp53_pik3ca_mutations <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Mutation_21Q4_Public_P53_PIK3CA.csv",
                                   header = TRUE, check.names = FALSE)
@@ -301,6 +302,48 @@ colnames(tp53_pik3ca_cnas)[ncol(tp53_pik3ca_cnas)] <- "PIK3CA.CNA"
 # Get the absolute copy number for TP53 & PIK3CA among these cell lines
 #tp53_pik3ca_cnas <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Copy_Number_(Absolute)_subsetted.csv",
 #header = TRUE, check.names = FALSE)
+
+
+## COLORECTAL ##
+# For all genes
+signif_hits_crispr_data_coad <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/CRISPR_(DepMap_Public_22Q4+Score,_Chronos)_COAD.csv",
+                                    header = TRUE, check.names = FALSE)
+signif_hits_rnai_data_coad <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/RNAi_(Achilles+DRIVE+Marcotte,_DEMETER2)_COAD.csv",
+                                  header = TRUE, check.names = FALSE)
+coad_cls <- unique(c(signif_hits_crispr_data_coad$depmap_id, signif_hits_rnai_data_coad$depmap_id))
+
+signif_hits_expression_data_coad <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Expression_Public_22Q4_COAD.csv", header = TRUE, check.names = FALSE)
+colnames(signif_hits_expression_data_coad)[1] <- "depmap_id"
+
+# Subset to our GOIs (breast has already done this)
+signif_hits_crispr_data_coad_sub <- signif_hits_crispr_data_coad[, c(1:6, which(colnames(signif_hits_crispr_data_coad) %in% c("SHMT2", "ARG2")))]
+signif_hits_rnai_data_coad_sub <- signif_hits_rnai_data_coad[, c(1:6, which(colnames(signif_hits_rnai_data_coad) %in% c("SHMT2", "ARG2")))]
+signif_hits_expression_data_coad_sub <- signif_hits_expression_data_coad[, c(1, which(colnames(signif_hits_expression_data_coad) %in% c("SHMT2", "ARG2", "TP53")))]
+
+# Get the mutations for TP53 among these cell lines
+mutations_coad <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Damaging_Mutations_COAD.csv",
+                                  header = TRUE, check.names = FALSE)
+tp53_mutations_coad <- mutations_coad[, c(1, which(colnames(mutations_coad) == "TP53"))]
+colnames(tp53_mutations_coad)[1] <- "depmap_id"
+
+# Get the relative copy number changes for TP53 among these cell lines
+cnas_coad <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Copy_Number_(Absolute)_COAD.csv",
+                             header = TRUE, check.names = FALSE)   # ABSOLUTE
+cnas_coad <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Copy_Number_Public_22Q4_COAD.csv",
+                      header = TRUE, check.names = FALSE)   # RELATIVE
+# for relative:
+colnames(cnas_coad)[1] <- "depmap_id"
+
+tp53_cnas_coad <- cnas_coad[, c("depmap_id", "cell_line_display_name", "TP53")]
+
+# Adjust column names
+colnames(tp53_cnas_coad)[ncol(tp53_cnas_coad)] <- "TP53.CNA"
+
+
+# Import BAGEL2 essentiality data
+bagel_data <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Table_DepMap2018Q4_BAGEL2_CRISPRcleanR_MultitargetingCorrected.txt", 
+                         header = TRUE, row.names = 1, check.names = FALSE)
+
 
 ### IMPORT CELL MODEL PASSPORT FEATURES ###
 # Link to Cell Model Passport downloads: https://cellmodelpassports.sanger.ac.uk/downloads
@@ -348,14 +391,17 @@ adjust_depmap_df <- function(signif_hits_df, mutation_df, cna_df, genes_of_inter
   
   # Add mutation and CNA status of genes of interest to the data frame
   signif_hits_df_melt <- merge(signif_hits_df_melt, mutation_df[,c("depmap_id", genes_of_interest)], 
-                               by = "depmap_id")
+                               by = "depmap_id")  
   genes_of_interest_cna <- unlist(lapply(genes_of_interest, function(x) paste0(x, ".CNA")))
   signif_hits_df_melt <- merge(signif_hits_df_melt, cna_df[,c("depmap_id", genes_of_interest_cna)], 
                                by = "depmap_id")
   
   # Make the mutation columns factors
-  mutation_cols <- which(colnames(signif_hits_df_melt) %in% genes_of_interest)
-  signif_hits_df_melt[, mutation_cols] <- lapply(signif_hits_df_melt[, mutation_cols], as.factor)
+  #mutation_cols <- which(colnames(signif_hits_df_melt) %in% genes_of_interest)
+  #signif_hits_df_melt[, mutation_cols] <- lapply(signif_hits_df_melt[, mutation_cols], as.factor)
+  factorized_mut_status <- as.factor(unlist(lapply(signif_hits_df_melt[, which(colnames(signif_hits_df_melt) == genes_of_interest)], function(val) 
+    ifelse(val > 1, 1, val))))
+  signif_hits_df_melt[, which(colnames(signif_hits_df_melt) == genes_of_interest)] <- factorized_mut_status
   
   
   # Bucket the CNA columns and also make them factors
@@ -373,16 +419,36 @@ adjust_depmap_df <- function(signif_hits_df, mutation_df, cna_df, genes_of_inter
 #' Bucket CNA values, given whether we want to prioritize deletions or amplifications
 #' @param cna_vals vector of CNA values 
 #' @param deletionOrAmp either "deletion" or "amplification" to indicate which we are prioritizing
+#' Define thresholds based on this thread: https://forum.depmap.org/t/defining-deep-deletions-and-amplifications/710/3,
+#' based on definitions from the TCGA: https://docs.gdc.cancer.gov/Data/Bioinformatics_Pipelines/CNV_Pipeline/#copy-number-estimation
 bucket_cna <- function(cna_vals, deletionOrAmp) {
   bucketed_cna_vals <- unlist(lapply(cna_vals, function(x) {
+    # Reported as log2(CN + 1). We want just the CN.
+    x_mod <- 2^(x) - 1
     if(deletionOrAmp == "deletion") {
-      # we use 3 here because there is a pseudocount of 1
-      if (x < log2(3)) {return(1)}
+      # we use 3 here because there is a pseudocount of 1; if no pseudocount, use log2(2)
+      #if (x < log2(3)) {return(1)}
+      if(x < 2^(-1.2)) {return(1)}
       else {return(0)}
     } else {
-      if (x > log2(3)) {return(1)}
+      #if (x > log2(3)) {return(1)}
+      if(x > (2^0.75)) {return(1)}
+      
       else {return(0)}
     }
+  }))
+  return(bucketed_cna_vals)
+}
+
+# -2 = deep deletion, -1 het loss, 0 = diploid, 1 = gain, 2 = amplification
+bucket_cna_5buckets <- function(cna_vals) {
+  bucketed_cna_vals <- unlist(lapply(cna_vals, function(x) {
+    x_mod <- 2^(x-1) 
+    if(x_mod < 1.2) {return(-2)}
+    if(x_mod < 1.32) {return(-1)}
+    if(x_mod < 2.64) {return(0)}
+    if(x_mod < 3.36) {return(1)}
+    else {return(2)}
   }))
   return(bucketed_cna_vals)
 }
@@ -395,7 +461,24 @@ signif_hits_rnai_data <- adjust_depmap_df(signif_hits_rnai_data, tp53_pik3ca_mut
 signif_hits_expression_data <- adjust_depmap_df(signif_hits_expression_data, tp53_pik3ca_mutations, tp53_pik3ca_cnas,
                                             c("TP53", "PIK3CA"), c("deletion", "amplification"))
 
+signif_hits_crispr_data_coad_sub <- adjust_depmap_df(signif_hits_crispr_data_coad_sub, tp53_mutations_coad, tp53_cnas_coad,
+                                            c("TP53"), c("deletion"))
+signif_hits_rnai_data_coad_sub <- adjust_depmap_df(signif_hits_rnai_data_coad_sub, tp53_mutations_coad, tp53_cnas_coad,
+                                          c("TP53"), c("deletion"))
+signif_hits_rnai_data_coad_sub <- na.omit(signif_hits_rnai_data_coad_sub[, !(colnames(signif_hits_rnai_data_coad_sub) == "lineage_4")])
+signif_hits_expression_data_coad_sub <- adjust_depmap_df(signif_hits_expression_data_coad_sub, tp53_mutations_coad, tp53_cnas_coad,
+                                                c("TP53"), c("deletion"))
 
+
+# For colorectal drivers
+drivers_cnas_coad_relative <- cnas_coad_relative[, c("depmap_id", "TP53", "KRAS", "APC", "PIK3CA", "BRAF")]
+colnames(tp53_cnas_coad)[2:ncol(tp53_cnas_coad)] <- c("TP53.CNA", "KRAS.CNA", "APC.CNA", "PIK3CA.CNA", "BRAF.CNA")
+del_or_amp_vect <- c('deletion', 'amplification', 'deletion', 'amplification', 'amplification')
+drivers_cnas_coad_relative[, 2:ncol(drivers_cnas_coad_relative)] <- lapply(2:(ncol(drivers_cnas_coad_relative)), function(i) {
+   bucketed_col <- bucket_cna(drivers_cnas_coad_relative[,i], del_or_amp_vect[i-1])
+   bucketed_col <- as.factor(bucketed_col)
+   return(bucketed_col)
+})
 
 # Subset to just the top hits for TP53 & PIK3CA specifically
 tp53_top_hits <- c("MTHFD1L", "SHMT2", "GSTP1", "TYMS", "PSPH", "CDO1", "MTHFD1", "CSAD", "AHCY", 
@@ -564,16 +647,53 @@ make_dependency_boxplot(signif_hits_rnai_data_pik3ca[signif_hits_rnai_data_pik3c
 make_dependency_boxplot(signif_hits_rnai_data_pik3ca[signif_hits_rnai_data_pik3ca$gene %in% pred_downregulat_pik3ca,], "PIK3CA", "cna")
 
 
+#' Make a similar plot, but a barplot for one gene target, by cell line
+#' @param signif_hits_df a DepMap knockout or expression data frame, subsetted to only include 
+#' the target gene of interest
+#' @param gene_of_interest a Hugo ID for a given regulatory gene of interest
+#' @param mut_or_cna either "mut", to signify we want to plot dependency by mutation status, or "cna" to
+#' indicate we want to plot dependency by CNA status
+make_dependency_barplot <- function(signif_hits_df, gene_of_interest, mut_or_cna) {
+  if(mut_or_cna == "mut") {
+    barplot <- ggplot(signif_hits_df, aes_string(x = "depmap_id", y = "value", fill = gene_of_interest)) + 
+      geom_bar(stat = 'identity') + xlab("DepMap ID") + ylab("CRISPR Dependency Score") +
+      scale_fill_manual(values = c("#619CFF", "#F8766D")) +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+    
+  } else if (mut_or_cna == "cna") {
+    gene_of_interest_cna <- paste0(gene_of_interest, ".CNA")
+    barplot <- ggplot(signif_hits_df, aes_string(x = "depmap_id", y = "value", fill = gene_of_interest_cna)) + 
+      geom_bar(stat = 'identity') +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+    
+  } else {
+    print(paste(mut_or_cna, "is not defined. Please try again with either 'mut' or 'cna'."))
+  }
+  print(barplot)
+}
+
+make_dependency_barplot(signif_hits_crispr_data_tp53, "TP53", "mut")
+
+
 # Split cell lines by whether they are derived from primary or metastatic, to see if there is a difference
 cell_line_sample_info <- read.csv(paste0("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/cell_line_sample_info.csv"),
                                   header = TRUE, check.names = FALSE)
 brca_cl_info <- cell_line_sample_info[grepl("Breast", cell_line_sample_info$primary_disease),]
+coad_cl_info <- cell_line_sample_info[grepl("Colorectal", cell_line_sample_info$primary_disease),]
 
 # Get the cell lines we have mutation/ expression data for
-cls_with_dat <- unique(signif_hits_crispr_data$depmap_id)
+brca_cls_with_dat <- unique(c(signif_hits_crispr_data$depmap_id, signif_hits_rnai_data$depmap_id))
+coad_cls_with_dat <- unique(c(signif_hits_crispr_data_coad_sub$depmap_id, signif_hits_rnai_data_coad_sub$depmap_id))
+
 
 # Subset the sample info DF to only the cell lines of interest
-brca_cl_info_sub <- brca_cl_info[brca_cl_info$DepMap_ID %fin% cls_with_dat,]
+brca_cl_info_sub <- brca_cl_info[brca_cl_info$DepMap_ID %fin% brca_cls_with_dat,]
+coad_cl_info_sub <- coad_cl_info[coad_cl_info$DepMap_ID %fin% coad_cls_with_dat,]
+
+
+# Subset BAGEL2 data
+bagel_data_brca <- bagel_data[,colnames(bagel_data) %in% brca_cl_info$DepMap_ID]
+
 
 # Add a "primary" or "metastatic" label to the signif_hits data frames
 
@@ -627,8 +747,18 @@ pred_up_tp53_noEff_pik3ca <- unique(c(setdiff(pred_upregulat_tp53, c(pred_upregu
 #' @param signif_hits_df a DepMap expression data frame, subsetted to only include genes that are 
 #' significant hits from a particular run of the LM
 make_expression_barplot <- function(signif_hits_df) {
-  ggplot(signif_hits_df, aes_string(x = "gene", y = "value", fill = "depmap_id")) + geom_bar(position = "dodge", stat= "identity") +
-      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  ggplot(signif_hits_df, aes(x = reorder(gene, -value), y = value, fill = depmap_id)) + 
+    geom_bar(position = "dodge", stat= "identity") +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+}
+
+make_expression_barplot2 <- function(signif_hits_df, gn) {
+  ggplot(signif_hits_df, aes(x = reorder(depmap_id, -value), y = 2^(value)-1, fill = TP53)) + 
+    geom_bar(position = "dodge", stat= "identity") +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    scale_fill_manual(values = c("#619CFF", "#F8766D")) +#, labels = c("TP53 Mutant", "TP53 WT")) + 
+    xlab("Cell Line") + ylab(paste("Expression of", paste(gn, "(TPM)")))
   
 }
 
