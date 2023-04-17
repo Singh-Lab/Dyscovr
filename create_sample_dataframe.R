@@ -16,10 +16,12 @@ library(dplyr)
 
 main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/"
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/cBioPortal/METABRIC/"
+#main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/TripleNeg_Chinese/"
 #main_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
 
 input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/"
 #input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_metabric/"
+#input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/TripleNeg_Chinese/"
 #input_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/"
 
 
@@ -55,12 +57,17 @@ aliquot_df <- aliquot_df[which(aliquot_df$patient_id %in% patients),]
 clin_samp_df <- read.table(paste0(input_path, "data_clinical_sample_sub.txt"), 
                            header = TRUE, check.names = FALSE, sep = ",", row.names = 1)
 
+### Clinical sample DF, for Chinese TN Cohort ###
+clin_samp_df <- read.csv(paste0(main_path, "clinical.csv"), header = T, check.names = F)
+# Limit to female patients
+clin_samp_df <- clin_samp_df[clin_samp_df$Sex %in% c("Female", "Female "),]
+
 
 ############################################################
 ### IMPORT EXPRESSION FILES (TCGA ONLY)
 ############################################################
 # Import expression counts data frame, or samples data frame from edgeR normalization
-expression_df <- read.csv(paste(main_path, "Expression/expression_counts_DF.csv", sep = ""), 
+expression_df <- read.csv(paste(main_path, "Expression/expression_counts_DF_edgeRfilt_TO.csv", sep = ""), 
                           header = TRUE, check.names = FALSE)
 # FOR BRCA
 tmm_norm_samples_df <- read.csv(paste(main_path, "Expression/tmm_normalized_expression_samples.csv", sep = ""),
@@ -83,6 +90,8 @@ colnames(tumor_purity_df)[1] <- 'Sample.ID'
 tumor_purity_df <- read.table(paste0(input_path, "data_clinical_patient_sub.txt"), header = TRUE, check.names = FALSE,
                               sep = ",")
 tumor_purity_df <- tumor_purity_df[, c("PATIENT_ID", "CELLULARITY")]
+
+# Tumor purity is found in the 'ACF' column of the clinical DF for the Chinese TN cohort ('aberrant cell fraction')
 
 
 ############################################################
@@ -156,6 +165,9 @@ icd_precomp_est <- read.csv(paste0(main_path, "Expression/CIBERSORT Cell Deconvo
 #icd_precomp_est <- read.csv(paste0(main_path, "Expression/quanTIseq Cell Deconvolution/quantiseq_cellFrac.csv"),
                                    #header = TRUE, check.names = FALSE, row.names = 1)
 
+# For Chinese TN BRCA, use the pre-computed estimates of stromal TILs (sTILs) and intratumoral TILs (iTILs)
+# TODO: may want to change this to estimate ourselves using CIBERSORT Abs
+
 
 ############################################################
 ### IMPORT MUTATION MATRIX PCs (variation from other mutations)
@@ -174,10 +186,10 @@ pca_results_misAndNon_brca_blca_hnsc <- read.csv("C:/Users/sarae/Documents/Mona 
 
 max_pcs <- 5
 
-# TODO: RUN THIS FOR METABRIC
+# TODO: IF NEEDED, RUN THIS FOR METABRIC AND CHINESE TN
 
 ############################################################
-# IMPORT PRE-CALLED GENOTYPE PCs
+# IMPORT PRE-CALLED GENOTYPE PCs (TCGA ONLY)
 ############################################################
 # Link to file downloads: https://gdc.cancer.gov/about-data/publications/CCG-AIM-2020
 # Link to associated Carrot-Zhang Paper: https://www.cell.com/cancer-cell/pdf/S1535-6108(20)30211-7.pdf
@@ -229,6 +241,10 @@ sample_dataframe <- create_sample_dataframe(aliquot_df, expression_df, tumor_pur
 # For METABRIC
 sample_dataframe <- create_sample_dataframe(clin_samp_df, NA, tumor_purity_df, 
                                             icd_precomp_est, NA, NA, NA, NA, NA, NA, "metabric")
+
+# FOR CHINESE TN BRCA 
+sample_dataframe <- create_sample_dataframe(clin_samp_df, NA, NA, NA, NA, NA, NA, 
+                                            NA, NA, NA, "chinese_tn")
 
 
 # TIMER
@@ -288,7 +304,8 @@ write.csv(sample_dataframe, paste(main_path, "Linear Model/Patient and Sample DF
 # For METABRIC
 write.csv(sample_dataframe, paste(main_path, "Patient and Sample DFs/sample_dataframe_cibersort_total_frac.csv", sep = ""))
 
-
+# For Chinese TN BRCA
+write.csv(sample_dataframe, paste0(main_path, "Patient and Sample DFs/sample_dataframe.csv"))
 
 ############################################################
 ### CREATE SAMPLE DATA FRAME
@@ -327,6 +344,9 @@ create_sample_dataframe <- function(aliquot_df, expression_df, tumor_purity_df,
     unique_sample_ids <- unique(aliquot_df$sample_submitter_id)
   } else if (dataset == 'metabric') {
     unique_sample_ids <- unique(aliquot_df$SAMPLE_ID)
+  } else if (dataset == "chinese_tn") {
+    unique_sample_ids <- unique(aliquot_df$Project_ID)
+    tumor_purity_df <- aliquot_df
   } else {print("Only implemented for TCGA and METABRIC.")}
   
   sample_dataframe <- data.frame(matrix(ncol = length(sample_characteristics), 
@@ -396,6 +416,7 @@ input_sample_specific_info <- function(input_df, aliquot_df, expression_df,
   
   # IMMUNE CELL INFILTRATION
   # OPTION 1: INCLUDE TOTAL PERCENTAGE OF IMMUNE CELLS AS A COVARIATE (need absolute fractions)
+  if(dataset == "chinese_tn") {immune_cell_infl_df <- aliquot_df}
   input_dataframe_updated <- add_total_immune_cell_percentage(input_dataframe_updated, 
                                                               immune_cell_infl_df,
                                                               ici_columns, dataset)
@@ -410,7 +431,9 @@ input_sample_specific_info <- function(input_df, aliquot_df, expression_df,
   }
   
   # LIBRARY SIZES
-  input_dataframe_updated <- add_library_sizes(input_dataframe_updated, expression_df)
+  if(!is.na(expression_df)) {
+    input_dataframe_updated <- add_library_sizes(input_dataframe_updated, expression_df)
+  }
   
   # MUTATION MATRIX PCs
   if(!is.na(mutation_pc_df)) {
@@ -418,7 +441,7 @@ input_sample_specific_info <- function(input_df, aliquot_df, expression_df,
   }
   
   # PRE-CALLED GENOTYPE PCs
-  if(!is.na(genotype_pc_file)) {
+  if(length(genotype_pc_file) > 1) {
     genotype_pc_file_processed <- process_genotype_pc_file(genotype_pc_file, 
                                                            genotype_pc_file_label, 
                                                            num_geno_pcs, sample_ids)
@@ -477,12 +500,16 @@ convert_tumor_purity_to_cpe <- function(sample_ids, tumor_purity_df) {
 #' Takes in the tumor purity CPE estimates data frame, created
 #' from the file from Aran et al. 2015. For each sample, it
 #' converts the CPE value to a bucketed value: low purity (0.0-0.5), 
-#' medium purity (0.5-0.75), and high purity (0.75-1.0)
+#' medium purity (0.5-0.75), and high purity (0.75-1.0). METABRIC creates
+#' 3 buckets based on "low", "medium", and "high" estimates of tumor purity.
+#' The Chinese TN cohort uses aberrant cell fraction (ACF) estimates, which 
+#' range from 0.2 to 1.0. Here, low tumor purity is 0.75-1.0, medium is 0.5-0.75, 
+#' and high is 0.2-0.5.
 #' @param tumor_purity_df a data frame produced from the
 #' convert_tumor_purity_to_cpe function (row names are sample TCGA IDs,
 #' Tumor.purity is a column of the CPE purity value) for TCGA, or a 
 #' sample clinical data frame for METABRIC
-#' @param dataset either 'tcga', 'metabric', 'icgc', or 'cptac3' to 
+#' @param dataset either 'tcga', 'metabric', 'chinese_tn', icgc', or 'cptac3' to 
 #' indicate what column names to reference/ data types to include
 bucket_tumor_purity <- function(tumor_purity_df, dataset) {
   
@@ -495,7 +522,10 @@ bucket_tumor_purity <- function(tumor_purity_df, dataset) {
         if (tp <= 0.5) {return(c(1,0,0))} 
         else if ((tp > 0.5) & (tp <= 0.75)) {return(c(0,1,0))} 
         else if (tp > 0.75) {return(c(0,0,1))} 
-        else {print(paste("Inappropriate purity value:", tp))}
+        else {
+          print(paste("Inappropriate purity value:", tp))
+          return(c(NA,NA,NA))
+        }
       }
     })
     
@@ -504,9 +534,16 @@ bucket_tumor_purity <- function(tumor_purity_df, dataset) {
       if(x == "Low") {return(c(1,0,0))}
       else if (x == "Moderate") {return(c(0,1,0))}
       else if (x == "High") {return(c(0,0,1))}
-      else {print(paste("Inappropriate purity value:", x)); return(NA)}
+      else {print(paste("Inappropriate purity value:", x)); return(c(NA,NA,NA))}
     })
-    
+  } else if (dataset == "chinese_tn") {
+    bucketed_rows <- lapply(tumor_purity_df$Ascat_ACF, function(acf) {
+      if(is.na(acf)) {return(c(NA,NA,NA))}
+      if(acf > 0.75) {return(c(1,0,0))}
+      else if ((acf > 0.5) & (acf <= 0.75)) {return(c(0,1,0))}
+      else if (acf <= 0.5) {return(c(0,0,1))}
+      else {print(paste("Inappropriate purity value:", acf)); return(c(NA,NA,NA))}
+    })
   } else {print("Only implemented for TCGA and METABRIC.")}
   
   tumor_purity_df_bucket <- do.call(rbind, bucketed_rows)
@@ -547,23 +584,35 @@ add_total_immune_cell_percentage <- function(sample_df, immune_cell_infl_df,
     # For this sample, get a subset of the IC infiltration data frame with the columns 
     # of interest from the tool of interest
     ici_df_sub <- c()
+    total_ic_frac <- NA
     
     if(dataset == 'tcga') {
       if (sample %in% immune_cell_infl_df$cell_type) {
         ici_df_sub <- immune_cell_infl_df[grepl(sample, immune_cell_infl_df$cell_type),
                                           colnames(immune_cell_infl_df) %in% ici_columns]
       } else {return (c(NA, NA, NA))}
+      # Sum the fraction of all these non-tumor cell types together
+      total_ic_frac <- sum(as.numeric(ici_df_sub), na.rm = TRUE)
     }
     else if (dataset == 'metabric') {
       if (sample %in% colnames(immune_cell_infl_df)) {
         ici_df_sub <- immune_cell_infl_df[, grepl(sample, colnames(immune_cell_infl_df))]
       } else {return (c(NA, NA, NA))}
+      # Sum the fraction of all these non-tumor cell types together
+      total_ic_frac <- sum(as.numeric(ici_df_sub), na.rm = TRUE)
     }
-    # Sum the fraction of all these non-tumor cell types together
-    total_ic_frac <- sum(as.numeric(ici_df_sub), na.rm = TRUE)
-    
+    else if (dataset == "chinese_tn") {
+      if(sample %in% immune_cell_infl_df$Project_ID) {
+        ici_df_sub <- immune_cell_infl_df[immune_cell_infl_df$Project_ID == sample, 
+                                          c("iTILs", "sTILs")]
+        # iTILs ranges from 0-50; sTILs ranges from 0-90. We will take the average 
+        # of these two estimates to evaluate the overall level of infiltrating lymphocytes
+        total_ic_frac <- mean(unlist(as.numeric(ici_df_sub)), na.rm = T) / 10
+        if(is.na(total_ic_frac) | is.nan(total_ic_frac)) {return(c(NA,NA,NA))}
+      }
+    }
     #return(total_ic_frac)
-    
+    print(total_ic_frac)
     thresh <- c(0.3, 0.7)
     if(dataset == "metabric") {thresh <- c(1.1, 1.3)}
     

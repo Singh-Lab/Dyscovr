@@ -101,17 +101,31 @@ filter_meth_by_ensg <- function(methylation_df, ensg_ids) {
 #' Possible values are "bucket_inclAmp", "bucket_exclAmp", "bucket_justAmp",
 #' "bucket_justDel", and "rawCNA"
 #' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3'
-get_cna_stat <- function(cna_df, sample, cna_bucketing, dataset) {
-
-  # Log2(CNA Stat + 1)
+#' @param use_relative a TRUE/FALSE value indicating whether or not we are
+#' taking into account the mean CN value for a given patient (e.g. log2(CN+1 / N+1),
+#' rather than log2(CN+1))
+#' @param cna_vals_sample if use_relative is TRUE, this is the full set of copy numbers across
+#' all genes for the given sample, in order to calculate the mean CN for that sample; otherwise NA
+get_cna_stat <- function(cna_df, sample, cna_bucketing, dataset, use_relative, cna_vals_sample) {
+  # Log2(CNA Stat + 1) or Log2(CNA Stat + 1 / Mean CNA + 1)
   if(cna_bucketing == "rawCNA") {
     cna_stat <- unique(as.integer(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE])))
     if (length(cna_stat) > 1) {cna_stat <- cna_stat[1]}
-    cna_stat <- log2(cna_stat + 1)
     if(length(cna_stat) < 1) {cna_stat <- NA}
     if (is.nan(cna_stat)) {cna_stat <- NA}
-  
-  # 1 if amplified ("justAmp") or deleted ("justDel"), 0 if 2+ copies
+    if(use_relative) {
+      # Get rid of the top 10% and bottom 10% of CNA values for this sample
+      ten_perc <- 0.1 * length(cna_vals_sample)
+      cna_vals_sample <- sort(cna_vals_sample)
+      cna_vals_sample_sub <- cna_vals_sample[ten_perc:(length(cna_vals_sample)-ten_perc)]
+      # Find the mean of the remaining values
+      mean_cn_samp <- mean(cna_vals_sample_sub)
+      # Calculate the new cna_stat using this value
+      cna_stat <- log2((cna_stat + 1) / (mean_cn_samp + 1))
+    } else {
+      cna_stat <- log2(cna_stat + 1)
+    }
+    # 1 if amplified ("justAmp") or deleted ("justDel"), 0 if 2+ copies
   } else if ((cna_bucketing == "bucket_justAmp") | (cna_bucketing == "bucket_justDel")) {
     cna_stat <- unique(as.integer(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE])))
     if (length(cna_stat) > 1) {cna_stat <- cna_stat[1]}
@@ -142,8 +156,8 @@ get_cna_stat <- function(cna_df, sample, cna_bucketing, dataset) {
         } else {print("Currently only implemented for TCGA and METABRIC."); return(NA)}
       }
     }
-  
-  # 3 buckets for deleted, normal, and amplified
+    
+    # 3 buckets for deleted, normal, and amplified
   } else {
     if(dataset == "TCGA") {
       str_buckets <- as.character(unlist(cna_df[,colnames(cna_df) == sample, with = FALSE]))
@@ -167,6 +181,7 @@ get_cna_stat <- function(cna_df, sample, cna_bucketing, dataset) {
   
   return(cna_stat)
 }
+
 
 ############################################################
 
@@ -468,16 +483,21 @@ create_lm_input_table_filename <- function(test, tester_name, run_name, target_u
   cna_bucketing_lab <- "rawCNA"
   if (cna_bucketing != "rawCNA") {cna_bucketing_lab <- paste("CNA", cna_bucketing, sep = "")}
   #mutation_restr <- unlist(strsplit(mutation_regprot_df_name, "_", fixed = TRUE))[1]
-  meth_b_lab <- "Raw"
-  if(meth_bucketing) {meth_b_lab <- "Bucketed"}
-  meth_label <- paste("meth", paste(meth_type, meth_b_lab, sep = ""), sep = "")
-  ici_label_spl <- unlist(strsplit(patient_df_name, "_", fixed = TRUE))
-  ici_label <- ici_label_spl[4]
-  if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
-  if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
-  
-  outfn <- paste(outfn, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
-                                                                     sep = "_"), sep = "_"), sep = "_")
+  if(!(is.na(meth_type) | (meth_type == "NA"))) {
+    meth_b_lab <- "Raw"
+    if(meth_bucketing) {meth_b_lab <- "Bucketed"}
+    meth_label <- paste("meth", paste(meth_type, meth_b_lab, sep = ""), sep = "")
+    
+    ici_label_spl <- unlist(strsplit(patient_df_name, "_", fixed = TRUE))
+    ici_label <- ici_label_spl[4]
+    if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
+    if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
+    outfn <- paste(outfn, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
+                                                 sep = "_"), sep = "_"), sep = "_")
+  } else {
+    outfn <- paste(outfn, paste(expr_norm, cna_bucketing_lab, sep = "_"), sep = "_")
+  }
+
   # paste(mutation_restr, , sep = "_")
   
   # Add PEER factors/ PCs if needed
@@ -602,18 +622,23 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
   cna_bucketing_lab <- "rawCNA"
   if (cna_bucketing != "rawCNA") {cna_bucketing_lab <- paste("CNA", cna_bucketing, sep = "")}
   #mutation_restr <- unlist(strsplit(mutation_regprot_df_name, "_", fixed = TRUE))[1]
-  meth_b_lab <- "Raw"
-  if(meth_bucketing) {
-    meth_b_lab <- "Bucketed"
+  if(!(is.na(meth_type) | (meth_type == "NA"))) {
+    meth_b_lab <- "Raw"
+    if(meth_bucketing) {
+      meth_b_lab <- "Bucketed"
+    }
+    meth_label <- paste("meth", paste(meth_type, meth_b_lab, sep = ""), sep = "")
+    ici_label_spl <- unlist(strsplit(patient_df_name, "_", fixed = TRUE))
+    ici_label <- ici_label_spl[4]
+    if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
+    if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
+    
+    outfn <- paste(outfn, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
+                                                 sep = "_"), sep = "_"), sep = "_")
+  } else {
+    outfn <- paste(outfn, paste(expr_norm, cna_bucketing_lab, sep = "_"), sep = "_")
   }
-  meth_label <- paste("meth", paste(meth_type, meth_b_lab, sep = ""), sep = "")
-  ici_label_spl <- unlist(strsplit(patient_df_name, "_", fixed = TRUE))
-  ici_label <- ici_label_spl[4]
-  if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
-  if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
   
-  outfn <- paste(outfn, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
-                                                                     sep = "_"), sep = "_"), sep = "_")
   # paste(mutation_restr, , sep = "_")
   
   # Add PEER factors/ PCs if needed
@@ -845,17 +870,20 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
   if (!(targ_k == "" | targ_k_ensg == "")) {
     mutation_targ_df <- filter_mut_by_uniprot(mutation_targ_df, targ_k) 
     cna_df <- filter_cna_by_ensg(cna_df, targ_k_ensg)
-    methylation_df <- filter_meth_by_ensg(methylation_df, targ_k_ensg)
+    if(dataset != "Chinese_TN") {
+      methylation_df <- filter_meth_by_ensg(methylation_df, targ_k_ensg)
+    }
     exp_rows_to_keep <- unique(unlist(lapply(targ_k_ensg, function(x) grep(x, expression_df$ensg_id))))
     expression_df <- expression_df[exp_rows_to_keep,]
     
     if(debug) {
       print(paste("dim mutation targ df:", dim(mutation_targ_df)))
       print(paste("dim cna df:", dim(cna_df)))
-      print(paste("dim methylation df:", dim(methylation_df)))
+      if(dataset != "Chinese_TN") {print(paste("dim methylation df:", dim(methylation_df)))}
       print(paste("dim expression df:", dim(expression_df)))
     }
-    
+    print(!(expression_df[, .N] == 0 | cna_df[, .N] == 0 | methylation_df[, .N] == 0 | 
+              mutation_targ_df[, .N] == 0))
     # Continue only if all of these data frames contain information about this target gene k
     if(!(expression_df[, .N] == 0 | cna_df[, .N] == 0 | methylation_df[, .N] == 0 | 
          mutation_targ_df[, .N] == 0)) {
@@ -863,21 +891,25 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
       # Loop through all samples to get the info for each target t_k column
       target_rows <- lapply(1:starter_df[, .N], function(i) {
         sample <- starter_df$sample_id[i]
+        print(sample)
         
         # Is this target mutated? 
         mut_stat <- get_mut_stat_targ(mutation_targ_df, sample)
         
         # Is this target amplified or deleted?
-        cna_stat <- get_cna_stat(cna_df, sample, cna_bucketing, dataset)
+        cna_stat <- get_cna_stat(cna_df, sample, cna_bucketing, dataset, FALSE, NA)
         if(grepl("incl", cna_bucketing)) {cna_stat <- cna_stat[[1]]}    
         
         # Is this target methylated, or differentially methylated?
-        if(analysis_type == "meQTL") {meth_bucketing <- FALSE}
-        meth_stat <- get_meth_stat(methylation_df, sample, meth_bucketing, tumNormMatched)
-        if(meth_bucketing) {
-          meth_stat <- as.integer(meth_stat[[1]])
-          if(length(meth_stat) > 3) {meth_stat <- meth_stat[1:3]}
-        }
+        if(dataset != "Chinese_TN") {
+          if(analysis_type == "meQTL") {meth_bucketing <- FALSE}
+          meth_stat <- get_meth_stat(methylation_df, sample, meth_bucketing, tumNormMatched)
+          if(meth_bucketing) {
+            meth_stat <- as.integer(meth_stat[[1]])
+            if(length(meth_stat) > 3) {meth_stat <- meth_stat[1:3]}
+          }
+        } else {meth_stat <- NA}
+        
         # What is the expression of this target in this sample in cancer?
         exp_stat <- unlist(get_exp_stat(expression_df, sample, tumNormMatched, 
                                         dataset, log_expression))
@@ -945,7 +977,8 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
 ############################################################
 #' Limits the target gene DF to only those targets that don't have an 
 #' existing file in the outpath provided
-#' @param outpath the path to which the LM input files will be written
+#' @param outpath the path to which the LM input files will be written; a list of
+#' paths if we are doing this pan-cancer
 #' @param targets_DF the data frame with gene targets for LM input file creation
 #' @param gene_name_index the numerical index of where the target gene name is found
 #' in a given file name
@@ -1025,8 +1058,12 @@ fix_lm_input_table <- function(lm_input_table) {
 #' @param num_pcs the number of genotypic PCs to include
 #' @param num_PEER the number of PEER factors to include
 #' @param qtl_type the type of model (eQTL or meQTL)
+#' @param cna_df the copy number data frame, in case we want to adjust the CNA columns
+#' @param adjust_cna_rel a TRUE/FALSE value indicating whether or not we are adjusting
+#' the CNA columns to make them relative
 import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, gene_names_sub,
-                                select_drivers, select_args, num_pcs, num_PEER, qtl_type) {
+                                select_drivers, select_args, num_pcs, num_PEER, qtl_type,
+                                cna_df, adjust_cna_rel) {
   
   # Get a threshold for number of samples
   # Set threshold to 25, as suggested in this paper: https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0229345
@@ -1034,6 +1071,9 @@ import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
   print(paste0("Minimum number of samples with data for a given gene:", thres))
   
   num_wo_yvar <- 0
+  
+  cna_samp_dict <- NA
+  if(adjust_cna_rel) {cna_samp_dict <- get_cna_samp_dict(cna_df)}
   
   lm_input_dfs <- lapply(lm_input_fns_sub, function(fn) {
     
@@ -1046,6 +1086,7 @@ import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
         if("ExpStat_k" %fin% colnames(file)) {
           if(nrow(file) >= thres) {
             if(randomize) {file$ExpStat_k <- dqsample(file$ExpStat_k)}
+            if(adjust_cna_rel) {file <- adjust_cna_relative(file, cna_samp_dict)}
             # Do some preliminary filtering of columns we do not need
             file_filt <- filter_input_file(file, select_drivers, select_args, 
                                            num_pcs, num_PEER)
@@ -1082,6 +1123,100 @@ import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
   
   names(lm_input_dfs) <- gene_names_sub
   return(lm_input_dfs)
+}
+
+
+#' Helper function to call the import_lm_input_fns function, given the size of the target set
+#' @param lm_input_fns_sub the names of the input filenames to import (a vector)
+#' @param input_lm_filepath the path where the input files are found
+#' @param randomize TRUE/FALSE value, whether we are randomizing expression/ methylation
+#' @param gene_names_sub the names of all the genes we are looking to import
+#' @param select_drivers the names of particular drivers we'd like to look at
+#' @param select_args particular covariates to include in the model
+#' @param num_pcs the numerical number of genotypic PCs to include
+#' @param num_peer the numerical number of PEER factors to include
+#' @param qtl_type either 'eQTL' or 'meQTL'
+#' @param cna_df the copy number data frame, in case we want to adjust the CNA columns
+#' @param adjust_cna_rel a TRUE/FALSE value indicating whether or not we are adjusting
+#' the CNA columns to make them relative
+#' @param N threshold for splitting into two segments
+call_import_lm_file <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
+                                gene_names_sub, select_drivers, select_args, num_pcs, 
+                                num_peer, qtl_type, cna_df, adj_cna_rel, N) {
+  if(length(lm_input_fns_sub) > N) {
+    lm_input_dfs <- import_lm_input_fns(lm_input_fns_sub[1:N], input_lm_filepath, 
+                                        randomize, gene_names_sub[1:N], select_drivers, 
+                                        select_args, num_pcs, num_peer, qtl_type,
+                                        cna_df, adj_cna_rel)
+  } else {
+    lm_input_dfs <- import_lm_input_fns(lm_input_fns_sub, input_lm_filepath, 
+                                        randomize, gene_names_sub, select_drivers, 
+                                        select_args, num_pcs, num_peer, qtl_type,
+                                        cna_df, adj_cna_rel)
+  }
+  
+  print(paste0("Number of genes discarded:", length(lm_input_dfs[is.na(lm_input_dfs)])))
+  lm_input_dfs <- lm_input_dfs[!is.na(lm_input_dfs)]
+  
+  print("length imported input DFs")
+  print(length(lm_input_dfs))
+  
+  return(lm_input_dfs)
+}
+
+
+############################################################
+#### ADJUST THE CNA COLUMNS TO BE RELATIVE, RATHER THAN ABSOLUTE
+############################################################
+#' For all CNAStat columns (non-bucketed) adjust the value to 
+#' be the relative CNA rather than the absolute CNA; in other words,
+#' rather than log2(CN + 1), it would be log2(CN+1) / log2((CN+1) / (N+1)),
+#' where N is the mean CN value for the middle 80% of the patient's CN values
+#' @param file the file to adjust
+#' @param cna_samp_dict a CN-sample dictionary that contains the N for each sample
+adjust_cna_relative <- function(file, cna_samp_dict) {
+  
+  cna_cols <- which(grepl("CNA", colnames(file)))
+  samples <- file$sample_id
+  
+  for (i in cna_cols) {
+    cna_vals <- as.integer(unlist(file[,i, with = F]))
+    new_cna_vals <- unlist(lapply(1:length(cna_vals), function(j) {
+      cn <- cna_vals[j]
+      # Undo the log2
+      cn <- 2^cn
+      # Divide by N+1 and take the log2 of that
+      n <- cna_samp_dict[[samples[j]]]
+      return(log2(cn/(n+1)))
+    }))
+    file[,i] <- new_cna_vals
+  }
+  return(file)
+}
+
+
+#' Get a copy number sample dictionary (named list) that, for each sample,
+#' has the mean copy number for that sample, across the middle 80% of their genes
+#' @param cna_df full copy number DF for all samples
+get_cna_samp_dict <- function(cna_df) {
+  
+  samples <- colnames(cna_df)
+  samples <- samples[!(samples %in% c("Gene_Symbol", "ensg_id", "ensg_ids", "Swissprot"))]
+  ten_perc <- 0.1 * nrow(cna_df)
+  
+  dictionary <- lapply(samples, function(samp) {
+    cna_vals_samp <- as.integer(unlist(cna_df[,colnames(cna_df) == samp, with = F]))
+    
+    # Get rid of the top 10% and bottom 10% of CNA values for this sample
+    cna_vals_samp <- sort(cna_vals_samp)
+    cna_vals_samp_sub <- cna_vals_samp[ten_perc:(length(cna_vals_samp)-ten_perc)]
+    # Find the mean of the remaining values
+    mean_cn_samp <- mean(cna_vals_samp_sub)
+    return(mean_cn_samp)
+  })
+  names(dictionary) <- samples
+  
+  return(dictionary)
 }
 
 

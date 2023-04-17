@@ -52,7 +52,8 @@ if(args$dataset == "TCGA") {
 }
 output_vis_path <- paste(output_vis_path, args$QTLtype, sep = "/")
 
-if ((args$cancerType == "PanCancer") & (args$specificTypes != "ALL")) {
+print(ct)
+if ((args$cancerType == "PanCancer") & (!(args$specificTypes == "ALL"))) {
   output_vis_path <- paste(output_vis_path, ct, sep = "/")
 }
 
@@ -145,13 +146,13 @@ mh_correct <- function(results_table, per_gene, fn_qvalvis, fn_qvalsum) {
 if("p.value" %fin% colnames(master_df_mut)) {
   if(!useNumFunctCopies) {
     fn_mut_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-    fn_cna_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    #fn_cna_qvalvis <- paste(output_vis_path, paste("Q-ValueVisualiz_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
     fn_mut_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-    fn_cna_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    #fn_cna_qvalsum <- paste(output_vis_path, paste("Q-ValueSummary_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
     
     tryCatch({
       master_df_mut_corrected <- mh_correct(master_df_mut, correct_per_gene, fn_mut_qvalvis, fn_mut_qvalsum)
-      master_df_cna_corrected <- mh_correct(master_df_cna, correct_per_gene, fn_cna_qvalvis, fn_cna_qvalsum)
+      #master_df_cna_corrected <- mh_correct(master_df_cna, correct_per_gene, fn_cna_qvalvis, fn_cna_qvalsum)
     }, error = function(cond) {print(cond)})
   } else {
     fn_fnc_qvalvis <- paste(output_vis_path, correct_per_gene, paste("Q-ValueVisualiz_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
@@ -162,7 +163,7 @@ if("p.value" %fin% colnames(master_df_mut)) {
   }
 } else {
   master_df_mut_corrected <- master_df_mut
-  master_df_cna_corrected <- master_df_cna
+  #master_df_cna_corrected <- master_df_cna
 }
 
 ############################################################
@@ -197,13 +198,15 @@ if(!useNumFunctCopies) {
     # Call this function
     print(paste("Run regprots jointly:", runRegprotsJointly))
     master_df_mut_corrected <- add_targ_regprot_gns(master_df_mut_corrected, all_genes_id_conv, runRegprotsJointly)
-    master_df_cna_corrected <- add_targ_regprot_gns(master_df_cna_corrected, all_genes_id_conv, runRegprotsJointly)
+    #master_df_cna_corrected <- add_targ_regprot_gns(master_df_cna_corrected, all_genes_id_conv, runRegprotsJointly)
     
     # Write this to a new file
     outfn <- str_replace(outfn, "uncorrected", "corrected") 
     print(paste("NEW FN:", outfn))
-    fwrite(master_df_mut_corrected, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
-    fwrite(master_df_cna_corrected, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
+    print(head(master_df_mut_corrected))
+    print(paste(outpath_curr, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
+    fwrite(master_df_mut_corrected, paste(outpath_curr, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
+    #fwrite(master_df_cna_corrected, paste(outpath_curr, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
   }, error = function(cond) {print(cond)})
 } else {
   tryCatch({
@@ -213,7 +216,7 @@ if(!useNumFunctCopies) {
     # Write this to a new file
     outfn <- str_replace(outfn, "uncorrected", "corrected") 
     print(paste("NEW FN:", outfn))
-    fwrite(master_df_fnc_corrected, paste(outpath, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
+    fwrite(master_df_fnc_corrected, paste(outpath_curr, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
   }, error = function(cond) {print(cond)})
 }
 
@@ -240,10 +243,10 @@ visualize_beta_distrib <- function(results_table) {
 # Create specific filenames
 if(!useNumFunctCopies) {
   fn_mut <- paste(output_vis_path, paste("BetaDistrib_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-  fn_cna <- paste(output_vis_path, paste("BetaDistrib_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+  #fn_cna <- paste(output_vis_path, paste("BetaDistrib_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
   
   print(paste("FN MUT:", fn_mut))
-  print(paste("FN CNA:", fn_cna))
+  #print(paste("FN CNA:", fn_cna))
   
   # Call this function & save output
   tryCatch({
@@ -251,9 +254,9 @@ if(!useNumFunctCopies) {
     visualize_beta_distrib(master_df_mut)
     dev.off()
     
-    png(fn_cna, width = 450, height = 350)
-    visualize_beta_distrib(master_df_cna)
-    dev.off()
+    #png(fn_cna, width = 450, height = 350)
+    #visualize_beta_distrib(master_df_cna)
+    #dev.off()
   }, error = function(cond) {print(cond)})
 } else {
   fn_fnc <- paste(output_vis_path, paste("BetaDistrib_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
@@ -283,7 +286,7 @@ visualize_pval_distrib <- function(results_table) {
 if("p.value" %fin% colnames(master_df_mut)) {
   if(!useNumFunctCopies) {
     fn_mut <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_MUT", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
-    fn_cna <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
+    #fn_cna <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_CNA", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
     
     # Call this function & save output
     tryCatch({
@@ -291,9 +294,9 @@ if("p.value" %fin% colnames(master_df_mut)) {
       visualize_pval_distrib(master_df_mut)
       dev.off()
       
-      png(fn_cna, width = 450, height = 350)
-      visualize_pval_distrib(master_df_cna)
-      dev.off()
+      #png(fn_cna, width = 450, height = 350)
+      #visualize_pval_distrib(master_df_cna)
+      #dev.off()
     }, error = function(cond) {print(cond)})
   } else {
     fn_fnc <- paste(output_vis_path, paste("P-ValDistrib_", paste(paste(outfn_vis, "_FNC", sep = ""), ").png", sep = ""), sep = ""), sep = "/")
@@ -543,10 +546,10 @@ if(!useNumFunctCopies) {
     #outfn <- str_replace(outfn, "corrected_", "") 
     #outfn <- str_replace(outfn, "res", "sig_res")
     #if(length(master_df_mut_sig) > 0) {
-      #fwrite(master_df_mut_sig, paste(outpath, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
+      #fwrite(master_df_mut_sig, paste(outpath_curr, paste(outfn, paste("_MUT", ".csv", sep = ""), sep = ""), sep = "/"))
     #}
     #if(length(master_df_cna_sig) > 0) {
-      #fwrite(master_df_cna_sig, paste(outpath, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
+      #fwrite(master_df_cna_sig, paste(outpath_curr, paste(outfn, paste("_CNA", ".csv", sep = ""), sep = ""), sep = "/"))
     #}
   }, error = function(cond) {print(cond)})
 } else {
@@ -557,7 +560,7 @@ if(!useNumFunctCopies) {
     #outfn <- str_replace(outfn, "corrected_", "") 
     #outfn <- str_replace(outfn, "res", "sig_res")
     #if(length(master_df_fnc_sig) > 0) {
-      #fwrite(master_df_fnc_sig, paste(outpath, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
+      #fwrite(master_df_fnc_sig, paste(outpath_curr, paste(outfn, paste("_FNC", ".csv", sep = ""), sep = ""), sep = "/"))
     #}
   }, error = function(cond) {print(cond)})
 }

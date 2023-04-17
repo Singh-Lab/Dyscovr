@@ -46,7 +46,7 @@ parser <- ArgumentParser()
 
 # Data set we are running on
 parser$add_argument("--dataset", default = "TCGA", type = "character", 
-                    help = "TCGA, METABRIC, ICGC, or CPTAC3. Default is TCGA.")
+                    help = "TCGA, METABRIC, Chinese_TN, ICGC, or CPTAC3. Default is TCGA.")
 
 # Type of QTL to run 
 parser$add_argument("--QTLtype", default = "eQTL", type = "character", 
@@ -212,6 +212,11 @@ if(args$cancerType == "BRCA") {
   if(args$dataset == "METABRIC") {
     main_path <- paste0(input_file_path, "METABRIC/")
     prot_path <- paste(input_file_path, "METABRIC/", sep = "")
+    
+  } else if (args$dataset == "Chinese_TN") {
+    main_path <- paste0(input_file_path, "Chinese_TN/")
+    prot_path <- paste(input_file_path, "Chinese_TN/", sep = "")
+  
   } else {
     if(!tumNormMatched) {
       main_path <- paste(input_file_path, "BRCA/tumor_only/", sep = "")
@@ -251,8 +256,23 @@ all_genes_id_conv <- fread("/Genomics/grid/users/scamilli/thesis_work/run-model-
 # import only the proteins at the given specificity level of interest under label "protein_ids_df"
 protein_ids_df <- data.frame()
 if(!test) {
-  protein_ids_df <- fread(paste(prot_path, args$protein_ids_df, sep = ""), 
-                          header = TRUE)
+  if(args$cancerType == "PanCancer") {
+    if(args$specificTypes == "ALL") {
+      protein_ids_df <- fread(paste(prot_path, args$protein_ids_df, sep = ""), 
+                              header = TRUE)
+    } else {
+      types <- unlist(strsplit(args$specificTypes, ";", fixed = T))
+      protein_ids_df <- lapply(types, function(ct) {
+        new_name <- paste0(prot_path, paste0(args$protein_ids_df, paste0(ct, ".csv")))
+        return(fread(new_name, header = TRUE))
+      })
+      names(protein_ids_df) <- types
+    }
+  } else {
+    protein_ids_df <- fread(paste(prot_path, args$protein_ids_df, sep = ""), 
+                            header = TRUE)
+  }
+
 } else {
   sample_protein_uniprot <- args$tester_uniprot_id
   sample_protein_ensg <- args$tester_ensg_id
@@ -297,31 +317,32 @@ if(grepl("transform", args$expression_df) | grepl("zscore", args$expression_df) 
 ############################################################
 # IMPORT METHYLATION FILES
 ############################################################
-methylation_df <- fread(paste(main_path, paste("methylation/", args$methylation_df, sep = ""), sep = ""),
-                        header = TRUE)
-#methylation_df <- methylation_df[,2:ncol(methylation_df)]
-colnames(methylation_df)[which(colnames(methylation_df) == "Gene_Symbol")] <- "gene_name"
-
-# If we're using bucketed methylation values AND running an meQTL, we'll need an 
-# additional DF with the raw Beta values to use as the outcome variable
-if((args$QTLtype == "meQTL") & (grepl("bucketed", args$methylation_df))) {
-  methylation_df_meQTL <- fread(paste(main_path, paste("methylation/", args$methylation_df_meQTL, sep = ""), sep = ""),
-                                header = TRUE)
-  methylation_df_meQTL <- methylation_df_meQTL[,2:ncol(methylation_df_meQTL)]
-  colnames(methylation_df_meQTL)[which(colnames(methylation_df_meQTL) == "Gene_Symbol")] <- "gene_name"
+if(args$dataset != "Chinese_TN") {
+  methylation_df <- fread(paste(main_path, paste("methylation/", args$methylation_df, sep = ""), sep = ""),
+                          header = TRUE)
+  #methylation_df <- methylation_df[,2:ncol(methylation_df)]
+  colnames(methylation_df)[which(colnames(methylation_df) == "Gene_Symbol")] <- "gene_name"
   
-} else {methylation_df_meQTL <- NA}
-
-if(debug) {
-  print("Methylation DF")
-  print(head(methylation_df))
+  # If we're using bucketed methylation values AND running an meQTL, we'll need an 
+  # additional DF with the raw Beta values to use as the outcome variable
+  if((args$QTLtype == "meQTL") & (grepl("bucketed", args$methylation_df))) {
+    methylation_df_meQTL <- fread(paste(main_path, paste("methylation/", args$methylation_df_meQTL, sep = ""), sep = ""),
+                                  header = TRUE)
+    methylation_df_meQTL <- methylation_df_meQTL[,2:ncol(methylation_df_meQTL)]
+    colnames(methylation_df_meQTL)[which(colnames(methylation_df_meQTL) == "Gene_Symbol")] <- "gene_name"
+    
+  } else {methylation_df_meQTL <- NA}
   
-  if(!is.na(methylation_df_meQTL)) {
-    print("Methylation DF meQTL")
-    print(head(methylation_df_meQTL))
+  if(debug) {
+    print("Methylation DF")
+    print(head(methylation_df))
+    
+    if(!is.na(methylation_df_meQTL)) {
+      print("Methylation DF meQTL")
+      print(head(methylation_df_meQTL))
+    }
   }
 }
-
 
 ############################################################
 # IMPORT GENE TARGET MUTATION FILES
@@ -425,17 +446,19 @@ if(ncol(targets_DF) > 2) {
 
 # Regardless of method, limit targets to only those that overlap the genes in the expression 
 # and methylation DFs
-methylation_ensg_ids <- unlist(lapply(methylation_df$ensg_ids, function(ids) 
-  unlist(strsplit(as.character(ids), ";", fixed = TRUE))))
-rows_to_keep <- unlist(lapply(1:length(targets_DF$ensg), function(i) {
-  targs <- unlist(strsplit(as.character(targets_DF[i,'ensg']), ";", fixed = TRUE))
-  if (any(targs %fin% expression_df$ensg_id)) {
-    if(any(targs %fin% methylation_ensg_ids)) {
-      return(TRUE)
+if(args$dataset != "Chinese_TN") {
+  methylation_ensg_ids <- unlist(lapply(methylation_df$ensg_ids, function(ids) 
+    unlist(strsplit(as.character(ids), ";", fixed = TRUE))))
+  rows_to_keep <- unlist(lapply(1:length(targets_DF$ensg), function(i) {
+    targs <- unlist(strsplit(as.character(targets_DF[i,'ensg']), ";", fixed = TRUE))
+    if (any(targs %fin% expression_df$ensg_id)) {
+      if(any(targs %fin% methylation_ensg_ids)) {
+        return(TRUE)
+      } else {return(FALSE)}
     } else {return(FALSE)}
-  } else {return(FALSE)}
-}))
-targets_DF <- targets_DF[rows_to_keep,]
+  }))
+  targets_DF <- targets_DF[rows_to_keep,]
+}
 
 if(debug) {
   print("Targets DF")
@@ -697,7 +720,7 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
       regprot <- protein_ids_df$swissprot_ids[i]
       regprot_ensg <- unlist(strsplit(protein_ids_df$ensg_ids[i], ";", fixed = TRUE))
       
-      #print(paste("Regulatory protein", paste(i, paste("/", protein_ids_df[, .N]))))
+      print(paste("Regulatory protein", paste(i, paste("/", protein_ids_df[, .N]))))
       
       # Create a starter table that gets the mutation, CNA, and methylation status 
       # for this regulatory protein and bind it to the patient DF
@@ -730,6 +753,7 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
     
     # Bind these together
     regprot_df <- do.call(cbind, protein_input_dfs)
+    print(head(regprot_df))
     
     # Add the patient/ sample DF to this 
     starter_df <- cbind(patient_df, regprot_df)
@@ -748,7 +772,10 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
     doParallel::registerDoParallel(parallel_cluster)
     
     list_of_rows <- split(downstream_target_df, f = seq(nrow(downstream_target_df)))
-    
+    if(dataset == "Chinese_TN") {
+      methylation_df <- NA
+      methylation_df_meQTL <- NA
+    }
     
     lm_input_tables <- foreach(currentRow = list_of_rows, 
                               .export = c("methylation_df", "methylation_df_meQTL", "starter_df", "mutation_targ_df",
@@ -789,12 +816,13 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
         }
         
         if(!is.na(lm_input_table)) {
-          
+
           tryCatch({
-            # First, remove any columns that are entirely NA (e.g., a given driver did not 
+            # First, remove any columns that are entirely NA or 0 (e.g., a given driver did not 
             # have CNA or methylation data reported)
             lm_input_table <- lm_input_table[, which(unlist(lapply(lm_input_table, function(x)
               !all(is.na(x))))), with = FALSE]
+            lm_input_table <- lm_input_table[, colSums(lm_input_table != 0, na.rm = T) > 0, with = FALSE]
             
             # Then, if a row has NA, remove that whole row and predict without it
             #lm_input_table <- na.exclude(lm_input_table)
@@ -883,9 +911,11 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg, m
   # Filter the data frames to look at only this regulatory protein
   mutation_targ_df_sub <- mutation_targ_df[grepl(regprot_i_uniprot, mutation_targ_df$Swissprot),]
   print(dim(mutation_targ_df_sub))
-  cna_df_sub <- filter_cna_by_ensg(cna_df, regprot_i_ensg)   
-  methylation_df_sub <- filter_meth_by_ensg(methylation_df, regprot_i_ensg)  
-  
+  cna_df_sub <- filter_cna_by_ensg(cna_df, regprot_i_ensg)  
+  if(dataset != "Chinese_TN") {
+    methylation_df_sub <- filter_meth_by_ensg(methylation_df, regprot_i_ensg) 
+  }
+   
   #print(paste("REGPROT_i ENSG:", regprot_i_ensg))
   
   # Optionally, add mutation, CNA status covariates for PIK3CA if regprot is TP53 and vice versa 
@@ -921,16 +951,23 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg, m
     else {mut_stat <- 1}
     
     # Does this regulatory protein have a CNA in cancer?
-    cna_stat <- get_cna_stat(cna_df_sub, sample, cna_bucketing, dataset)
-    if(grepl("incl", cna_bucketing)) {cna_stat <- as.integer(cna_stat[[1]])}    
+    cna_stat <- get_cna_stat(cna_df_sub, sample, cna_bucketing, dataset, FALSE, NA)
+    #cna_vect_sample <- unlist(cna_df[,colnames(cna_df) == sample, with = F])
+    #cna_stat <- get_cna_stat(cna_df_sub, sample, cna_bucketing, dataset, TRUE, cna_vect_sample)
+    if(grepl("incl", cna_bucketing)) {cna_stat <- as.integer(cna_stat[[1]])}     
     
     # Does this regulatory protein have a methylation marker in cancer, or differential 
     # methylation between tumor and normal?
-    meth_stat <- get_meth_stat(methylation_df_sub, sample, meth_bucketing, tumNormMatched)
-    if(meth_bucketing) {
-      meth_stat <- as.integer(meth_stat[[1]])
-      if(length(meth_stat) > 3) {meth_stat <- meth_stat[1:3]}
+    if(dataset != "Chinese_TN") {
+      meth_stat <- get_meth_stat(methylation_df_sub, sample, meth_bucketing, tumNormMatched)
+      if(meth_bucketing) {
+        meth_stat <- as.integer(meth_stat[[1]])
+        if(length(meth_stat) > 3) {meth_stat <- meth_stat[1:3]}
+      }
+    } else {
+      meth_stat <- NA
     }
+    
     
     # If we are using the functional number of copies info, what is the functional
     # number of copies for this protein in this sample?
@@ -1091,7 +1128,7 @@ get_next_mut_driver_dfs <- function(regprot_i_ensg, cna_df, mutation_regprot_df)
 get_altern_stats <- function(regprot_i_ensg, cna_df_sub, cna_df_altern, bucket_type,
                              mutation_regprot_df, sample, dataset, mut_stat) {
   
-  altern_cna_stat <- get_cna_stat(cna_df_altern, sample, bucket_type, dataset)
+  altern_cna_stat <- get_cna_stat(cna_df_altern, sample, bucket_type, dataset, FALSE, NA)
   mutation_regprot_df_sub <- mutation_regprot_df[Patient %like% sample]
   if(mutation_regprot_df_sub[, .N] > 0) {
     altern_mut_stat <- 1
@@ -1170,7 +1207,7 @@ if(args$patientsOfInterest != "") {
   gene_name_index <- gene_name_index + 1
   outpath <- paste0(outpath, paste0("/subtype_files", args$patientOfInterestLabel))
 }
-targets_DF <- limit_to_targets_wo_existing_files(outpath, targets_DF, gene_name_index)
+#targets_DF <- limit_to_targets_wo_existing_files(outpath, targets_DF, gene_name_index)
 
 ############################################################
 # IF RUNNING PER-CANCER WITH SPECIFIC CANCER TYPES, GET 
@@ -1232,10 +1269,15 @@ if(is.na(patient_cancer_mapping)) {
     patient_df <- subset_by_intersecting_ids(patients_of_interest, patient_df, FALSE, tumNormMatched, args$dataset)
     mutation_targ_df <- subset_by_intersecting_ids(patients_of_interest, mutation_targ_df, TRUE, tumNormMatched, args$dataset)
     #mutation_regprot_df <- subset_regprot_df_by_intersecting_ids(patients_of_interest, mutation_regprot_df, tumNormMatched, args$dataset)
-    methylation_df <- subset_by_intersecting_ids(patients_of_interest, methylation_df, TRUE, tumNormMatched, args$dataset)
-    if(!is.na(methylation_df_meQTL)) {
-      methylation_df_meQTL <- subset_by_intersecting_ids(patients_of_interest, methylation_df_meQTL, TRUE, tumNormMatched, args$dataset)
-    } else {methylation_df_meQTL <- NA} 
+    if(args$dataset != "Chinese_TN") {
+      methylation_df <- subset_by_intersecting_ids(patients_of_interest, methylation_df, TRUE, tumNormMatched, args$dataset)
+      if(!is.na(methylation_df_meQTL)) {
+        methylation_df_meQTL <- subset_by_intersecting_ids(patients_of_interest, methylation_df_meQTL, TRUE, tumNormMatched, args$dataset)
+      } else {methylation_df_meQTL <- NA} 
+    } else {
+      methylation_df <- NA
+      methylation_df_meQTL <- NA
+    }
     cna_df <- subset_by_intersecting_ids(patients_of_interest, cna_df, TRUE, tumNormMatched, args$dataset)
     expression_df <- subset_by_intersecting_ids(patients_of_interest, expression_df, TRUE, tumNormMatched, args$dataset)
     if(useNumFunctCopies) {num_funct_copies_DF <- subset_by_intersecting_ids(patients_of_interest, num_funct_copies_DF, FALSE, tumNormMatched, args$dataset)}
@@ -1246,10 +1288,12 @@ if(is.na(patient_cancer_mapping)) {
     patient_df <- remove_metastatic_samples(patient_df, FALSE)
     mutation_targ_df <- remove_metastatic_samples(mutation_targ_df, TRUE)
     #mutation_regprot_df <- remove_metastatic_samples_regprot(mutation_regprot_df)
-    methylation_df <- remove_metastatic_samples(methylation_df, TRUE)
-    if(!is.na(methylation_df_meQTL)) {
-      methylation_df_meQTL <- remove_metastatic_samples(methylation_df_meQTL, TRUE)
-    } else {methylation_df_meQTL <- NA} 
+    if(args$dataset != "Chinese_TN") {
+      methylation_df <- remove_metastatic_samples(methylation_df, TRUE)
+      if(!is.na(methylation_df_meQTL)) {
+        methylation_df_meQTL <- remove_metastatic_samples(methylation_df_meQTL, TRUE)
+      } else {methylation_df_meQTL <- NA} 
+    } 
     cna_df <- remove_metastatic_samples(cna_df, TRUE)
     expression_df <- remove_metastatic_samples(expression_df, TRUE)
     if(useNumFunctCopies) {num_funct_copies_DF <- remove_metastatic_samples(num_funct_copies_DF, FALSE)}
@@ -1307,10 +1351,15 @@ if(is.na(patient_cancer_mapping)) {
     patient_df_sub <- subset_by_intersecting_ids(patient_ids, patient_df, FALSE, tumNormMatched, args$dataset)
     mutation_targ_df_sub <- subset_by_intersecting_ids(patient_ids, mutation_targ_df, TRUE, tumNormMatched, args$dataset)
     #mutation_regprot_df_sub <- subset_regprot_df_by_intersecting_ids(patient_ids, mutation_regprot_df, tumNormMatched, args$dataset)
-    methylation_df_sub <- subset_by_intersecting_ids(patient_ids, methylation_df, TRUE, tumNormMatched, args$dataset)
-    if(!is.na(methylation_df_meQTL)) {
-      methylation_df_meQTL_sub <- subset_by_intersecting_ids(patient_ids, methylation_df_meQTL, TRUE, tumNormMatched, args$dataset)
-    } else {methylation_df_meQTL_sub <- NA} 
+    if(args$dataset != "Chinese_TN") {
+      methylation_df_sub <- subset_by_intersecting_ids(patient_ids, methylation_df, TRUE, tumNormMatched, args$dataset)
+      if(!is.na(methylation_df_meQTL)) {
+        methylation_df_meQTL_sub <- subset_by_intersecting_ids(patient_ids, methylation_df_meQTL, TRUE, tumNormMatched, args$dataset)
+      } else {methylation_df_meQTL_sub <- NA} 
+    } else {
+      methylation_df <- NA
+      methylation_df_meQTL <- NA
+    }
     cna_df_sub <- subset_by_intersecting_ids(patient_ids, cna_df, TRUE, tumNormMatched, args$dataset)
     expression_df_sub <- subset_by_intersecting_ids(patient_ids, expression_df, TRUE, tumNormMatched, args$dataset)
     if(useNumFunctCopies) {num_funct_copies_DF_sub <- subset_by_intersecting_ids(patients_of_interest, num_funct_copies_DF, FALSE, tumNormMatched, args$dataset)}
@@ -1320,17 +1369,22 @@ if(is.na(patient_cancer_mapping)) {
       patient_df <- remove_metastatic_samples(patient_df, FALSE)
       mutation_targ_df <- remove_metastatic_samples(mutation_targ_df, TRUE)
       #mutation_regprot_df <- remove_metastatic_samples_regprot(mutation_regprot_df)
-      methylation_df <- remove_metastatic_samples(methylation_df, TRUE)
-      if(!is.na(methylation_df_meQTL)) {
-        methylation_df_meQTL <- remove_metastatic_samples(methylation_df_meQTL, TRUE)
-      } else {methylation_df_meQTL <- NA} 
+      if(args$dataset != "Chinese_TN") {
+        methylation_df <- remove_metastatic_samples(methylation_df, TRUE)
+        if(!is.na(methylation_df_meQTL)) {
+          methylation_df_meQTL <- remove_metastatic_samples(methylation_df_meQTL, TRUE)
+        } else {methylation_df_meQTL <- NA} 
+      } 
       cna_df <- remove_metastatic_samples(cna_df, TRUE)
       expression_df <- remove_metastatic_samples(expression_df, TRUE)
       if(useNumFunctCopies) {num_funct_copies_DF <- remove_metastatic_samples(num_funct_copies_DF, FALSE)}
     }
     
+    name <- names(patient_cancer_mapping)[i]
+    protein_ids_df_spec <- protein_ids_df[[name]]
+    
     # Run the model with these subsetted files
-    lm_input_tables <- create_lm_input_table(protein_ids_df = protein_ids_df, 
+    lm_input_tables <- create_lm_input_table(protein_ids_df = protein_ids_df_spec, 
                                             downstream_target_df = targets_DF, 
                                             patient_df = patient_df_sub,
                                             mutation_df_targ =  mutation_targ_df_sub,
@@ -1349,7 +1403,7 @@ if(is.na(patient_cancer_mapping)) {
                                             num_PEER = args$num_PEER,
                                             num_pcs = args$num_pcs,
                                             debug = debug,
-                                            outpath = outpath, 
+                                            outpath = outpath_i, 
                                             removeCis = removeCis,
                                             removeMetastatic = removeMetastatic,
                                             all_genes_id_conv = all_genes_id_conv,
