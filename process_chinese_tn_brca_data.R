@@ -107,6 +107,10 @@ mut_count_matrix_silent_full <- rbind(mut_count_matrix_silent,
 write.csv(mut_count_matrix_nonsyn_full, paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous.csv"))
 write.csv(mut_count_matrix_silent_full, paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_silent.csv"))
 
+# Read back
+mut_count_matrix_nonsyn_full <- read.csv(paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous.csv"),
+                                         header = T, check.names = F, row.names = 1)
+
 # Add total nonsynonymous mutational burden to clinical DF, using get_num_mutations_per_patient function
 # from maf_helper_functions.R
 tmb <- get_num_mutations_per_patient(mut_count_matrix_nonsyn_full)
@@ -114,21 +118,45 @@ tmb$Project_ID <- rownames(tmb)
 tn_clinical_df <- merge(tn_clinical_df, tmb, by = "Project_ID")
 colnames(tn_clinical_df)[which(colnames( tn_clinical_df) == "Total.Num.Mut")] <- "Total.Num.Muts"
 
+############################################################
+### FILTER PATIENTS THAT EXCEED A FIXED HYPERMUTATOR THRESHOLD, IF NEEDED
+############################################################
+# Using uniform threshold of 368, as from paper (see TCGA analysis)
+thres <- 368
+
+# Limit to those samples below this threshold
+mut_count_matrix_nonsyn_colsums <- unlist(lapply(1:ncol(mut_count_matrix_nonsyn_full), function(i) {
+  vals <- as.integer(unlist(mut_count_matrix_nonsyn_full[,i]))
+  return(length(vals[vals > 0]))
+}))
+
+# Visualize this 
+hist(mut_count_matrix_nonsyn_colsums, main = "Total Mutation Counts per Patient, Chinese TN BRCA", xlab = "Total # of Mutations")
+
+mut_count_matrix_nonsyn_sub <- mut_count_matrix_nonsyn_full[, which(mut_count_matrix_nonsyn_colsums < thres)]
+write.csv(mut_count_matrix_nonsyn_sub, paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous_uniformHypermutRm.csv"))
+
 
 ############################################################
 ### IMPORT CNA DATA
 ############################################################
 # Import CNA data file (0 is normal, -1 is deletion of 1 copy, -2 is deletion of 2 copies, 2+ is amplification)
 # Will have to use bucketing method for this CNA data
-tn_cna_df <- read.table(paste0(main_path, "FUSCCTNBC_MergedASCATSegmentations.txt"), header = TRUE, 
-                              sep = "\t", check.names = FALSE)
+#tn_cna_df <- read.table(paste0(main_path, "FUSCCTNBC_MergedASCATSegmentations.txt"), header = TRUE, 
+#                              sep = "\t", check.names = FALSE)
+tn_cna_df <- read.table(paste0(main_path, "GISTIC_files/all_data_by_genes.txt"), header = TRUE, 
+                                                      sep = "\t", check.names = FALSE)
 
 # Remove the Entrez ID & HUGO ID columns, use ENSG IDs instead
-ensg_ids <- unlist(lapply(tn_cna_df$Hugo_Symbol, function(x) 
-  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x,'ensembl_gene_id'])), collapse = ";")))
+ensg_ids <- unlist(lapply(tn_cna_df$`Gene Symbol`, function(x) {
+  symb <- unlist(strsplit(x, "|", fixed = T))[1]
+  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == symb,'ensembl_gene_id'])), 
+        collapse = ";")
+}))
 tn_cna_df <- tn_cna_df[ensg_ids != "",]
 ensg_ids <- ensg_ids[ensg_ids != ""]
-tn_cna_df <- tn_cna_df[,3:ncol(tn_cna_df)]
+
+tn_cna_df <- tn_cna_df[,4:ncol(tn_cna_df)]
 rownames(tn_cna_df) <- make.names(ensg_ids, unique = TRUE)
 
 # Write to file
@@ -138,9 +166,8 @@ write.csv(tn_cna_df, paste0(output_path, "CNV/CNA_DF_AllGenes_CancerOnly.csv"))
 ############################################################
 ### READ PROCESSED FILES BACK AND ADJUST HEADERS
 ############################################################
-
 ## MUTATION GENE TARG DF ##
-tn_mutation_count_df_nonsynonymous <- read.csv(paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous.csv"), 
+tn_mutation_count_df_nonsynonymous <- read.csv(paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous_uniformHypermutRm.csv"), 
                                                      header = TRUE, check.names = FALSE)
 tn_mutation_count_df_silent <- read.csv(paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_silent.csv"), 
                                               header = TRUE, check.names = FALSE)
@@ -154,17 +181,17 @@ tn_mutation_count_df_silent$Swissprot <- unlist(lapply(tn_mutation_count_df_sile
 
 
 ## CNA DF ##
-tn_cna_df <- read.csv(paste0(output_path, "CNV/CNA_DF_AllGenes.csv"), 
+tn_cna_df <- read.csv(paste0(output_path, "CNV/CNA_DF_AllGenes_CancerOnly.csv"), 
                             header = TRUE, check.names = FALSE, row.names = 1)
 
 ## EXPRESSION DF ##
 tn_expression_df <- read.csv(paste0(output_path, "Expression/expression_FPKM_filtBySD1_DF.csv"), 
-                                   header = TRUE, check.names = FALSE)
+                                   header = TRUE, check.names = FALSE, row.names = 1)
 colnames(tn_expression_df)[1] <- 'ensg_id'
 
 
 ## PATIENT SAMPLE DF ## 
-tn_patient_sample_df <- read.csv(paste0(main_path, "Patient and Sample DFs/combined_patient_sample_DF.csv"), 
+tn_patient_sample_df <- read.csv(paste0(output_path, "Patient and Sample DFs/combined_patient_sample_DF.csv"), 
                                  header = T, check.names = F)
 colnames(tn_patient_sample_df)[1] <- "sample_id"
 
@@ -172,10 +199,10 @@ colnames(tn_patient_sample_df)[1] <- "sample_id"
 ############################################################
 ### ENSURE ALL IDS STILL OVERLAP
 ############################################################
-mutation_ids_nonsyn <- unique(unlist(lapply(tn_mutation_df_nonsynonymous$Tumor_Sample_Barcode, function(x) 
-  unlist(strsplit(x, ";", fixed = TRUE)))))  #271
-mutation_ids_silent <- unique(unlist(lapply(tn_mutation_df_silent$Tumor_Sample_Barcode, function(x) 
-  unlist(strsplit(x, ";", fixed = TRUE)))))  #271
+mutation_ids_nonsyn <- unique(colnames(tn_mutation_count_df_nonsynonymous)[!(colnames(tn_mutation_count_df_nonsynonymous) %in%
+                                                                               c("Gene_Symbol", "Swissprot"))])  #270
+mutation_ids_silent <- unique(colnames(tn_mutation_count_df_silent)[!(colnames(tn_mutation_count_df_silent) %in%
+                                                                               c("Gene_Symbol", "Swissprot"))])  #271
 
 cna_ids <- colnames(tn_cna_df) #401
 
@@ -184,7 +211,7 @@ expression_ids <- colnames(tn_expression_df)[2:ncol(tn_expression_df)]  #258
 patient_sample_ids <- tn_patient_sample_df$sample_id #270
 
 intersecting_patients <- intersect(cna_ids, intersect(expression_ids, intersect(mutation_ids_nonsyn, patient_sample_ids)))
-print(length(intersecting_patients)) # 168 patients 
+print(length(intersecting_patients)) # 167 patients 
 
 write.table(intersecting_patients, "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/TripleNeg_Chinese/intersecting_ids.txt",
             quote = FALSE, row.names = FALSE)
@@ -196,103 +223,28 @@ intersecting_patients <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main
 ############################################################
 ### IF NECESSARY, SUBSET FINALIZED DATASETS BY INTERSECTING IDs
 ############################################################
-tn_mutation_count_df_missense_sub <- tn_mutation_count_df_missense[, c(1, which(colnames(tn_mutation_count_df_missense) %in% 
-                                                                                              intersecting_patients))]
-tn_mutation_count_df_misAndNon_sub <- tn_mutation_count_df_misAndNon[, c(1, which(colnames(tn_mutation_count_df_misAndNon) %in% 
-                                                                                                intersecting_patients))]
 tn_mutation_count_df_nonsynonymous_sub <- tn_mutation_count_df_nonsynonymous[, c(1, which(colnames(tn_mutation_count_df_nonsynonymous) %in% 
-                                                                                                        intersecting_patients))]
+                                                                                            intersecting_patients), 
+                                                                                 ncol(tn_mutation_count_df_nonsynonymous))]
 tn_mutation_count_df_silent_sub <- tn_mutation_count_df_silent[, c(1, which(colnames(tn_mutation_count_df_silent) %in% 
-                                                                                          intersecting_patients))]
-
+                                                                                            intersecting_patients), 
+                                                                                 ncol(tn_mutation_count_df_silent))]
 tn_cna_df_sub <- tn_cna_df[, c(1, which(colnames(tn_cna_df) %in% intersecting_patients))]
 
 
 tn_expression_df_sub <- tn_expression_df[, c(1, which(colnames(tn_expression_df) %in% intersecting_patients))]
 
-tn_methylation_df_log2_sub <- tn_methylation_df_log2[, c(1, which(colnames(tn_methylation_df_log2) %in% intersecting_patients))]
-tn_methylation_df_logit_sub <- tn_methylation_df_logit[, c(1, which(colnames(tn_methylation_df_logit) %in% intersecting_patients))]
-
 tn_patient_sample_df_sub <- tn_patient_sample_df[tn_patient_sample_df$sample_id %in% intersecting_patients,]
 
-
-# Do this for the labels on the regprot data frame as well
-get_mutation_df_new_patient_labels <- function(tn_mutation_df, intersecting_patients) {
-  mutation_df_new_patient_labels <- lapply(tn_mutation_df$Patient, function(x) {
-    # Split apart the semicolon separated sample IDs
-    spl_patients <- unlist(strsplit(x, ";", fixed = TRUE))
-    # Check if this patient is in the intersecting patients list and return TRUE if so, F o.w.
-    matching_patient_ind <- unlist(lapply(spl_patients, function(y) {
-      if(y %fin% intersecting_patients) {
-        return(TRUE)
-      } else {return(FALSE)}
-    }))
-    # If there are overlapping patients in this row, then we want to keep this row
-    if(TRUE %in% matching_patient_ind) {
-      samps_to_keep <- spl_patients[matching_patient_ind]
-      
-      # If we still have samples, return them in this row 
-      if(length(samps_to_keep) > 0) {
-        return(paste(samps_to_keep, collapse = ";"))
-      } else {return(NA)}
-    } else {return(NA)}
-  })
-  return(mutation_df_new_patient_labels)
-}
-
-tn_mutation_df_missense_labels <- get_mutation_df_new_patient_labels(tn_mutation_df_missense, 
-                                                                           intersecting_patients)
-tn_mutation_df_misAndNon_labels <- get_mutation_df_new_patient_labels(tn_mutation_df_misAndNon, 
-                                                                            intersecting_patients)
-tn_mutation_df_nonsynonymous_labels <- get_mutation_df_new_patient_labels(tn_mutation_df_nonsynonymous, 
-                                                                                intersecting_patients)
-tn_mutation_df_silent_labels <- get_mutation_df_new_patient_labels(tn_mutation_df_silent, 
-                                                                         intersecting_patients)
-
-# Remove NA
-tn_mutation_df_missense_sub <- tn_mutation_df_missense[unlist(lapply(tn_mutation_df_missense_labels, function(x) 
-  ifelse(is.na(x), FALSE, TRUE))),]
-tn_mutation_df_misAndNon_sub <- tn_mutation_df_misAndNon[unlist(lapply(tn_mutation_df_misAndNon_labels, function(x) 
-  ifelse(is.na(x), FALSE, TRUE))),]
-tn_mutation_df_nonsynonymous_sub <- tn_mutation_df_nonsynonymous[unlist(lapply(tn_mutation_df_nonsynonymous_labels, function(x) 
-  ifelse(is.na(x), FALSE, TRUE))),]
-tn_mutation_df_silent_sub <- tn_mutation_df_missense[unlist(lapply(tn_mutation_df_silent_labels, function(x) 
-  ifelse(is.na(x), FALSE, TRUE))),]
-
-# Update the DF with the new intersecting patient labels
-tn_mutation_df_missense_sub$Patient <- tn_mutation_df_missense_labels[!is.na(tn_mutation_df_missense_labels)]
-tn_mutation_df_missense_sub$Patient <- unlist(lapply(tn_mutation_df_missense_sub$Patient, function(x) return(unlist(x))))
-
-tn_mutation_df_misAndNon_sub$Patient <- tn_mutation_df_misAndNon_labels[!is.na(tn_mutation_df_misAndNon_labels)]
-tn_mutation_df_misAndNon_sub$Patient <- unlist(lapply(tn_mutation_df_misAndNon_sub$Patient, function(x) return(unlist(x))))
-
-tn_mutation_df_nonsynonymous_sub$Patient <- tn_mutation_df_nonsynonymous_labels[!is.na(tn_mutation_df_nonsynonymous_labels)]
-tn_mutation_df_nonsynonymous_sub$Patient <- unlist(lapply(tn_mutation_df_nonsynonymous_sub$Patient, function(x) return(unlist(x))))
-
-tn_mutation_df_silent_sub$Patient <- tn_mutation_df_silent_labels[!is.na(tn_mutation_df_silent_labels)]
-tn_mutation_df_silent_sub$Patient <- unlist(lapply(tn_mutation_df_silent_sub$Patient, function(x) return(unlist(x))))
 
 ############################################################
 ### WRITE THESE NEWLY SUBSETTED FILES BACK
 ############################################################
-write.csv(tn_mutation_count_df_missense_sub, paste0(output_path, "Linear Model/mutation_count_df_missense_IntersectPatients.csv"))
-write.csv(tn_mutation_count_df_misAndNon_sub, paste0(output_path, "Linear Model/mutation_count_df_missense_nonsense_IntersectPatients.csv"))
-write.csv(tn_mutation_count_df_nonsynonymous_sub, paste0(output_path, "Linear Model/mutation_count_df_nonsynonymous_IntersectPatients.csv"))
-write.csv(tn_mutation_count_df_silent_sub, paste0(output_path, "Linear Model/mutation_count_df_silent_IntersectPatients.csv"))
-
-write.csv(tn_cna_df_sub, paste0(output_path, "Linear Model/cna_df_allgenes_IntersectPatients.csv"))
-
-write.csv(tn_expression_df_sub, paste0(output_path, "Linear Model/expression_df_log2intensity_filtBySD0.2_IntersectPatients.csv"))
-
-write.csv(tn_methylation_df_log2_sub, paste0(output_path, "Linear Model/methylation_df_RRBS_log2_IntersectPatients.csv"))
-write.csv(tn_methylation_df_logit_sub, paste0(output_path, "Linear Model/methylation_df_RRBS_logit_IntersectPatients.csv"))
-
-write.csv(tn_patient_sample_df_sub, paste0(output_path, "Linear Model/patient_sample_df_cibersort_total_frac_IntersectPatients.csv"))
-
-write.csv(tn_mutation_df_missense_sub, paste0(output_path, "Linear Model/iprotein_mutation_df_missense.csv"))
-write.csv(tn_mutation_df_misAndNon_sub, paste0(output_path, "Linear Model/iprotein_mutation_df_missense_nonsense.csv"))
-write.csv(tn_mutation_df_nonsynonymous_sub, paste0(output_path, "Linear Model/iprotein_mutation_df_nonsynonymous.csv"))
-write.csv(tn_mutation_df_silent_sub, paste0(output_path, "Linear Model/iprotein_mutation_df_silent.csv"))
+write.csv(tn_mutation_count_df_nonsynonymous_sub, paste0(output_path, "Linear Model/mutation_count_df_nonsynonymous_uniformHypermutRm_IntersectPatients.csv"))
+write.csv(tn_mutation_count_df_silent_sub, paste0(output_path, "Linear Model/mutation_count_df_silent_uniformHypermutRm_IntersectPatients.csv"))
+write.csv(tn_cna_df_sub, paste0(output_path, "Linear Model/cna_df_allgenes_uniformHypermutRm_IntersectPatients.csv"))
+write.csv(tn_expression_df_sub, paste0(output_path, "Linear Model/expression_df_FPKM_filtBySD1_uniformHypermutRm_IntersectPatients.csv"))
+write.csv(tn_patient_sample_df_sub, paste0(output_path, "Linear Model/patient_sample_df_uniformHypermutRm_IntersectPatients.csv"))
 
 
 #############################################################
@@ -302,92 +254,64 @@ write.csv(tn_mutation_df_silent_sub, paste0(output_path, "Linear Model/iprotein_
 driver_gene_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/GRCh38_driver_gene_list.tsv", 
                            sep = "\t", header = TRUE, comment.char = "#", skip = 10)
 
-iprotein_prots_missense <- unique(tn_mutation_df_missense_sub$Swissprot)  # 122 unique mutated proteins
-iprotein_prots_misAndNon <- unique(tn_mutation_df_misAndNon_sub$Swissprot)  # 122 unique mutated proteins
-iprotein_prots_nonsyn <- unique(tn_mutation_df_nonsynonymous_sub$Swissprot)  # 122 unique mutated proteins
-iprotein_prots_silent <- unique(tn_mutation_df_silent_sub$Swissprot)  # 122 unique mutated proteins
+regprot_input_df_all_5perc <- create_regulatory_prot_input_df(as.data.table(tn_mutation_count_df_nonsynonymous_sub), 0.05, 5, NA, intersecting_patients, 
+                                                                 "i-protein", intersecting_patients, NA, all_genes_id_conv, NA, NA, "Chinese_TN", NA)
+regprot_input_df_driver_5perc <- create_regulatory_prot_input_df(as.data.table(tn_mutation_count_df_nonsynonymous_sub), 0.05, 5, NA, intersecting_patients, 
+                                                                 "i-protein", intersecting_patients, driver_gene_df, all_genes_id_conv, NA, NA, "Chinese_TN", NA)
 
-# Proceed with nonsynonymous mutations; use functions from 'generate_protein_input_tables.R'
-iprotein_prots_ensg <- convert_to_ensembl(iprotein_prots_nonsyn)
+print(paste(unique(unlist(lapply(regprot_input_df_driver_5perc$swissprot_ids, function(id) 
+  all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == id, 'external_gene_name']))), collapse = ", "))
 
-# Create initial DF with all proteins
-recombine_into_df_and_write(iprotein_prots, iprotein_prots_ensg, "iprotein", prot_path)
+write.csv(regprot_input_df_all_5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_all_nonsynonymous.csv"), row.names = F)
+write.csv(regprot_input_df_driver_5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_drivers_nonsynonymous.csv"), row.names = F)
 
-# Call filter to include only proteins mutated in at least 5 patients, and at least 2.5% or 5% of patients
-
-# Nonsynonymous
-regprot_input_df_all_5perc <- create_regulatory_prot_input_df(tn_mutation_df_nonsynonymous, 
-                                                              0.05, 5, "i-protein", intersecting_patients, 
-                                                              NA, all_genes_id_conv, NA, NA, "tn")
-regprot_input_df_driver_5perc <- create_regulatory_prot_input_df(tn_mutation_df_nonsynonymous, 
-                                                                 0.05, 5, "i-protein", intersecting_patients, 
-                                                                 driver_gene_df, all_genes_id_conv, NA, NA, "tn")
-
-regprot_input_df_all_2.5perc <- create_regulatory_prot_input_df(tn_mutation_df_nonsynonymous, 
-                                                                0.025, 5, "i-protein", intersecting_patients, 
-                                                                NA, all_genes_id_conv, NA, NA, "tn")
-regprot_input_df_driver_2.5perc <- create_regulatory_prot_input_df(tn_mutation_df_nonsynonymous, 
-                                                                   0.025, 5, "i-protein", intersecting_patients, 
-                                                                   driver_gene_df, all_genes_id_conv, NA, NA, "tn")
+# Print out the names of the drivers that were written to a given file
+print(paste(unique(unlist(lapply(regprot_input_df_driver_5perc$swissprot_ids, function(id) 
+  all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == id, 'external_gene_name']))), collapse = ","))
 
 
-write.csv(regprot_input_df_all_5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_all_nonsynonymous.csv"))
-write.csv(regprot_input_df_driver_5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_drivers_nonsynonymous.csv"))
-write.csv(regprot_input_df_all_2.5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.025Freq_all_nonsynonymous.csv"))
-write.csv(regprot_input_df_driver_2.5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.025Freq_drivers_nonsynonymous.csv"))
 
 
-# Repeat this for individual subtypes
-patient_set_lumA <- intersect(intersecting_patients, tn_clinical_patient_df[tn_clinical_patient_df$CLAUDIN_SUBTYPE == "LumA", 'PATIENT_ID'])
-patient_set_lumB <- intersect(intersecting_patients, tn_clinical_patient_df[tn_clinical_patient_df$CLAUDIN_SUBTYPE == "LumB", 'PATIENT_ID'])
-patient_set_basal <- intersect(intersecting_patients, tn_clinical_patient_df[tn_clinical_patient_df$CLAUDIN_SUBTYPE %in% c('claudin-low', 'Basal'), 'PATIENT_ID'])
-patient_set_her2 <- intersect(intersecting_patients, tn_clinical_patient_df[tn_clinical_patient_df$CLAUDIN_SUBTYPE == 'Her2', 'PATIENT_ID'])
 
 
-#' Function to keep only patients in the regprot mutation DF that are a member of the
-#' given patient set
-#' @param tn_mutation_df a regprot mutation DF with tn IDs
-#' @param patient_set a vector of tn patient IDs to keep
-get_regprot_df_subsetted_by_subtype <- function(tn_mutation_df, patient_set) {
-  new_rows <- lapply(1:nrow(tn_mutation_df), function(i) {
-    pats <- unlist(strsplit(tn_mutation_df[i, 'Patient'], ";", fixed = TRUE))
-    pats_in_set <- paste(intersect(pats, patient_set), collapse = ";")
-    
-    row <- as.data.frame(tn_mutation_df[i,])
-    colnames(row) <- colnames(tn_mutation_df)
-    row[,'Patient'] <- pats_in_set
-    return(row)
-  })
-  new_df <- do.call("rbind", new_rows)
-  return(new_df)
-}
-
-tn_mutation_df_nonsynonymous_lumA <- get_regprot_df_subsetted_by_subtype(tn_mutation_df_nonsynonymous,
-                                                                               patient_set_lumA)
-tn_mutation_df_nonsynonymous_lumB <- get_regprot_df_subsetted_by_subtype(tn_mutation_df_nonsynonymous,
-                                                                               patient_set_lumB)
-tn_mutation_df_nonsynonymous_basal <- get_regprot_df_subsetted_by_subtype(tn_mutation_df_nonsynonymous,
-                                                                                patient_set_basal)
-tn_mutation_df_nonsynonymous_her2 <- get_regprot_df_subsetted_by_subtype(tn_mutation_df_nonsynonymous,
-                                                                               patient_set_her2)
-
-regprot_input_df_all_5perc_lumA <- create_regulatory_prot_input_df(tn_mutation_df_nonsynonymous_lumA, 
-                                                                   0.05, 5, "i-protein", patient_set_lumA, 
-                                                                   NA, all_genes_id_conv, NA, NA, "tn")
-regprot_input_df_driver_5perc_lumA <- create_regulatory_prot_input_df(tn_mutation_df_nonsynonymous_lumA, 
-                                                                      0.05, 5, "i-protein", patient_set_lumA, 
-                                                                      driver_gene_df, all_genes_id_conv, NA, NA, "tn")
-
-regprot_input_df_all_2.5perc_lumA <- create_regulatory_prot_input_df(tn_mutation_df_nonsynonymous_lumA, 
-                                                                     0.025, 5, "i-protein", patient_set_lumA, 
-                                                                     NA, all_genes_id_conv, NA, NA, "tn")
-regprot_input_df_driver_2.5perc_lumA <- create_regulatory_prot_input_df(tn_mutation_df_nonsynonymous_lumA, 
-                                                                        0.025, 5, "i-protein", patient_set_lumA, 
-                                                                        driver_gene_df, all_genes_id_conv, NA, NA, "tn")
 
 
-write.csv(regprot_input_df_all_5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_all_nonsynonymous.csv"))
-write.csv(regprot_input_df_driver_5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_drivers_nonsynonymous.csv"))
-write.csv(regprot_input_df_all_2.5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.025Freq_all_nonsynonymous.csv"))
-write.csv(regprot_input_df_driver_2.5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.025Freq_drivers_nonsynonymous.csv"))
+
+
+
+
+
+
+
+
+############################################################
+### ARCHIVAL: REMOVE HYPERMUTATORS
+############################################################
+# Visualize the number of mutations per patient
+hist(colSums(tn_mutation_count_df_nonsynonymous_sub[,!(colnames(tn_mutation_count_df_nonsynonymous_sub) %in% c("Swissprot", "Gene_Symbol"))]), 
+     main = "", xlab = "Number of Nonsynonymous Mutations")
+
+# Remove hypermutators (set threshold of 300)
+thres <- 300
+colsums <- colSums(tn_mutation_count_df_nonsynonymous_sub[,!(colnames(tn_mutation_count_df_nonsynonymous_sub) %in% c("Swissprot", "Gene_Symbol"))])
+tn_mutation_count_df_nonsynonymous_sub <- tn_mutation_count_df_nonsynonymous_sub[,c(1, (which(colsums < thres)+1), ncol(tn_mutation_count_df_nonsynonymous_sub))]
+write.csv(tn_mutation_count_df_nonsynonymous_sub, paste0(output_path, "Linear Model/mutation_count_df_nonsynonymous_hyperMutRm_IntersectPatients.csv"))
+
+hypermut_pat <- colnames(tn_mutation_count_df_nonsynonymous_sub)[which(colsums > thres)+1]
+intersecting_patients <- intersecting_patients[!(intersecting_patients %in% c(hypermut_pat))]
+write.table(intersecting_patients, "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/TripleNeg_Chinese/intersecting_ids_hypermutRm.txt",
+            quote = FALSE, row.names = FALSE)
+
+# Remove the hypermutator from the other files as well
+tn_mutation_count_df_silent_sub <- tn_mutation_count_df_silent_sub[, c(1, which(colnames(tn_mutation_count_df_silent_sub) %in% 
+                                                                                  intersecting_patients), 
+                                                                       ncol(tn_mutation_count_df_silent_sub))]
+tn_cna_df_sub <- tn_cna_df_sub[, c(1, which(colnames(tn_cna_df_sub) %in% intersecting_patients))]
+tn_expression_df_sub <- tn_expression_df_sub[, c(1, which(colnames(tn_expression_df_sub) %in% intersecting_patients))]
+tn_patient_sample_df_sub <- tn_patient_sample_df_sub[tn_patient_sample_df_sub$sample_id %in% intersecting_patients,]
+
+write.csv(tn_mutation_count_df_silent_sub, paste0(output_path, "Linear Model/mutation_count_df_silent_hyperMutRm_IntersectPatients.csv"))
+write.csv(tn_cna_df_sub, paste0(output_path, "Linear Model/cna_df_allgenes_hyperMutRm_IntersectPatients.csv"))
+write.csv(tn_expression_df_sub, paste0(output_path, "Linear Model/expression_df_FPKM_filtBySD1_hyperMutRm_IntersectPatients.csv"))
+write.csv(tn_patient_sample_df_sub, paste0(output_path, "Linear Model/patient_sample_df_hyperMutRm_IntersectPatients.csv"))
 

@@ -1,65 +1,137 @@
 #!/bin/bash
-#SBATCH --mem=8192
-#SBATCH --qos=1wk
+#SBATCH --qos=1day
 #SBATCH --nodes=1
-#SBATCH --job-name=lm_run_cancerRelated_noPEER_metabolicPWtargs_tmm_rawCNA_M_eQTL_allButCancerType
+#SBATCH --tasks-per-node=1
+#SBATCH --cpus-per-task=6
+#SBATCH --mem=54GB
+#SBATCH --job-name=lm_topDrivers
 #SBATCH --mail-user=scamilli@princeton.edu
 #SBATCH --mail-type=fail,time_limit
 
-
-#SAMPLE RUN: TP53 and all targets (TNM)
-#Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "TRUE" --cancerType "BRCA" --randomize "FALSE" \
-#--test "TRUE" --expression_df "expression_tmm_DF_tnm.csv" --methylation_df "methylation_DF_Beta_tnm.csv" \
-#--mutation_targ_df "mut_count_matrix_missense_tnm.csv" --mutation_regprot_df "iprotein_results_missense_tnm.csv" \
-#--cna_df "CNV_DF_AllGenes_tnm.csv" --patient_df "combined_patient_sample_DF_cibersort_total_frac_tmm_tnm.csv" \
-#--target_df "allgene_targets.csv" --cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "Beta" \
-#--targets_name "allGenes" --num_PEER 10 --num_pcs 0 --debug "FALSE" --collinearity_diagn "TRUE" --regularization "None"
+module add R/4.0.3
 
 # SAMPLE RUN: TP53 and all targets/ ChIP-eat targets (NON-TNM)
-#Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" \
-#--test "TRUE" --expression_df "expression_tmm_CancerOnly_IntersectPatients.csv" --methylation_df "methylation_M_CancerOnly_IntersectPatients.csv" \
-#--methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatients.csv" --mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatients.csv" \
-#--mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatients.csv" --cna_df "CNA_AllGenes_CancerOnly_IntersectPatients.csv" \
-#--patient_df "combined_patient_sample_cibersort_total_frac_tmm_normAge_IntersectPatients.csv" --target_df "allgene_targets.csv" \
-#--cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --targets_name "allGenes" --num_PEER 0 \
-#--num_pcs 0 --debug "FALSE" --collinearity_diagn "FALSE" --regularization "None" \
-#--select_args "ExpStat_k;MutStat_i;CNAStat_i;MethStat_i;CNAStat_k;MutStat_k;MethStat_k;Age;Tumor_purity;Treatment_rad;Treatment_pharm;Tot_IC_Frac;Prior_malig;Tot_Mut" \
-#--select_args_label "allButCancerType"
+#Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" --removeMetastatic "TRUE" \
+#--test "TRUE" --incl_nextMutDriver "TRUE" --expression_df "expression_quantile_norm_edgeRfilt_SDGr1_inverseNtransform_CancerOnly_IntersectPatients.csv" --methylation_df "methylation_M_CancerOnly_IntersectPatients.csv" \
+#--methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatients.csv" --mutation_targ_df "iprotein_mut_count_matrix_nonsynonymous_IntersectPatients.csv" \
+#--mutation_regprot_df "iprotein_results_nonsynonymous_IntersectPatients.csv" --cna_df "CNA_AllGenes_CancerOnly_IntersectPatients.csv" \
+#--patient_df "combined_patient_sample_cibersort_total_frac_tmm_normAge_IntersectPatients.csv" --target_df "glycolysis_targets.csv" \
+#--cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --targets_name "glycolysisTargs" --num_PEER 0 --useNumFunctCopies "FALSE" \
+#--num_pcs 0 --mut_pc_vect "0" --debug "FALSE" --collinearity_diagn "FALSE" --regularization "None" \
+#--select_args "ExpStat_k;MutStat_i;CNAStat_i;MethStat_i;CNAStat_k;PIK3CA_MutStat_i;PIK3CA_CNAStat_i;PIK3CAP53_MutStat_i;MutStat_k;MethStat_k;Age;Tumor_purity;Treatment_rad;Treatment_pharm;Tot_IC_Frac;Prior_malig;Tot_Mut;Cancer_type" \
+#--select_args_label "PIK3CA_covs.inclCT.invNTr.Nonsyn" --removeCis "TRUE" --dataset "TCGA" --inclResiduals "FALSE"
 
-# SAMPLE RUN: IDH4 and metabolic targets (NON-TNM)
-#Rscript linear_model.R --QTLtype "meQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" \
-#--test "TRUE" --tester_name "IDH1" --tester_uniprot_id "O75874" --tester_ensg_id "ENSG00000138413" \
-#--expression_df "expression_tmm_CancerOnly_IntersectPatients.csv" --methylation_df "methylation_M_CancerOnly_IntersectPatients.csv" \
-#--methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatients.csv" --mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatients.csv" \
-#--mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatients.csv" --cna_df "CNA_AllGenes_CancerOnly_IntersectPatients.csv" \
+#--patientsOfInterest "LT20PAmp.NotTP53andPIK3CAMNmut_patient_ids.txt" --patientsOfInterestLabel "LT20PAmp.noMutOverlap" \
+#--patientsOfInterest "HER2_patient_ids.txt" --patientsOfInterestLabel "HER2" \
+#--patientsOfInterest "LessThan20PercAmp_patient_ids.txt" --patientsOfInterestLabel "LT20PAmp" \
+
+
+# SAMPLE RUN: PIK3CA and all targets/ ChIP-eat targets (NON-TNM)
+#Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" --removeMetastatic "TRUE" \
+#--test "TRUE" --tester_name "PIK3CA" --tester_uniprot_id "P42336" --tester_ensg_id "ENSG00000121879" --incl_nextMutDriver "TRUE" \
+#--expression_df "expression_tmmSDGr1filtByExpr_CancerOnly_IntersectPatients.csv" --methylation_df "methylation_M_CancerOnly_IntersectPatients.csv" \
+#--methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatients.csv" --mutation_targ_df "iprotein_mut_count_matrix_nonsynonymous_IntersectPatients.csv" \
+#--mutation_regprot_df "iprotein_results_nonsynonymous_IntersectPatients.csv" --cna_df "CNA_AllGenes_CancerOnly_IntersectPatients.csv" \
 #--patient_df "combined_patient_sample_cibersort_total_frac_tmm_normAge_IntersectPatients.csv" --target_df "metabolic_targets.csv" \
-#--cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --targets_name "metabolicTargs" --num_PEER 0 \
+#--cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --targets_name "metabolicTargs" --num_PEER 0 --useNumFunctCopies "FALSE" \
+#--num_pcs 0 --mut_pc_vect "0" --debug "FALSE" --collinearity_diagn "FALSE" --regularization "None" \
+#--select_args "ExpStat_k;MutStat_i;CNAStat_i;MethStat_i;TP53_MutStat_i;TP53_CNAStat_i;TP53PIK3CA_MutStat_i;CNAStat_k;MutStat_k;MethStat_k;Age;Tumor_purity;Treatment_rad;Treatment_pharm;Tot_IC_Frac;Prior_malig;Tot_Mut;Cancer_type" \
+#--select_args_label "TP53_Covs.inclCT.Nonsyn" --removeCis "TRUE" --dataset "TCGA"
+
+#--functional_copies_df "pik3ca_functional_copies_per_sample.csv"
+#--patientsOfInterest "LessThan20PercAmp_patient_ids.txt" --patientsOfInterestLabel "LT20PAmp" \
+
+# SAMPLE RUN: IDH1 and metabolic targets (NON-TNM)
+#Rscript linear_model.R --QTLtype "meQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" --removeMetastatic "TRUE" \
+#--test "TRUE" --tester_name "IDH1" --tester_uniprot_id "O75874" --tester_ensg_id "ENSG00000138413" \
+#--expression_df "expression_tmmSDGr1filtByExpr_CancerOnly_IntersectPatients.csv" --methylation_df "methylation_M_CancerOnly_IntersectPatients.csv" \
+#--methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatients.csv" --mutation_targ_df "mut_count_matrix_missense_nonsense_CancerOnly_IntersectPatients.csv" \
+#--mutation_regprot_df "iprotein_results_missense_nonsense_CancerOnly_IntersectPatients.csv" --cna_df "CNA_AllGenes_CancerOnly_IntersectPatients.csv" \
+#--patient_df "combined_patient_sample_cibersort_total_frac_tmm_normAge_IntersectPatients.csv" --target_df "allgene_targets.csv" \
+#--cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --targets_name "allGenes" --num_PEER 0 --useNumFunctCopies "FALSE" \
 #--num_pcs 0 --debug "FALSE" --collinearity_diagn "FALSE" --regularization "None" \
-#--select_args "ExpStat_k;MutStat_i;CNAStat_i;MethStat_i;CNAStat_k;MutStat_k;MethStat_k;Age;Tumor_purity;Treatment_rad;Treatment_pharm;Tot_IC_Frac;Prior_malig;Tot_Mut" \
-#--select_args_label "allButCancerType"
+#--select_args "ExpStat_k;MutStat_i;CNAStat_i;MethStat_i;CNAStat_k;MutStat_k;MethStat_k;Age;Tumor_purity;Treatment_rad;Treatment_pharm;Tot_IC_Frac;Prior_malig;Tot_Mut;Cancer_type" \
+#--select_args_label "inclCT" --removeCis "TRUE" --dataset "TCGA"
 
+# SAMPLE RUN: Other Genes and all targets (NON-TNM) 
+#Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" --removeMetastatic "TRUE" \
+#--test "TRUE" --tester_name "TTN" --tester_uniprot_id "Q8WZ42" --tester_ensg_id "ENSG00000155657" --incl_nextMutDriver "TRUE" \
+#--expression_df "expression_quantile_norm_edgeRfilt_SDGr1_CancerOnly_IntersectPatients.csv" --methylation_df "methylation_M_CancerOnly_IntersectPatients.csv" \
+#--methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatients.csv" --mutation_targ_df "mut_count_matrix_missense_nonsense_CancerOnly_IntersectPatients.csv" \
+#--mutation_regprot_df "iprotein_results_missense_nonsense_CancerOnly_IntersectPatients.csv" --cna_df "CNA_AllGenes_CancerOnly_IntersectPatients.csv" \
+#--patient_df "combined_patient_sample_cibersort_total_frac_tmm_normAge_IntersectPatients.csv" --target_df "allgene_targets.csv" \
+#--cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --targets_name "allGenes" --num_PEER 0 --useNumFunctCopies "FALSE" \
+#--num_pcs 2 --mut_pc_vect "0" --debug "FALSE" --collinearity_diagn "FALSE" --regularization "None" \
+#--select_args "ExpStat_k;MutStat_i;CNAStat_i;MethStat_i;TP53_MutStat_i;TP53_CNAStat_i;PIK3CA_MutStat_i;PIK3CA_CNAStat_i;TP53PIK3CA_MutStat_i;CNAStat_k;MutStat_k;MethStat_k;Age;Tumor_purity;Treatment_rad;Treatment_pharm;Tot_IC_Frac;Prior_malig;Tot_Mut;Cancer_type" \
+#--select_args_label "TP53_Covs.inclCT.MN.edgeRfilt.SDGr1" --removeCis "TRUE" --dataset "TCGA"
 
-# SAMPLE RUN: USH2A and all targets (NON-TNM) -- NEGATIVE CONTROL
-#Rscript linear_model.R --QTLtype "meQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" \
+# SAMPLE RUN: Other Genes and all targets (NON-TNM) 
+#Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" --removeMetastatic "TRUE" --incl_nextMutDriver "TRUE" \
+#--patientsOfInterest "Basal_patient_ids.txt" --patientsOfInterestLabel "Basal" \
+#--test "TRUE" --tester_name "MUC16" --tester_uniprot_id "Q8WXI7" --tester_ensg_id "ENSG00000181143" \
+#--expression_df "expression_quantile_norm_edgeRfilt_SDGr1_sklearn_CancerOnly_IntersectPatients.csv" --methylation_df "methylation_M_CancerOnly_IntersectPatients.csv" \
+#--methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatients.csv" --mutation_targ_df "iprotein_mut_count_matrix_nonsynonymous_IntersectPatients.csv" \
+#--mutation_regprot_df "iprotein_results_nonsynonymous_IntersectPatients.csv" --cna_df "CNA_AllGenes_CancerOnly_IntersectPatients.csv" \
+#--patient_df "combined_patient_sample_cibersort_total_frac_tmm_normAge_IntersectPatients.csv" --target_df "metabolic_targets.csv" \
+#--cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --targets_name "metabolicTargs" --num_PEER 0 --useNumFunctCopies "FALSE" \
+#--num_pcs 0 --mut_pc_vect "0" --debug "TRUE" --collinearity_diagn "FALSE" --regularization "None" \
+#--select_args "ExpStat_k;MutStat_i;CNAStat_i;MethStat_i;TP53_MutStat_i;TP53_CNAStat_i;TP53PIK3CA_MutStat_i;PIK3CA_MutStat_i;PIK3CA_CNAStat_i;CNAStat_k;MutStat_k;MethStat_k;Age;Tumor_purity;Treatment_rad;Treatment_pharm;Tot_IC_Frac;Prior_malig;Tot_Mut;Cancer_type" \
+#--select_args_label "TP53_PIK3CA_Covs.inclCT.sklearn.Nonsyn" --removeCis "TRUE" --dataset "TCGA" --run_query_genes_jointly "FALSE"
+
+# RBP SF3B1 (mutated in 11); USH2A is highly mutated but not cancer relevant (negative control)
+#--test "TRUE" --tester_name "SF3B1" --tester_uniprot_id "O75533" --tester_ensg_id "ENSG00000115524" \
 #--test "TRUE" --tester_name "USH2A" --tester_uniprot_id "O75445" --tester_ensg_id "ENSG00000042781" \
-#--expression_df "expression_tmm_CancerOnly_IntersectPatients.csv" --methylation_df "methylation_bucketed_Beta_CancerOnly_IntersectPatients.csv" \
-#--methylation_df_meQTL "methylation_Beta_CancerOnly_IntersectPatients.csv" --mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatients.csv" \
-#--mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatients.csv" --cna_df "CNA_AllGenes_Bucketed_InclAmp_CancerOnly_IntersectPatients.csv" \
-#--patient_df "combined_patient_sample_cibersort_total_frac_tmm_IntersectPatients.csv" --target_df "allgene_targets.csv" \
-#--cna_bucketing "bucket_inclAmp" --meth_bucketing "TRUE" --meth_type "Beta" --targets_name "allGenes" --num_PEER 0 --num_pcs 0 \
-#--debug "FALSE" --collinearity_diagn "TRUE" --regularization "None" --select_args "MutStat_i;ExpStat_k"
+#--test "TRUE" --tester_name "MYC" --tester_uniprot_id "P01106" --tester_ensg_id "ENSG00000136997" \
+#--test "TRUE" --tester_name "KMT2C" --tester_uniprot_id "Q8NEZ4" --tester_ensg_id "ENSG00000055609" \
+#--test "TRUE" --tester_name "GATA3" --tester_uniprot_id "P23771" --tester_ensg_id "ENSG00000107485"  \
+#--test "TRUE" --tester_name "FOXA1" --tester_uniprot_id "P55317" --tester_ensg_id "ENSG00000129514" \
+#--test "TRUE" --tester_name "MUC16" --tester_uniprot_id "Q8WXI7" --tester_ensg_id "ENSG00000181143" \
+
+#--patientsOfInterest "LessThan20PercAmp_patient_ids.txt" --patientsOfInterestLabel "LT20PAmp" \
+
+# SAMPLE RUN: Cancer Related Genes/ Highly Deleted TFs and Metabolic Targets (NON-TNM); with regularization
+#Rscript linear_model2.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" --removeMetastatic "TRUE" \
+#--test "FALSE" --protein_ids_df "iprotein_protein_ids_df_gr0.05Freq_drivers_nonsynonymous.csv" --incl_nextMutDriver "FALSE" \
+#--expression_df "expression_quantile_norm_edgeRfilt_SDGr1_sklearn_CancerOnly_IntersectPatientsWashU.csv" \
+#--methylation_df "methylation_M_CancerOnly_IntersectPatientsWashU.csv" --methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatientsWashU.csv" \
+#--mutation_targ_df "iprotein_mut_count_matrix_nonsynonymous_IntersectPatientsWashU.csv" --mutation_regprot_df "iprotein_results_nonsynonymous_IntersectPatientsWashU.csv" \
+#--cna_df "CNA_AllGenes_CancerOnly_IntersectPatientsWashU.csv" --patient_df "combined_patient_sample_cibersort_total_frac_tmm_normAge_IntersectPatientsWashU.csv" \
+#--target_df "allgene_targets.csv" --cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --run_name "top_drivers" \
+#--targets_name "allGenes" --num_PEER 0 --num_pcs 3 --debug "TRUE" --collinearity_diagn "FALSE" --regularization "bayesian.bglss" --useNumFunctCopies "FALSE" \
+#--select_args "ExpStat_k;MutStat_i;CNAStat_i;MethStat_i;CNAStat_k;MutStat_k;MethStat_k;Age;Tumor_purity;Treatment_rad;Treatment_pharm;Tot_IC_Frac;PC;Prior_malig;Tot_Mut;Cancer_type" \
+#--select_args_label "inclCT.sklearn.Nonsyn.0.05.WashU" --removeCis "TRUE" --dataset "TCGA" --run_query_genes_jointly "TRUE" --model_type "linear" 
+
+
+# SAMPLE RUN: Cancer Related Genes/ Highly Deleted TFs and Metabolic Targets (NON-TNM); without regularization
+#Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "FALSE" --removeMetastatic "TRUE" \
+#--test "FALSE" --protein_ids_df "iprotein_protein_ids_df_gr0.05Freq_drivers_nonsynonymous.csv" --incl_nextMutDriver "FALSE" \
+#--expression_df "expression_quantile_norm_edgeRfilt_SDGr1_sklearn_CancerOnly_IntersectPatientsWashU.csv" \
+#--methylation_df "methylation_M_CancerOnly_IntersectPatientsWashU.csv" --methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatientsWashU.csv" \
+#--mutation_targ_df "iprotein_mut_count_matrix_nonsynonymous_IntersectPatientsWashU.csv" --mutation_regprot_df "iprotein_results_nonsynonymous_IntersectPatientsWashU.csv" \
+#--cna_df "CNA_AllGenes_CancerOnly_IntersectPatientsWashU.csv" --patient_df "combined_patient_sample_cibersort_total_frac_tmm_normAge_IntersectPatientsWashU.csv" \
+#--target_df "metabolic_targets.csv" --cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --run_name "top_drivers" \
+#--targets_name "metabolicTargs" --num_PEER 0 --num_pcs 3 --debug "FALSE" --collinearity_diagn "FALSE" --regularization "None" --useNumFunctCopies "FALSE" \
+#--select_args "ExpStat_k;MutStat_i;CNAStat_i;MethStat_i;CNAStat_k;MutStat_k;MethStat_k;Age;Tumor_purity;Treatment_rad;Treatment_pharm;Tot_IC_Frac;PC;Prior_malig;Tot_Mut;Cancer_type" \
+#--select_args_label "inclCT.sklearn.Nonsyn.0.05.WashU.original" --removeCis "TRUE" --dataset "TCGA" --run_query_genes_jointly "TRUE" --model_type "linear" 
+
+#--patientsOfInterest "Luminal.A_patient_ids.txt" --patientsOfInterestLabel "LumA" \
+#--patientsOfInterest "LessThan20PercAmp_patient_ids.txt" --patientsOfInterestLabel "LT20PAmp" \
+#--patientsOfInterest "NotTP53andPIK3CAmut_patient_ids.txt" --patientsOfInterestLabel "NoMutOverlap" \
+
 
 # SAMPLE RUN: Cancer Related Genes/ Highly Deleted TFs and Metabolic Targets (NON-TNM)
-Rscript linear_model.R --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --randomize "TRUE" \
---test "FALSE" --protein_ids_df "iprotein_protein_ids_df_cancerRelated.csv" --expression_df "expression_tmm_CancerOnly_IntersectPatients.csv" \
---methylation_df "methylation_M_CancerOnly_IntersectPatients.csv" --methylation_df_meQTL "methylation_M_CancerOnly_IntersectPatients.csv" \
---mutation_targ_df "mut_count_matrix_missense_CancerOnly_IntersectPatients.csv" --mutation_regprot_df "iprotein_results_missense_CancerOnly_IntersectPatients.csv" \
---cna_df "CNA_AllGenes_CancerOnly_IntersectPatients.csv" --patient_df "combined_patient_sample_cibersort_total_frac_tmm_normAge_IntersectPatients.csv" \
---target_df "metabolic_targets.csv" --cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M" --run_name "cancerRelated" \
---targets_name "metabolicTargs" --num_PEER 0 --num_pcs 0 --debug "FALSE" --collinearity_diagn "FALSE" --regularization "None" \
---select_args "ExpStat_k;MutStat_i;CNAStat_i;MethStat_i;CNAStat_k;MutStat_k;MethStat_k;Age;Tumor_purity;Treatment_rad;Treatment_pharm;Tot_IC_Frac;Prior_malig;Tot_Mut" \
---select_args_label "allButCancerType"
+Rscript linear_model3.R --dataset "TCGA" --QTLtype "eQTL" --tumNormMatched "FALSE" --cancerType "BRCA" --run_query_genes_jointly "TRUE" \
+--test "FALSE" --randomize "FALSE" --expression_df "expression_quantile_norm_edgeRfilt_sklearn_CancerOnly_IntersectPatientsWashU.csv" \
+--input_lm_filepath "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/BRCA/tumor_only/lm_input_tables/top_drivers_0.05_relCNA/eQTL" \
+--patient_df "combined_patient_sample_cibersort_total_frac_IntersectPatientsWashU.csv" --run_name "top_drivers_0.05_relCNA" \
+--target_df "allgene_targets.csv" --targets_name "allGenes" --cna_bucketing "rawCNA" --meth_bucketing "FALSE" --meth_type "M"  \
+--num_PEER 0 --num_pcs 3 --debug "TRUE" --model_type "linear" --collinearity_diagn "FALSE" --regularization "None"  \
+--select_args "ExpStat_k;MutStat_i;CNAStat_i;MethStat_i;CNAStat_k;MutStat_k;MethStat_k;Age;Tumor_purity;Treatment_rad;Treatment_pharm;Tot_IC_Frac;PC;Prior_malig;Tot_Mut;Cancer_type" \
+--select_args_label "inclCT.sklearn.Nonsyn.0.05.WashU" 
 
+#--input_lm_filepath "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/BRCA/tumor_only/lm_input_tables/top_drivers_0.025/eQTL" \
+#--patientsOfInterest "HER2_patient_ids.txt" --patientsOfInterestLabel "HER2" \
+#--mutation_regprot_df "iprotein_results_nonsynonymous_IntersectPatientsWashU.csv" \
 
 
 # FILES THAT WE HAVE TO CHOOSE FROM:

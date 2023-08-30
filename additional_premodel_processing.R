@@ -82,7 +82,8 @@ colnames(expression_df_rn)[1] <- 'ensg_id'
 expression_df_qn_sub <- expression_df_qn[, c(1, (which(grepl("TCGA", colnames(expression_df_qn)[2:ncol(expression_df_qn)]))+1)), with = F]
 colnames(expression_df_qn_sub)[2:ncol(expression_df_qn_sub)] <- unlist(lapply(colnames(expression_df_qn_sub)[2:ncol(expression_df_qn_sub)], function(x)
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
-
+expression_df_qn_sub$ensg_id <- unlist(lapply(expression_df_qn_sub$ensg_id, function(x)
+  unlist(strsplit(x, ".", fixed = T))[1]))
 
 
 ############################################################
@@ -139,7 +140,7 @@ write.csv(methylation_df_M_full, paste(main_path, "Methylation/methylation_DF_M_
 # paste(unique(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'uniprot_gn_id']), collapse = ";")))
 
 ### NON-TUMOR-NORMAL MATCHED ###
-mutation_targ_df <- fread(paste(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous_ALL_inclNonmut.csv", sep = ""), 
+mutation_targ_df <- fread(paste(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous_ALL.csv", sep = ""), 
                              header = TRUE)
 #colnames(mutation_targ_df) <- unlist(lapply(colnames(mutation_targ_df), function(x) str_replace_all(string = x, pattern = " ", repl = "")))
 mutation_targ_df <- mutation_targ_df[,2:ncol(mutation_targ_df)]
@@ -398,33 +399,39 @@ combine_patient_and_samp_dfs <- function(patient_df, sample_df, dataset) {
     #print(sample_row)
     
     # Get the corresponding row from the patient DF, if tcga
-    patient <- sample_barcode
-    if(dataset == "tcga") {
-      patient <- unlist(strsplit(sample_barcode, "-", fixed = TRUE))[1]
-    }
-    print(patient)
-    
-    if(patient %fin% rownames(patient_df)) {
-      patient_row <- patient_df[rownames(patient_df) == patient,]
-      #print(patient_row)
+    if(length(sample_barcode) > 0) {
+      patient <- sample_barcode
+      if(dataset == "tcga") {
+        patient <- unlist(strsplit(sample_barcode, "-", fixed = TRUE))[1]
+      }
+      print(patient)
+      print(ncol(sample_df) + ncol(patient_df))
       
-      # Combine these together, so that the sample ID is maintained as the row name
-      if(!((length(sample_row) == 0) | (length(patient_row) == 0))) {
-        return(cbind(sample_row, patient_row))
+      if(patient %fin% rownames(patient_df)) {
+        patient_row <- patient_df[rownames(patient_df) == patient,]
+        #print(patient_row)
+        
+        # Combine these together, so that the sample ID is maintained as the row name
+        if(!((length(sample_row) == 0) | (length(patient_row) == 0))) {
+          return(cbind(sample_row, patient_row))
+        } else {
+          print("Something went wrong.")
+          return(NA)
+        }
       } else {
-        print("Something went wrong.")
+        print("Patient from sample DF is not in patient DF.")
         return(NA)
       }
-    } else {
-      print("Patient from sample DF is not in patient DF.")
-      return(NA)
-    }
+    } else {return(NA)}
   })
+  sample_dfs <- sample_dfs[!is.na(sample_dfs)]
   
   # Recombine all these new, combined rows into a full DF
   #sample_dfs <- sample_dfs[!is.na(sample_dfs)]
-  combined_df <- do.call(rbind, sample_dfs)
-  rownames(combined_df) <- rownames(sample_df)
+  if(length(sample_dfs) > 0) {
+    combined_df <- do.call(rbind, sample_dfs)
+    rownames(combined_df) <- rownames(sample_df)
+  } else {combined_df <- NA}
   
   return(combined_df)
 }
@@ -458,13 +465,25 @@ write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sampl
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_timer_rn_mean_MedGr10_ntnm.csv", sep = ""))
 write.csv(combined_pat_samp_df, paste(main_path, "Linear Model/Patient and Sample DFs/combined_patient_sample_DF_timer_rn_mean_MedGr10_top10k_ntnm.csv", sep = ""))
 
+sample_df_pats <- unlist(lapply(rownames(sample_df_to), function(x) 
+  unlist(strsplit(x, "-", fixed = T))[1]))
 
 # For per-cancer files (patient files stored in list 'pan_cancer_patient_dfs')
 combined_pat_samp_dfs <- lapply(pan_cancer_patient_dfs, function(pat_df) {
-  comb_df <- combine_patient_and_samp_dfs(pat_df, sample_df_to, 'tcga')
-  comb_df <- comb_df[rowSums(is.na(comb_df)) != ncol(comb_df),]
-  comb_df <- comb_df[,colSums(is.na(comb_df)) != nrow(comb_df)]
-  return(comb_df)
+  sample_df_to_sub <- sample_df_to[which(sample_df_pats %in% rownames(pat_df)),]
+  if((length(sample_df_to_sub) > 0) & (length(pat_df) > 0)) {
+    comb_df <- combine_patient_and_samp_dfs(pat_df, sample_df_to, 'tcga')
+    if(length(comb_df) == 1) {
+      if(!is.na(comb_df)) {
+        comb_df <- comb_df[rowSums(is.na(comb_df)) != ncol(comb_df),]
+        comb_df <- comb_df[,colSums(is.na(comb_df)) != nrow(comb_df)]
+      }
+    } else {
+      comb_df <- comb_df[rowSums(is.na(comb_df)) != ncol(comb_df),]
+      comb_df <- comb_df[,colSums(is.na(comb_df)) != nrow(comb_df)]
+    }
+    return(comb_df)
+  } else{return(NA)}
 })
 names(combined_pat_samp_dfs) <- names(pan_cancer_patient_dfs)
 
@@ -536,7 +555,7 @@ methylation_patients <- get_unique_patients(colnames(methylation_df)[2:ncol(meth
 #exp_samp_ids <- unlist(lapply(colnames(expression_df)[2:ncol(expression_df)], function(x)
   #paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
 #expression_patients <- get_unique_patients(exp_samp_ids)  # 738; 7375
-expression_patients <- get_unique_patients(colnames(expression_df)[2:ncol(expression_df)])  # 732; 7375
+expression_patients <- get_unique_patients(colnames(expression_df)[2:ncol(expression_df)])  # 732; 7733
 mutation_targ_patients <- unlist(get_unique_patients(colnames(mutation_targ_df)[!(colnames(mutation_targ_df) %in% c('Swissprot', 'Gene_Symbol'))])) # 978; 7258; #737
 mutation_regprot_patients <- unique(unlist(lapply(mutation_regprot_df$Patient, function(x) 
   unlist(strsplit(x, ";", fixed = TRUE)))))   # 615; 6732 -- ignore this (6875 with nonsense, 6889 with nonsynonymous)
@@ -548,19 +567,18 @@ mutation_regprot_patients <- unique(unlist(lapply(mutation_regprot_df$Patient, f
 
 #clin_samp_ids <- unlist(lapply(rownames(patient_sample_df), function(x)
 #  paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse = "-")))
-clinical_patients <- get_unique_patients(rownames(patient_sample_df))  # 732; 6960; 313 for COAD/READ
-clinical_patients_perCt <- unique(unlist(lapply(patient_sample_dfs, function(df) get_unique_patients(rownames(df)))))  # 6960
+clinical_patients <- get_unique_patients(rownames(patient_sample_df))  # 732; 7731; 313 for COAD/READ
+clinical_patients_perCt <- unique(unlist(lapply(patient_sample_dfs, function(df) 
+  get_unique_patients(rownames(df)))))  # 7731
 
 intersecting_patients <- intersect(cna_patients, 
                                    intersect(methylation_patients,
                                              intersect(expression_patients,
                                                        intersect(mutation_targ_patients, clinical_patients))))
-print(length(intersecting_patients)) # 727 in BRCA (605 using UCSF genotype PCs, 609 if using WashU genotype PCs for BRCA; 5722 if using WashU PCs P-C)
+print(length(intersecting_patients)) # 727 in BRCA (605 using UCSF genotype PCs, 609 if using WashU genotype PCs for BRCA; 6378 if using WashU PCs P-C)
 
 #182 for COAD/READ
 
-# Remove hypermutator patients
-intersecting_patients_hypermutFilt <- intersecting_patients[!(intersecting_patients %in% total_excluded_pats)]
 
 #' Given a list of intersecting patient IDs (XXXX, e.g. A0WY), it subsets a 
 #' given data frame with column names that contain sample IDs (XXXX-XXX, e.g. A0WY-01A)
@@ -610,15 +628,15 @@ subset_by_intersecting_ids <- function(intersecting_patients, df, colNames) {
 }
 
 # Call this function
-cna_df_sub <- subset_by_intersecting_ids(intersecting_patients, cna_df, TRUE)
-methylation_df_sub <- subset_by_intersecting_ids(intersecting_patients, methylation_df, TRUE)
-mutation_targ_df_sub <- subset_by_intersecting_ids(intersecting_patients, mutation_targ_df, TRUE)
+cna_df_sub <- subset_by_intersecting_ids(intersecting_patients, cna_df, TRUE)  # 6477
+methylation_df_sub <- subset_by_intersecting_ids(intersecting_patients, methylation_df, TRUE)  # 6457
+mutation_targ_df_sub <- subset_by_intersecting_ids(intersecting_patients, mutation_targ_df, TRUE)   # 6379
 colnames(expression_df)[2:ncol(expression_df)] <- unlist(lapply(colnames(expression_df)[2:ncol(expression_df)], function(x) 
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse= "-")))
-expression_df_sub <- subset_by_intersecting_ids(intersecting_patients, expression_df, TRUE)
+expression_df_sub <- subset_by_intersecting_ids(intersecting_patients, expression_df, TRUE)  # 6508
 rownames(patient_sample_df) <- unlist(lapply(rownames(patient_sample_df), function(x) 
   paste(unlist(strsplit(x, "-", fixed = TRUE))[3:4], collapse= "-")))
-patient_sample_df_sub <- subset_by_intersecting_ids(intersecting_patients, patient_sample_df, FALSE)
+patient_sample_df_sub <- subset_by_intersecting_ids(intersecting_patients, patient_sample_df, FALSE)  # 6503
 
 # Do this for the per-cancer patient/sample files
 patient_sample_dfs_sub <- lapply(patient_sample_dfs, function(df) 
@@ -690,6 +708,57 @@ lapply(1:length(patient_sample_dfs_sub), function(i) {
 write.table(intersecting_patients, paste(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt", sep = ""))
 intersecting_patients <- read.table(paste(main_path, "Linear Model/Tumor_Only/intersecting_ids.txt", sep = ""))[,1]
 
+
+############################################################
+# REMOVE HYPERMUTATED PATIENTS FROM THESE INPUT DFs
+############################################################
+# Remove hypermutator patients
+#pc_mut_count_mat_hypermutFilt <- read.csv(paste0(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous_ALL_manual_hyperMutFilt.csv"),
+                                    #header = T, check.names = F)
+pc_mut_count_mat_hypermutFilt <- read.csv(paste0(main_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous_ALL_uniform_hyperMutFilt.csv"),
+                                          header = T, check.names = F)
+colnames(mut_count_mat_hypermutFilt)[1] <- "Gene_Symbol"
+mut_count_mat_hypermutFilt_pats <- unlist(lapply(colnames(mut_count_mat_hypermutFilt)[2:ncol(mut_count_mat_hypermutFilt)], function(x)
+  unlist(strsplit(x, "-", fixed = T))[1]))
+
+intersecting_patients_hypermutFilt <- intersect(cna_patients, 
+                                   intersect(methylation_patients,
+                                             intersect(expression_patients,
+                                                       intersect(mut_count_mat_hypermutFilt_pats, clinical_patients))))
+print(length(intersecting_patients_hypermutFilt)) # From 6378 to 6018 for uniform threshold, 5923 for manual thresholds 
+
+cna_df_sub_hypermut <- subset_by_intersecting_ids(intersecting_patients_hypermutFilt, cna_df_sub, TRUE)  # 6112 for uniform, 6016 for manual
+methylation_df_sub_hypermut <- subset_by_intersecting_ids(intersecting_patients_hypermutFilt, methylation_df_sub, TRUE)  # 6093 for uniform, 5996 for manual
+mutation_targ_df_sub_hypermut <- subset_by_intersecting_ids(intersecting_patients_hypermutFilt, mutation_targ_df_sub, TRUE)   # 6018 for uniform, 5923 for manual
+expression_df_sub_hypermut <- subset_by_intersecting_ids(intersecting_patients_hypermutFilt, expression_df_sub, TRUE)  # 6137 for uniform, 6039 for manual
+patient_sample_df_sub_hypermut <- subset_by_intersecting_ids(intersecting_patients_hypermutFilt, patient_sample_df_sub, FALSE)  # 6135, 6039 for manual
+
+# Do this for the per-cancer patient/sample files
+patient_sample_dfs_sub_hypermut <- lapply(patient_sample_dfs_sub, function(df) 
+  subset_by_intersecting_ids(intersecting_patients_hypermutFilt, df, F))
+names(patient_sample_dfs_sub_hypermut) <- names(patient_sample_dfs_sub)
+
+# Add ENSG IDs to methylation DF
+methylation_df_sub_hypermut$ensg_ids <- unlist(lapply(methylation_df_sub_hypermut$Gene_Symbol, function(x) 
+  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x,'ensembl_gene_id'])), collapse = ";")))
+
+# Add Swissprot IDs to mutation DF
+mutation_targ_df_sub_hypermut$Swissprot <- unlist(lapply(mutation_targ_df_sub_hypermut$Gene_Symbol, function(x) 
+  paste(unique(all_genes_id_conv[all_genes_id_conv$external_gene_name == x, 'uniprot_gn_id']), collapse = ";")))
+
+# Re-write these all to to files
+write.csv(cna_df_sub_hypermut, paste(main_path, "Linear Model/Tumor_Only/CNV/CNA_AllGenes_mergedIsoforms_CancerOnly_noHypermut_IntersectPatientsWashU.csv", sep = ""))
+write.csv(methylation_df_sub_hypermut, paste(main_path, "Linear Model/Tumor_Only/Methylation/methylation_M_CancerOnly_noHypermut_IntersectPatientsWashU.csv", sep = ""))
+write.csv(expression_df_sub_hypermut, paste(main_path, "Linear Model/Tumor_Only/Expression/expression_quantile_norm_noHypermut_IntersectPatientsWashU.csv", sep = ""))
+write.csv(mutation_targ_df_sub_hypermut, paste(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_nonsynonymous_noHypermut_IntersectPatientsWashU.csv", sep = ""))
+write.csv(patient_sample_df_sub_hypermut, paste(main_path, "Linear Model/Tumor_Only/Patient/combined_patient_sample_inclSubtypes_noHypermut_IntersectPatientsWashU.csv", sep = ""))
+
+lapply(1:length(patient_sample_dfs_sub_hypermut), function(i) {
+  ct <- names(patient_sample_dfs_sub_hypermut)[i]
+  fn <- paste0("Linear Model/Tumor_Only/Patient/combined_patient_sample_cibersort_total_frac_", 
+               paste0(ct, "_inclSubtypes_noHypermut_IntersectPatientsWashU.csv"))
+  write.csv(patient_sample_dfs_sub_hypermut[[i]], paste0(main_path, fn))
+})
 
 ############################################################
 ############################################################
@@ -988,7 +1057,35 @@ write(g2_noMut_pats_lt20pamp, paste0(main_path, paste0("Patient Subsets/", paste
 
 ############################################################
 ############################################################
-# 9. MERGE PAN-CANCER EXPRESSION DFs INTO ONE
+# 9. IDENTIFY MALE OR FEMALE PATIENTS 
+############################################################
+############################################################
+# In the pan-cancer case, male is 0 and female is 1
+patient_sample_df <- read.csv(paste0(main_path, "Linear Model/Tumor_Only/Patient/combined_patient_sample_inclSubtypes_uniformHypermutRm_IntersectPatientsWashU.csv"), 
+                              header = T, check.names = F, row.names = 1)
+male_pats <- unique(unlist(lapply(rownames(patient_sample_df[patient_sample_df$Gender == 0,]), function(x)
+  unlist(strsplit(x, "-", fixed = T))[1])))   #3001 patients
+female_pats <- unique(unlist(lapply(rownames(patient_sample_df[patient_sample_df$Gender == 1,]), function(x)
+  unlist(strsplit(x, "-", fixed = T))[1])))   #3017
+
+
+
+# If needed, use a patient-cancer mapping to eliminate patients from a sex-specific cancer
+# These include BRCA (breast), OV (ovarian), CESC (cervical), PRAD (prostate), TCGT (testicular), UCS and UCEC (uterine)
+sex_specific_cts <- c("BRCA", "OV", "CESC", "PRAD", "TCGT", "UCS", "UCEC")
+sex_specific_pats <- unlist(patient_cancer_mapping[names(patient_cancer_mapping) %in% sex_specific_cts])
+
+male_pats <- setdiff(male_pats, sex_specific_pats)   #2587
+female_pats <- setdiff(female_pats, sex_specific_pats)  #1721
+
+# Write these to file
+write(male_pats, paste0(main_path, "Patient Subsets/male_patients.txt"))
+write(female_pats, paste0(main_path, "Patient Subsets/female_patients.txt"))
+
+
+############################################################
+############################################################
+# 10. MERGE PAN-CANCER EXPRESSION DFs INTO ONE
 ############################################################
 ############################################################
 

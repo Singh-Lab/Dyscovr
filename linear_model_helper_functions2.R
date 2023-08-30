@@ -11,6 +11,9 @@ library.path <- .libPaths()
 library(stringr, lib.loc = library.path, quietly = TRUE)
 library(data.table, lib.loc = library.path, quietly = TRUE)
 library(broom, lib.loc = library.path, quietly = TRUE)
+library(Hmisc, lib.loc = library.path, quietly = TRUE)
+#library(pcaPP, lib.loc = library.path, quietly = TRUE)
+#library(qlcMatrix, lib.loc = library.path, quietly = TRUE)
 
 ############################################################
 
@@ -430,7 +433,6 @@ create_lm_input_file_outpath <- function(cancerType, specificType, test, tester_
 }
 
 
-############################################################
 #' Create the appropriate output file name for the master DF result based on the
 #' conditions of the given run
 #' @param test a TRUE/ FALSE value indicating whether this is a test on a single
@@ -438,6 +440,83 @@ create_lm_input_file_outpath <- function(cancerType, specificType, test, tester_
 #' @param tester_name if this is a test, the name of the tester regulatory protein
 #' @param run_name string value indicating the type of run if we are not running 
 #' a test on a single regulatory protein
+#' @param cna_bucketing a string description of how we are bucketing/ handling 
+#' CNA values
+#' @param meth_bucketing a TRUE/ FALSE value indicating if we are in some way 
+#' bucketing our methylation value
+#' @param meth_type 'Beta' or 'M' depending on the type of methylation we are
+#' using
+#' @param patient_df_name the string name used to import the patient DF
+#' @param num_PEER an integer value from 0 to 10 indicating the number of PEER 
+#' factors we are using
+#' @param num_pcs an integer value from 0 to 2 indicating the number of principal
+#' components we are using
+#' @param randomize a TRUE/ FALSE value indicating whether or not we are randomizing
+#' our dependent variable (expression or methylation)
+#' @param patients_to_incl_label a label indicating the subpopulation we are restricting 
+#' to, if any
+#' @param removeCis a TRUE/ FALSE value indicating whether or not we have removed
+#' cis gene pairings 
+#' @param removeMetastatic a TRUE/ FALSE value indicating whether or not we have removed 
+#' metastatic samples from the analysis
+create_regprot_input_table_filename <- function(test, tester_name, run_name, cna_bucketing, 
+                                                meth_bucketing, meth_type, patient_df_name, 
+                                                num_PEER, num_pcs, patients_to_incl_label, 
+                                                removeCis, removeMetastatic) {
+  outfn <- "regprot_input"
+  
+  # Add the name of the patient population of interest, if there is one
+  if(!(patients_to_incl_label == "")) {
+    outfn <- paste(outfn, patients_to_incl_label, sep = "_")
+  }
+  
+  # Add the name of the regulatory protein/ group of regulatory proteins
+  if(test) {
+    outfn <- paste(outfn, tester_name, sep = "_")
+  } else {outfn <- paste(outfn, run_name, sep = "_")} 
+  
+  # Add the decisions for CNA bucketing, mutation restriction, 
+  # methylation bucketing, and immune cell deconvolution bucketing 
+  cna_bucketing_lab <- "rawCNA"
+  if (cna_bucketing != "rawCNA") {cna_bucketing_lab <- paste("CNA", cna_bucketing, sep = "")}
+  #mutation_restr <- unlist(strsplit(mutation_regprot_df_name, "_", fixed = TRUE))[1]
+  if(!(is.na(meth_type) | (meth_type == "NA"))) {
+    meth_b_lab <- "Raw"
+    if(meth_bucketing) {meth_b_lab <- "Bucketed"}
+    meth_label <- paste("meth", paste(meth_type, meth_b_lab, sep = ""), sep = "")
+    
+    #ici_label_spl <- unlist(strsplit(patient_df_name, "_", fixed = TRUE))
+    #ici_label <- ici_label_spl[4]
+    #if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
+    #if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
+    #outfn <- paste(outfn, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
+                                                 #sep = "_"), sep = "_"), sep = "_")
+    outfn <- paste(outfn, paste(cna_bucketing_lab, meth_label, sep = "_"), sep = "_")
+  } else {
+    outfn <- paste(outfn, cna_bucketing_lab, sep = "_")
+  }
+  
+  # paste(mutation_restr, , sep = "_")
+  
+  # Add PEER factors/ PCs if needed
+  if(!(num_PEER == 0)) {outfn <- paste(outfn, paste(num_PEER, "PEER", sep = ""), sep = "_")}
+  if(!(num_pcs == 0))  {outfn <- paste(outfn, paste(num_pcs, "PCs", sep = ""), sep = "_")}
+  
+  # If we are NOT removing cis comparisons, add a label to denote this
+  if(removeCis) {outfn <- paste(outfn, "RmCis", sep = "_")}
+  
+  # If we are NOT removing metastatic samples, add a label to denote this
+  if(!removeMetastatic) {outfn <- paste(outfn, "notRmMetast", sep = "_")}
+  
+  print(paste("Regprot Outfile Name", outfn))
+  
+  return(outfn)
+}
+
+
+############################################################
+#' Create the appropriate output file name for the master DF result based on the
+#' conditions of the given run
 #' @param target_uniprot a Uniprot ID of the target gene for the given DF
 #' @param expression_df_name the string name used to import the expression DF
 #' @param cna_bucketing a string description of how we are bucketing/ handling 
@@ -459,20 +538,16 @@ create_lm_input_file_outpath <- function(cancerType, specificType, test, tester_
 #' cis gene pairings 
 #' @param removeMetastatic a TRUE/ FALSE value indicating whether or not we have removed 
 #' metastatic samples from the analysis
-create_lm_input_table_filename <- function(test, tester_name, run_name, target_uniprot, expression_df_name,
-                                   cna_bucketing, meth_bucketing, meth_type, patient_df_name, num_PEER, 
-                                   num_pcs, randomize, patients_to_incl_label, removeCis, removeMetastatic) {
+create_lm_input_table_filename <- function(target_uniprot, expression_df_name, 
+                                           cna_bucketing, meth_bucketing, meth_type, 
+                                           patient_df_name, randomize, patients_to_incl_label, 
+                                           removeCis, removeMetastatic) {
   outfn <- "lm_input"
   
   # Add the name of the patient population of interest, if there is one
   if(!(patients_to_incl_label == "")) {
     outfn <- paste(outfn, patients_to_incl_label, sep = "_")
   }
-  
-  # Add the name of the regulatory protein/ group of regulatory proteins
-  if(test) {
-    outfn <- paste(outfn, tester_name, sep = "_")
-  } else {outfn <- paste(outfn, run_name, sep = "_")} 
   
   # Add the name of the target 
   outfn <- paste(outfn, target_uniprot[1], sep = "_")
@@ -488,11 +563,7 @@ create_lm_input_table_filename <- function(test, tester_name, run_name, target_u
     if(meth_bucketing) {meth_b_lab <- "Bucketed"}
     meth_label <- paste("meth", paste(meth_type, meth_b_lab, sep = ""), sep = "")
     
-    ici_label_spl <- unlist(strsplit(patient_df_name, "_", fixed = TRUE))
-    ici_label <- ici_label_spl[4]
-    if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
-    if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
-    outfn <- paste(outfn, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
+    outfn <- paste(outfn, paste(expr_norm, paste(cna_bucketing_lab, meth_label, 
                                                  sep = "_"), sep = "_"), sep = "_")
   } else {
     outfn <- paste(outfn, paste(expr_norm, cna_bucketing_lab, sep = "_"), sep = "_")
@@ -500,15 +571,8 @@ create_lm_input_table_filename <- function(test, tester_name, run_name, target_u
 
   # paste(mutation_restr, , sep = "_")
   
-  # Add PEER factors/ PCs if needed
-  if(!(num_PEER == 0)) {outfn <- paste(outfn, paste(num_PEER, "PEER", sep = ""), sep = "_")}
-  if(!(num_pcs == 0))  {outfn <- paste(outfn, paste(num_pcs, "PCs", sep = ""), sep = "_")}
-  
   # If we are NOT removing cis comparisons, add a label to denote this
   if(removeCis) {outfn <- paste(outfn, "RmCis", sep = "_")}
-  
-  # If we are NOT removing metastatic samples, add a label to denote this
-  if(!removeMetastatic) {outfn <- paste(outfn, "notRmMetast", sep = "_")}
   
   # If we randomized expression, add "_RANDOMIZED" to the end of the file name
   if (randomize) {outfn <- paste(outfn, "_RANDOMIZED", sep = "")}
@@ -533,7 +597,7 @@ create_lm_input_table_filename <- function(test, tester_name, run_name, target_u
 #' @param tumNormMatched a TRUE/ FALSE value indicating whether or not this is a 
 #' tumor-normal matched run
 #' @param QTL_type either "eQTL" or "meQTL" depending on the type of run we are running
-#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3'
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', 'CPTAC3', or 'Chinese_TN'
 create_file_outpath <- function(cancerType, specificType, test, tester_name, 
                                 run_name, tumNormMatched, QTLtype, dataset) {
   outpath <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/output_files"
@@ -628,13 +692,14 @@ create_output_filename <- function(test, tester_name, run_name, targets_name, ex
       meth_b_lab <- "Bucketed"
     }
     meth_label <- paste("meth", paste(meth_type, meth_b_lab, sep = ""), sep = "")
-    ici_label_spl <- unlist(strsplit(patient_df_name, "_", fixed = TRUE))
-    ici_label <- ici_label_spl[4]
-    if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
-    if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
+    #ici_label_spl <- unlist(strsplit(patient_df_name, "_", fixed = TRUE))
+    #ici_label <- ici_label_spl[4]
+    #if(ici_label_spl[5] == "total") {ici_label <- paste(ici_label, "TotalFrac", sep = "")}
+    #if(ici_label_spl[5] == "abs") {ici_label <- paste(ici_label, "Abs", sep = "")}
     
-    outfn <- paste(outfn, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
-                                                 sep = "_"), sep = "_"), sep = "_")
+    #outfn <- paste(outfn, paste(expr_norm, paste(cna_bucketing_lab, paste(meth_label, ici_label, sep = "_"), 
+                                                 #sep = "_"), sep = "_"), sep = "_")
+    outfn <- paste(outfn, paste(expr_norm, paste(cna_bucketing_lab, meth_label, sep = "_"), sep = "_"), sep = "_")
   } else {
     outfn <- paste(outfn, paste(expr_norm, cna_bucketing_lab, sep = "_"), sep = "_")
   }
@@ -879,14 +944,25 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
     if(debug) {
       print(paste("dim mutation targ df:", dim(mutation_targ_df)))
       print(paste("dim cna df:", dim(cna_df)))
-      if(dataset != "Chinese_TN") {print(paste("dim methylation df:", dim(methylation_df)))}
       print(paste("dim expression df:", dim(expression_df)))
+      
+      if(dataset != "Chinese_TN") {
+        print(paste("dim methylation df:", dim(methylation_df)))
+        print(!(expression_df[, .N] == 0 | cna_df[, .N] == 0 | methylation_df[, .N] == 0 | 
+                  mutation_targ_df[, .N] == 0))
+      }
     }
-    print(!(expression_df[, .N] == 0 | cna_df[, .N] == 0 | methylation_df[, .N] == 0 | 
-              mutation_targ_df[, .N] == 0))
+
     # Continue only if all of these data frames contain information about this target gene k
-    if(!(expression_df[, .N] == 0 | cna_df[, .N] == 0 | methylation_df[, .N] == 0 | 
-         mutation_targ_df[, .N] == 0)) {
+    if(!(expression_df[, .N] == 0 | cna_df[, .N] == 0  | mutation_targ_df[, .N] == 0)) {
+      if(dataset != "Chinese_TN") {
+        if(methylation_df[, .N] == 0) {
+          if(debug) {
+            print(paste("Target not found in all DFs:", targ_k))
+          }
+          return(NA)
+        }
+      }
       
       # Loop through all samples to get the info for each target t_k column
       target_rows <- lapply(1:starter_df[, .N], function(i) {
@@ -943,19 +1019,22 @@ fill_targ_inputs <- function(starter_df, targ_k, targ_k_ensg, mutation_targ_df,
       })
       
       tryCatch({
-        # Bind these rows into the starter DF
         colnam <- colnames(target_rows[[1]])
         targ_k_df <- data.table::rbindlist(target_rows)
         colnames(targ_k_df) <- colnam
-        full_df <- cbind(starter_df, targ_k_df)
+        targ_k_df <- cbind(starter_df[,'sample_id'], targ_k_df)
+        return(targ_k_df)
+      #  full_df <- cbind(starter_df, targ_k_df)
         
       }, error=function(cond){
         print("Unexpected error; target rows is not valid: ")
         print(target_rows)
-        full_df <- starter_df
+        return(starter_df)
       })
       
-      return(full_df)
+      #return(full_df)
+      
+      
     } else {
       if(debug) {
         print(paste("Target not found in all DFs:", targ_k))
@@ -1049,6 +1128,8 @@ fix_lm_input_table <- function(lm_input_table) {
 #' this function reads them into a list of data tables that are returned
 #' @param lm_input_fns_sub vector of LM input files
 #' @param input_lm_filepath the path to the linear model input files
+#' @param regprot_input_fn the filename for the regulatory protein(s) portion of the 
+#' LM input DF
 #' @param randomize TRUE/FALSE value to indicate whether or not we are randomizing 
 #' the target variable
 #' @param gene_names_sub vector of the genes associated with each of the LM input files
@@ -1061,9 +1142,9 @@ fix_lm_input_table <- function(lm_input_table) {
 #' @param cna_df the copy number data frame, in case we want to adjust the CNA columns
 #' @param adjust_cna_rel a TRUE/FALSE value indicating whether or not we are adjusting
 #' the CNA columns to make them relative
-import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, gene_names_sub,
-                                select_drivers, select_args, num_pcs, num_PEER, qtl_type,
-                                cna_df, adjust_cna_rel) {
+import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, regprot_input_fn,
+                                randomize, gene_names_sub, select_drivers, select_args, 
+                                num_pcs, num_PEER, qtl_type, cna_df, adjust_cna_rel) {
   
   # Get a threshold for number of samples
   # Set threshold to 25, as suggested in this paper: https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0229345
@@ -1074,6 +1155,9 @@ import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
   
   cna_samp_dict <- NA
   if(adjust_cna_rel) {cna_samp_dict <- get_cna_samp_dict(cna_df)}
+  
+  # Import the regulatory protein input DF
+  regprot_df <- fread(paste(input_lm_filepath, regprot_input_fn, sep = "/"), header = T)
   
   lm_input_dfs <- lapply(lm_input_fns_sub, function(fn) {
     
@@ -1086,7 +1170,12 @@ import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
         if("ExpStat_k" %fin% colnames(file)) {
           if(nrow(file) >= thres) {
             if(randomize) {file$ExpStat_k <- dqsample(file$ExpStat_k)}
+            
+            # Add the regprot/ clinical portion
+            file <- merge(regprot_df, file, by = 'sample_id', all.x = FALSE, all.y = TRUE)
+            
             if(adjust_cna_rel) {file <- adjust_cna_relative(file, cna_samp_dict)}
+            
             # Do some preliminary filtering of columns we do not need
             file_filt <- filter_input_file(file, select_drivers, select_args, 
                                            num_pcs, num_PEER)
@@ -1102,6 +1191,12 @@ import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
         if("MethStat_k" %fin% colnames(file)) {
           if(nrow(file) >= thres) {
             if(randomize) {file$MethStat_k <- dqsample(file$MethStat_k)}
+            
+            # Add the regprot/ clinical portion
+            file <- merge(regprot_df, file, by = 'sample_id', all.x = FALSE, all.y = TRUE)
+            
+            if(adjust_cna_rel) {file <- adjust_cna_relative(file, cna_samp_dict)}
+            
             # Do some preliminary filtering of columns we do not need
             file_filt <- filter_input_file(file, select_drivers, select_args, 
                                            num_pcs, num_PEER)
@@ -1118,8 +1213,9 @@ import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
       }
     }
   })
-  
-  print(paste("Number of genes without a y-variable column, also discarded: ",  num_wo_yvar))
+  if(num_wo_yvar > 0) {
+    print(paste("Number of genes without a y-variable column, also discarded: ",  num_wo_yvar))
+  }
   
   names(lm_input_dfs) <- gene_names_sub
   return(lm_input_dfs)
@@ -1129,6 +1225,7 @@ import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
 #' Helper function to call the import_lm_input_fns function, given the size of the target set
 #' @param lm_input_fns_sub the names of the input filenames to import (a vector)
 #' @param input_lm_filepath the path where the input files are found
+#' @param regprot_input_fn the name of the regulatory protein(s) part of the LM input tables
 #' @param randomize TRUE/FALSE value, whether we are randomizing expression/ methylation
 #' @param gene_names_sub the names of all the genes we are looking to import
 #' @param select_drivers the names of particular drivers we'd like to look at
@@ -1140,16 +1237,16 @@ import_lm_input_fns <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
 #' @param adjust_cna_rel a TRUE/FALSE value indicating whether or not we are adjusting
 #' the CNA columns to make them relative
 #' @param N threshold for splitting into two segments
-call_import_lm_file <- function(lm_input_fns_sub, input_lm_filepath, randomize, 
+call_import_lm_file <- function(lm_input_fns_sub, input_lm_filepath, regprot_input_fn, randomize, 
                                 gene_names_sub, select_drivers, select_args, num_pcs, 
                                 num_peer, qtl_type, cna_df, adj_cna_rel, N) {
   if(length(lm_input_fns_sub) > N) {
     lm_input_dfs <- import_lm_input_fns(lm_input_fns_sub[1:N], input_lm_filepath, 
-                                        randomize, gene_names_sub[1:N], select_drivers, 
-                                        select_args, num_pcs, num_peer, qtl_type,
-                                        cna_df, adj_cna_rel)
+                                        regprot_input_fn, randomize, gene_names_sub[1:N], 
+                                        select_drivers, select_args, num_pcs, 
+                                        num_peer, qtl_type, cna_df, adj_cna_rel)
   } else {
-    lm_input_dfs <- import_lm_input_fns(lm_input_fns_sub, input_lm_filepath, 
+    lm_input_dfs <- import_lm_input_fns(lm_input_fns_sub, input_lm_filepath, regprot_input_fn,
                                         randomize, gene_names_sub, select_drivers, 
                                         select_args, num_pcs, num_peer, qtl_type,
                                         cna_df, adj_cna_rel)
@@ -1261,6 +1358,7 @@ filter_input_file <- function(lm_input_table, select_drivers, covs_to_incl, num_
     drivers_in_tab <- unlist(lapply(colnames_to_incl[grepl("MutStat_i", colnames_to_incl)], function(x)
       unlist(strsplit(x, "_", fixed = TRUE))[1]))
     drivers_to_exclude <- setdiff(drivers_in_tab, select_driver_vect)
+    drivers_to_exclude <- drivers_to_exclude[drivers_to_exclude != ""]
     drivers_to_exclude_covs <- unlist(lapply(drivers_to_exclude, function(d) 
       return(colnames_to_incl[grepl(d, colnames_to_incl)])))
     colnames_to_incl <- colnames_to_incl[!(colnames_to_incl %fin% drivers_to_exclude_covs)]
@@ -1416,7 +1514,8 @@ construct_formula <- function(lm_input_table, protein_ids_df, analysis_type,
   print("Now constructing formula...")
 
   # Exclude sample ID
-  colnames_to_incl <- colnames(lm_input_table)[2:ncol(lm_input_table)]
+  colnames_to_incl <- colnames(lm_input_table)[!(colnames(lm_input_table) == "sample_id")]
+  colnames_to_incl <- colnames_to_incl[!(colnames_to_incl == "_MutStat_i")]
   #print(length(colnames_to_incl))
   if(length(colnames_to_incl) < 3) {print(lm_input_table)}
   
@@ -1452,11 +1551,11 @@ construct_formula <- function(lm_input_table, protein_ids_df, analysis_type,
   if (analysis_type == "eQTL") {      
     colnames_to_incl <- colnames_to_incl[!(colnames_to_incl == "ExpStat_k")]
     formula <- paste(colnames_to_incl, collapse = " + ") 
-    formula <- paste("ExpStat_k ~ ", formula, sep = "")
+    formula <- paste("ExpStat_k ~", formula)
   } else if (analysis_type == "meQTL") {
     colnames_to_incl <- colnames_to_incl[!(colnames_to_incl == "MethStat_k")]
     formula <- paste(colnames_to_incl, collapse = " + ") 
-    formula <- paste("MethStat_k ~ ", formula, sep = "")
+    formula <- paste("MethStat_k ~", formula)
   } else {
     print(paste("Invalid analysis type:", analysis_type))
     return(NA)
@@ -1465,6 +1564,336 @@ construct_formula <- function(lm_input_table, protein_ids_df, analysis_type,
   return(formula)
 }
 
+############################################################
+#' A function to calculate a spearman correlation matrix among
+#' all variables in an input table and, according to the provided
+#' method, strategically exclude them if they are significantly 
+#' correlated (TODO: would need to adjust this for meQTLs)
+#' @param lm_input_table a single LM input table to linear model
+#' @param formula a LM formula, for using a VIF metric
+#' @param method the way to handle collinear variables; either "eliminate"
+#' or "interaction_term", with an optional '_vif' or on the
+#' end to indicate we are using VIF rather than Spearman/ Jaccard
+#' @param outfile the combined path and filename of the file where we are dynamically
+#' storing the variables that we remove for each target gene
+#' @param vif_thres a vif threshold, typically 
+correct_collinearity <- function(lm_input_table, formula, method, outfile, vif_thres = 5) {
+  
+  lm_input_matrix <- as.matrix(lm_input_table[,!(colnames(lm_input_table) %fin% 
+                                                   c("ExpStat_k", "sample_id")), with = F])
+  variables_removed <- c()
+  
+  # Deal with sparsity (remove columns with >97% 0's)
+  #lm_input_matrix <- lm_input_matrix[, colSums(lm_input_matrix == 0) < (0.97 * nrow(lm_input_matrix))]
+  
+  # Remove variables that are entirely 0 
+  lm_input_matrix <- lm_input_matrix[, colSums(lm_input_matrix != 0) > 0]
+  
+  # 1. SPEARMAN CORRELATION METHOD
+  # To remove cancer subtypes that are correlated to a driver mutation status using Spearman
+  # Use the Hmisc package to calculate a correlation matrix, get the p-values
+  corr_res <- correct_collinearity_spearman(lm_input_matrix, method, outfile)
+  lm_input_matrix <- corr_res[[1]]
+  variables_removed <- c(variables_removed, as.character(unlist(corr_res[[2]])))
+  
+  # 2. VIF/ TOLERANCE COLLINEARITY METHOD
+
+  # Make new formula
+  form_spl <- unlist(strsplit(formula, " ~ ", fixed = T))
+  form_spl_x <- unlist(strsplit(form_spl[2], " + ", fixed = T))
+  form_spl_x <- form_spl_x[form_spl_x %fin% colnames(lm_input_matrix)]
+  formula_new <- paste(as.character(form_spl[1]), paste(form_spl_x, collapse = " + "), sep = " ~ ")
+
+  lm_fit <- NA
+  lm_data <- cbind(lm_input_table[,c("sample_id", "ExpStat_k"), with = F], lm_input_matrix)
+  tryCatch({
+    lm_fit <- lm(data = lm_data, formula = formula_new)
+  }, error = function(cond) {
+    print(formula_new)
+    print(cond)
+    print(lm_data)
+  })
+
+  # Calculate VIF
+  vif_res <- calculate_vif(lm_fit, lm_data, formula_new)
+  if(!(is.na(vif_res[[2]]))) {
+    variables_removed <- c(variables_removed, as.character(vif_res[[2]]))
+  }
+  vif_res_new <- vif_res[[1]]
+  #names <- names(vif_res_new[vif_res_new > vif_thres])
+
+  # Get the names of the variables with a VIF score that exceeds some threshold
+  sig_vals <- vif_res_new[vif_res_new > vif_thres]
+  names <- names(sig_vals)
+
+  # Keep only the variables that are *not* bucketed (these will automatically have high VIF scores
+  # because of their linearity with the other buckets)
+  names <- names[!grepl("_b", names)]
+  
+  # Exclude other variables that exceed this VIF threshold
+  if(length(names) > 0) {
+    
+    # Check if there are driver mutation variables here - we want to keep these 
+    # and make sure their VIF goes down
+    if(TRUE %fin% grepl("MutStat_i", names)) {
+      mutstat_vars <- names[grepl("MutStat_i", names)]
+      
+      while(length(mutstat_vars) > 0) {
+        names <- names[!(names %fin% mutstat_vars)]
+        if(length(names) == 0) {break}
+        lm_input_matrix <- lm_input_matrix[,!(colnames(lm_input_matrix) %fin% names)]
+        variables_removed <- c(variables_removed, names)
+        
+        # Make new formula
+        form_spl <- unlist(strsplit(formula_new, " ~ ", fixed = T))
+        form_spl_x <- unlist(strsplit(form_spl[2], " + ", fixed = T))
+        form_spl_x <- form_spl_x[form_spl_x %fin% colnames(lm_input_matrix)]
+        formula_new <- paste(as.character(form_spl[1]), paste(form_spl_x, collapse = " + "), sep = " ~ ")
+        
+        # Fit the new model
+        lm_fit <- NA
+        lm_data <- cbind(lm_input_table[,c("sample_id", "ExpStat_k"), with = F], lm_input_matrix)
+        tryCatch({
+          lm_fit <- lm(data = lm_data, formula = formula_new)
+        }, error = function(cond) {
+          print(formula_new)
+          print(cond)
+          print(lm_data)
+        })
+        
+        # Recalculate the VIF scores, and make sure that the new MutStat_i variable's 
+        # VIF is lower than the threshold (if not, repeat until it is)
+        vif_res <- calculate_vif(lm_fit, lm_data, formula_new)
+        if(!(is.na(vif_res[[2]]))) {
+          variables_removed <- c(variables_removed, as.character(vif_res[[2]]))
+        }
+        vif_res_new <- vif_res[[1]]
+        #vifs_mutStat <- unlist(lapply(mutstat_vars, function(v) 
+          #vif_res_new[which(names(vif_res_new) == v)]))
+        names <- names(vif_res_new[vif_res_new > vif_thres])
+        names <- names[!grepl("_b", names)]
+        mutstat_vars <- names[grepl("MutStat_i", names)]
+      }
+      
+    } else {
+      lm_input_matrix <- lm_input_matrix[,!(colnames(lm_input_matrix) %fin% names)]
+      variables_removed <- c(variables_removed, names)
+    }
+  }
+  
+  # Write removed variables to file
+  print("Variables to be removed due to collinearity:")
+  print(variables_removed)
+  fwrite(list(paste(as.character(unlist(variables_removed)), collapse = ",")), 
+         outfile, append = T)
+  
+  lm_input_matrix <- cbind(lm_input_table[,c("sample_id", "ExpStat_k"), with = F], lm_input_matrix)
+  return(as.data.frame(lm_input_matrix))
+}
+
+
+#' Helper function to correct collinearity using a Spearman correlation/ Jaccard similarity method
+#' Spearman is for computing correlation between continuous variables; Jaccard is for measuring
+#' similarity between binary variables or continuous/binary combinations
+correct_collinearity_spearman <- function(lm_input_matrix, method, outfile) {
+  
+  variables_removed <- c()
+  
+  # Use the Hmisc package to calculate a correlation matrix, get the p-values
+  corr_mat <- as.data.frame(rcorr(lm_input_matrix, type = "spearman")$r)
+  corr_mat_p <- as.data.frame(rcorr(lm_input_matrix, type = "spearman")$P)
+
+  combos <- get_spearman_combos(corr_mat, corr_mat_p)
+
+  # Select which variables to keep, if we are eliminating collinear variables, or
+  # create interaction terms for them
+  # Always eliminate the subtype variable first, leaving the mutation covariates for last
+  # Keep the target's covariates over the others
+  for(c in combos) {
+    c_spl <- unlist(strsplit(c, ":", fixed = T)) 
+    var1 <- as.character(c_spl[1])
+    var2 <- as.character(c_spl[2])
+    
+    # Ignore the bucketed variables or variables for the same driver (we expect 
+    # these to be collinear, by definition)
+    if((!is.null(var1)) & (!is.null(var2))) {
+      var1_spl <- unlist(strsplit(var1, "_", fixed = T))
+      var2_spl <- unlist(strsplit(var2, "_", fixed = T))
+      if(!(var1_spl[1] == var2_spl[1])) {
+        if(!(grepl("PC", var1) & grepl("PC", var2))) {
+          
+          # Regardless, remove cancer subtypes that are based on mutation status of a driver
+          if((var1_spl[length(var1_spl)] == "i") & (var2_spl[1] == "Cancer")) {
+            lm_input_matrix <- lm_input_matrix[,colnames(lm_input_matrix) != var2]
+            variables_removed <- c(variables_removed, var2)
+          }
+          if((var2_spl[length(var2_spl)] == "i") & (var1_spl[1] == "Cancer")) {
+            lm_input_matrix <- lm_input_matrix[,colnames(lm_input_matrix) != var1]
+            variables_removed <- c(variables_removed, var1)
+          }
+          
+          if(!grepl("vif", method)) {
+            if(method == "eliminate") {
+              # We can't predict a factor well if it is correlated to the methylation, CNA,
+              # or mutation status of that target gene itself, even though this is very
+              # much in the realm of possibility
+              if(var1_spl[length(var1_spl)] == "k") {
+                if(var2_spl[length(var2_spl)] != "k") {
+                  if(var2 %fin% colnames(lm_input_matrix)) {
+                    lm_input_matrix <- lm_input_matrix[,colnames(lm_input_matrix) != var2]
+                    variables_removed <- c(variables_removed, var2)
+                  }
+                }
+              }
+              if(var2_spl[length(var2_spl)] == "k") {
+                if(var1_spl[length(var1_spl)] != "k") {
+                  if(var1 %fin% colnames(lm_input_matrix)) {
+                    lm_input_matrix <- lm_input_matrix[,colnames(lm_input_matrix) != var1]
+                    variables_removed <- c(variables_removed, var1)
+                  }
+                }
+              }
+              
+              # NOTE: If both of these terms are for nuisance variables like age and gender, just
+              # keep them
+              
+            } else  {
+              if(method != "interaction_term") {
+                print("Only 'eliminate' and 'interaction_term' are implemented methods
+                  for dealing with variable collinearity. Using interaction term method.")
+              }
+              if(((var1_spl[length(var1_spl)] == "k") & (var2_spl[length(var2_spl)] != "k")) | 
+                 ((var1_spl[length(var1_spl)] != "k") & (var2_spl[length(var2_spl)] == "k"))) {
+                new_var <- paste(var1, paste(var2, "interac", sep = "_"), sep = "_")
+                #print(new_var)
+                #pseudocount <- 0.0001
+                vals <- unlist(lapply(1:nrow(lm_input_matrix), function(i) {
+                  e1 <- unique(as.numeric(lm_input_matrix[i,colnames(lm_input_matrix) == var1])) #+ pseudocount
+                  e2 <- unique(as.numeric(lm_input_matrix[i,colnames(lm_input_matrix) == var2])) #+ pseudocount
+                  #return(e1*e2)
+                  return(ifelse(((e1 > 0) & (e2 > 0)) | ((e1 < 0) & (e2 < 0)), 1, 0))
+                }))
+                
+                lm_input_matrix <- cbind(lm_input_matrix, vals)
+                colnames(lm_input_matrix)[ncol(lm_input_matrix)] <- new_var
+              }
+            } 
+          }
+        }
+      } 
+    } 
+  }
+  # Write removed variables to file
+  #fwrite(list(paste(variables_removed, collapse = ",")), outfile, append = T)
+  
+  return(list(lm_input_matrix, unique(variables_removed)))
+}
+
+
+#' Helper function to get combinations of significantly correlated variables 
+#' from a Spearman correlation matrix
+#' @param corr_mat spearman correlation matrix
+#' @param corr_mat_p spearman correlation pvalue matrix
+#' @param sig_thres the p-value significance threshold for considering
+#' a pair of variables to be correlated
+#' @param corr_thres the absolute value of the minimum spearman correlation to qualify
+#' two variables as being correlated
+get_spearman_combos <- function(corr_mat, corr_mat_p, sig_thres = 1e-05, corr_thres = 0.7) {
+
+  names <- rownames(corr_mat)
+  num_rows <- nrow(corr_mat)
+  
+  combos <- unique(unlist(lapply(1:ncol(corr_mat), function(i) {
+    curr_var <- colnames(corr_mat)[i]
+    curr_vals <- corr_mat[i:num_rows, i]
+    curr_pvals <- corr_mat_p[i:num_rows, i]
+    curr_names <- names[i:num_rows]
+    
+    # Remove NA/NAN values (assume these are not significant)
+    na_nan_ind <- which(is.na(curr_pvals) | is.nan(curr_pvals))
+    curr_pvals <- curr_pvals[-na_nan_ind]
+    curr_names <- curr_names[-na_nan_ind]
+    curr_vals <- curr_vals[-na_nan_ind]
+    
+    #print(curr_vals)
+    #print(curr_pvals)
+    #print(curr_names)
+    
+    if(any(curr_pvals < sig_thres)) {
+      corr_ind <- intersect(which(curr_pvals < sig_thres), which(abs(curr_vals) > corr_thres))
+      corr_vars <- unlist(curr_names[corr_ind])
+      if(length(corr_vars) > 0) {
+        tuples <- lapply(corr_vars, function(v) return(paste(curr_var, v, sep = ":")))
+        return(tuples)
+      } else {return(NA)}
+    }
+  })))
+  combos <- combos[!is.na(combos)]
+  #print(combos)
+  
+  return(combos)
+}
+
+
+#' Calculate VIF scores using either the olssr or caret packages
+#' @param lm_fit the fitted linear regression
+#' @param lm_input_table the LM input table, in case we have aliased coefficients
+#' @param formula the LM formula, in case we have aliased coefficients
+calculate_vif <- function(lm_fit, lm_input_table, formula) {
+  
+  variables_removed <- NA
+  
+  # Option 1: use olsrr package
+  #vif_res <- olsrr::ols_coll_diag(lm_fit)
+  #vif_res <-  vif_res_olsrr[[1]]
+  
+  # Option 2: use caret package -- slightly faster, but both are very fast
+  tryCatch({
+    vif_res <- car::vif(lm_fit, type = "predictor")
+  }, error=function(cond) {
+    if(grepl("aliased coefficients", cond)) {
+      boolFalse <- F
+      variables_removed <- c()
+      i <- 1
+      while(boolFalse == F) {
+        lm_input_table_sub <- lm_input_table[, !(colnames(lm_input_table) %fin% 
+                                                   c("ExpStat_k", "sample_id")), with = F]
+        cor_df <- cor(lm_input_table_sub)
+        cor_df[row(cor_df) == col(cor_df)] <- NA
+        #ind <- as.integer(which((cor_df == 1) | (cor_df == 1), arr.ind = T))
+        #variables_removed <- unique(c(rownames(cor_df)[ind[1]], colnames(cor_df)[ind[2]]))
+        ind <- rbind(which(cor_df == 1, arr.ind = T), which(cor_df == -1, arr.ind = T))
+        print(ind)
+        if(is.null(ind)) {return(NA)}
+        variables_removed <- c(variables_removed, unique(rownames(ind)))
+        print(variables_removed)
+        formula_spl <- unlist(strsplit(formula, " ~ ", fixed = T))
+        formula_spl_x <- unlist(strsplit(formula_spl[2], " + ", fixed = T))
+        formula_spl_x <- formula_spl_x[!(formula_spl_x %fin% variables_removed)]
+        formula_new <- paste(as.character(formula_spl[1]), paste(formula_spl_x, collapse = " + "), sep = " ~ ")
+        #print(formula_new)
+        lm_input_table <- lm_input_table[,!(colnames(lm_input_table) %fin% variables_removed), with = F]
+        lm_fit <- lm(data = lm_input_table, formula = formula_new)
+        try({
+          vif_res <- car::vif(lm_fit, type = "predictor")
+          boolFalse <- T
+        })
+        i <- i + 1
+        
+        # Quit if we have reached an endless loop
+        if(i > 5) {
+          return(NA)
+        }
+      }
+      
+    } else {
+      print(cond)
+      return(NA)
+    }
+  })
+  
+  return(list(vif_res, variables_removed))
+}
 
 ############################################################
 #' A function to combine the collinearity diagnostic statistics,
@@ -1568,7 +1997,7 @@ combine_collinearity_diagnostics <- function(path, outfn, debug, randomize) {
 #' found on the rows or the columns of the DF (TRUE is columns, FALSE is rows)
 #' @param tumNormMatched a TRUE/FALSE value indicating whether we are looking at 
 #' tumor-normal matched samples (if FALSE, restrict to only cancer samples)
-#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3'
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', 'CPTAC3', or 'Chinese_TN'
 subset_by_intersecting_ids <- function(patients, df, colNames, tumNormMatched, dataset) {
   df <- as.data.frame(df)
   df_adj <- NA

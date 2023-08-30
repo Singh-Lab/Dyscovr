@@ -1,13 +1,13 @@
 ############################################################
 # Helper functions for exploratory analysis and visualization
 # of MAF files
-# Written By: Sara Camilli, July 2020
+# Written By: Sara Geraghty, July 2020
 ############################################################
 library(maftools)
 library(stats)
 library(ggplot2)
 library(dplyr)
-library(tidytext)
+#library(tidytext)
 library(TCGAbiolinks)
 library("RColorBrewer")
 library("gplots")
@@ -77,11 +77,6 @@ get_mut_count_matrix <- function(maf) {
 allgene_targets <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/allgene_targets.csv", 
                             header = TRUE, row.names = 1, check.names = FALSE)
 
-intersecting_patients_brca <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Linear Model/Tumor_Only/intersecting_ids.txt", 
-                                         header = TRUE, row.names = 1, check.names = FALSE)[,1]
-intersecting_patients_pc <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Linear Model/Tumor_Only/intersecting_ids.txt", 
-                                         header = FALSE, check.names = FALSE)[,1]
-
 #' Function to add genes with no mutations across any sample to the mutation count matrix
 #' @param mut_count_matrix a maftools-produced mutation count matrix
 #' @param allgene_targets a list of all target genes created from ensembl
@@ -101,6 +96,7 @@ add_missing_genes_to_mut_count_mat <- function(mut_count_matrix, allgene_targets
   colnames(missing_genes_df) <- colnames(mut_count_matrix)
   
   mut_count_matrix_full <- rbind(mut_count_matrix, missing_genes_df)
+  rownames(mut_count_matrix_full) <- c(rownames(mut_count_matrix), rownames(missing_genes_df))
   
   return(mut_count_matrix_full)
 }
@@ -216,7 +212,7 @@ visualize_mutation_distrib <- function(total_mutation_count_matrix, patient_id_c
   mut_count_matrices <- lapply(cancer_types, function(ct) {
     # Subset the mapping to just this cancer type & get all the patients of this type
     patients <- patient_id_cancer_type_map[patient_id_cancer_type_map$Project.ID == ct, 'Patient.ID'] 
-    print(patients)
+    print(head(patients))
     # Use these patients to subset the total count matrix file
     #count_matrix_sub <- total_mutation_count_matrix[grepl(paste(patients, collapse = "|"), total_mutation_count_matrix$X),]            #maf[unlist(strsplit(maf$Tumor.Sample.Barcode, "-", fixed = TRUE))[3] %fin% patients,]  # May need to fix this, or use subset
     count_matrix_sub <- total_mutation_count_matrix[grepl(paste(patients, collapse = "|"), rownames(total_mutation_count_matrix)), , drop = FALSE]            #maf[unlist(strsplit(maf$Tumor.Sample.Barcode, "-", fixed = TRUE))[3] %fin% patients,]  # May need to fix this, or use subset
@@ -242,7 +238,7 @@ make_patient_id_cancer_type_map <- function(patient_ids, clinical_df) {
   
   rows <- lapply(patient_ids, function(id) {
     # Extract the "project ID" for each patient ID and split out the "TCGA-" part
-    project_id <- unlist(strsplit(unique(clinical_df[grepl(id, clinical_df$tcga_barcode), 'project_id']), "-", fixed = TRUE))[2]
+    project_id <- unlist(strsplit(unique(clinical_df[grepl(id, clinical_df$case_submitter_id), 'project_id']), "-", fixed = TRUE))[2]
     if(!length(project_id) == 0) {
       return(c(id, project_id))
     }
@@ -255,6 +251,9 @@ make_patient_id_cancer_type_map <- function(patient_ids, clinical_df) {
 }
 
 # Import needed information
+path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/"
+clinical_df <- read.csv(paste0(path, "Input Data Files/Pan-Cancer/clinical_data_subset.csv"), 
+                                                 header = T, check.names = F)
 total_mutation_count_matrix <- read.csv(paste(path, "Saved Output Data Files/Pan-Cancer/Mutation/Mutation Count Matrices/total_mut_count_matrix_per_patient.csv", sep = ""))
 patient_ids <- unique(unlist(lapply(total_mutation_count_matrix$X, function(x) unlist(strsplit(x, "-", fixed = TRUE))[3])))
 
@@ -267,6 +266,8 @@ total_mut_count_tab <- visualize_mutation_distrib(total_mutation_count_matrix, c
 # Plot the total mutation counts as a histogram for each table
 ggplot(total_mut_count_tab, aes(x=Total.Num.Mut)) + geom_histogram() +
   labs(x = "Total Mutation Count", y = "Frequency") + facet_wrap(~Project.ID)
+
+write.csv(total_mut_count_tab, paste0(path, "Saved Output Data Files/Pan-Cancer/Mutation/Mutation Count Matrices/total_mut_count_matrix_per_patient_ALL.csv"))
 
 
 ### OPTIONAL, IF NEEDED ###
@@ -312,28 +313,95 @@ get_per_cancer_sub_mafs(maf_file_df_missense, clinical_df)
 filter_hypermutators <- function(maf_filename, maf_df) {
   
   maf <- read.maf(maf_filename)
+  
   mut_count_matrix <- get_mut_count_matrix(maf)
   total_mut_count_tab <- get_num_mutations_per_patient(mut_count_matrix)
   total_mut_counts <- total_mut_count_tab[,1]
   
+  print(length(total_mut_counts))
+  
   # Get the IQR
-  iqr <- IQR(total_mut_counts)
+  #iqr <- IQR(total_mut_counts)
   # Get Q3 of data
-  q3 <- as.numeric(quantile(total_mut_counts)[4])
+  #q3 <- as.numeric(quantile(total_mut_counts)[4])
   # Get Q3 + 1.5(IQR)
-  thres <- as.numeric(q3 + (1.5 * iqr))
+  #thres <- as.numeric(q3 + (1.5 * iqr))
+  #print(thres)
+  mean <- mean(total_mut_counts)
+  sd <- sd(total_mut_counts)
+  thres <- mean + (sd*3)
+  print(mean)
+  print(sd)
+  print(thres)
 
   # Filter the mutation count table by this threshold
   total_mut_count_tab_filt <- subset(total_mut_count_tab, Total.Num.Mut < thres)
 
   # Get the remaining patients left in the matrix
   remaining_samp <- rownames(total_mut_count_tab_filt)
+  print(setdiff(rownames(total_mut_count_tab), rownames(total_mut_count_tab_filt)))
 
   # Filter the maf DF to include only these patients & return
   maf_df_filt <- maf_df[maf_df$Tumor_Sample_Barcode %fin% remaining_samp,]
+  
+  hist(total_mut_count_tab_filt$Total.Num.Mut, xlab = "Number of Variants", main = "")
+  
+  print(dim(maf_df_filt))
 
   return(list(maf_df = maf_df_filt, mut_count_df = total_mut_count_tab_filt))
 }
+
+#' Additional option when we have manually determined thresholds from histograms 
+#' of the total number of mutations; returns a filtered mutation count matrix
+#' @param mut_count_matrix a pan-cancer mutation count matrix
+#' @param pc_hypermutator_thres a table of thresholds for total # of mutations 
+#' for each cancer type
+#' @param cancer_patient_id_type_map a mapping of patient IDs to cancer type
+filter_hypermutators_manual <- function(mut_count_matrix, pc_hypermutator_thres, 
+                                        cancer_patient_id_type_map) {
+  cts <- unique(cancer_patient_id_type_map$Project.ID)
+  mut_count_pats <- unlist(lapply(colnames(mut_count_matrix), function(x) 
+    unlist(strsplit(x, "-", fixed = T))[1]))
+  
+  df_new_list <- lapply(cts, function(ct) {
+    ct_pats <- unlist(cancer_patient_id_type_map[cancer_patient_id_type_map$Project.ID == ct, 'Patient.ID'])
+    mut_ct <- mut_count_matrix[, which(mut_count_pats %in% ct_pats)]
+    # Get the total number of mutations for each of these patients
+    mut_colsums <- colSums(mut_ct)
+    # Get the threshold for this CT
+    thres <- pc_hypermutator_thres[pc_hypermutator_thres$Cancer.Type == ct, 'Hypermut.Thres']
+    # Limit to those samples below this threshold
+    mut_sub <- mut_ct[, which(mut_colsums < thres)]
+    return(mut_sub)
+  })
+  
+  mut_count_matrix_sub <- do.call(cbind, df_new_list)
+  
+  total_mut_count_matrix <- get_num_mutations_per_patient(mut_count_matrix_sub)
+  total_mut_count_matrix_full <- visualize_mutation_distrib(total_mut_count_matrix, cancer_patient_id_type_map)
+  g <- ggplot(total_mut_count_matrix_full, aes(x=Total.Num.Mut)) + geom_histogram() +
+    labs(x = "Total Mutation Count", y = "Frequency") + facet_wrap(~Project.ID, scales ="free")
+  print(g)
+  
+  return(mut_count_matrix_sub)
+}
+
+
+path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/"
+clinical_df <- read.csv(paste0(path, "Input Data Files/Pan-Cancer/clinical_data_subset.csv"), 
+                        header = T, check.names = F)
+pc_mut_count_matrix_all <- read.csv(paste0(path, "Saved Output Data Files/Pan-Cancer/Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous_ALL.csv"), 
+                                        header = T, check.names = F, row.names = 1)
+patient_ids <- unique(unlist(lapply(colnames(pc_mut_count_matrix_all), function(x) 
+  unlist(strsplit(x, "-", fixed = TRUE))[1])))
+
+cancer_patient_id_type_map <- make_patient_id_cancer_type_map(patient_ids, clinical_df)
+#pc_hypermutator_thres <- read.csv(paste0(path, "Saved Output Data Files/Pan-Cancer/Mutation/Mutation Count Matrices/manual_hypermutator_thresholds.csv"))
+pc_hypermutator_thres <- read.csv(paste0(path, "Saved Output Data Files/Pan-Cancer/Mutation/Mutation Count Matrices/uniform_hypermutator_thresholds.csv"))
+
+
+mut_count_matrix_manual_hypermutFilt <- filter_hypermutators_manual(mut_count_matrix, pc_hypermutator_thres, 
+                                                                    cancer_patient_id_type_map)
 
 ############################################################
 

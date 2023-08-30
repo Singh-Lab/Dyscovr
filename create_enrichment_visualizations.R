@@ -39,12 +39,13 @@ all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Proje
 #' @param known_targs a vector of known targets for a gene of interest (master
 #' DF should already be subsetted to just this gene); ex. ChIP-eat targets, HumanBase
 #' @param type the type of test, either "fisher's exact" or "k-s"
-compute_statistical_enrichment <- function(master_df, known_targs, type) {
+#' @param qval_thres q-value threshold for HG enrichment
+compute_statistical_enrichment <- function(master_df, known_targs, type, qval_thres) {
   final_res <- NA
   
   if ((type == "fisher's exact") | (type == "both")) {
-    sig_targets <- unique(master_df[master_df$q.value < 0.1, 'T_k.name'])
-    nonsig_targets <- unique(master_df[master_df$q.value > 0.1, 'T_k.name'])
+    sig_targets <- unique(master_df[master_df$q.value < qval_thres, 'T_k.name'])
+    nonsig_targets <- unique(master_df[master_df$q.value > qval_thres, 'T_k.name'])
     targets <- unique(master_df$T_k.name)
     
     num_sig_targets <- length(sig_targets)
@@ -87,8 +88,18 @@ compute_statistical_enrichment <- function(master_df, known_targs, type) {
     # Perform the K-S test, with the uniform distribution
     ks_res <- ks.test(ranks_of_targs, uniform, alternative = "greater")
     
-    print(ks_res)
+    #print(ks_res)
     print(ks_res$p.value)
+    
+    # Alternative to print the K-S statistic exactly, using the KSgeneral package
+    # (Note that this is now a two-sided test)
+    if(ks_res$p.value == 0) {
+      print("Printing KSgeneral two-sided K-S p-value:")
+      ks_res_exact <- disc_ks_test(ranks_of_targs, ecdf(uniform), exact = T,
+                                   alternative = "greater")
+      print(ks_res_exact$p.value)
+      ks_res <- ks_res_exact
+    }
     
     if(type == "both") {final_res <- list(final_res, ks_res)}
     else {final_res <- ks_res}
@@ -101,8 +112,22 @@ compute_statistical_enrichment <- function(master_df, known_targs, type) {
 }
 
 # Call function
-compute_statistical_enrichment(allgenes_p53, tp53_nw_targs, "both")
+compute_statistical_enrichment(allgenes_p53, tp53_nw_targs, "both", 0.1)
 
+
+input <- melt(as.data.frame(list("TP53" = -log10(1.571079e-06), "PIK3CA" = -log10(0.00031161), 
+                                 "KRAS" = -log10(0.009104977), "IDH1" = -log10(0.7308022))))
+colnames(input) <- c("Driver", "negLog10pval")
+
+ggplot(input, aes(y = negLog10pval, fill = Driver, x = reorder(Driver, negLog10pval, mean))) + 
+  geom_bar(position = "dodge", width = 0.95, stat = "identity", show.legend = FALSE, color = "black") + 
+  scale_fill_manual(values = c("#0072B5FF", "#BC3C29FF", "#20854EFF", "#FFDC91FF")) + #scale_color_nejm() +
+  xlab("Driver") + ylab(paste0("-log10(pval) of HG Enrichment,\n Top 100 STRING Neighbors (q<", paste0(0.001, ")\n"))) +
+  geom_hline(yintercept=-log10(0.05), linetype="dashed", color = "black") + coord_flip() + #theme_minimal() +
+  scale_y_discrete(expand = c(0, 0)) + scale_y_continuous(expand = c(0, 0)) +
+  theme(axis.text = element_text(face="bold", size = 14), 
+        axis.title=element_text(size=16, face="bold"), panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'white'))
 
 #' Given a set of STRING/ HumanBase confidence values and p-values values from the model,
 #' calculate a spearman correlation between the confidence values and 1-(p.value)
@@ -574,9 +599,10 @@ dev.off()
 #' to calculate enrichment in alternative sets (such as PubMed, etc.)
 #' @param master_df a master DF produced from run_linear_model() that has q-values
 #' @param qval_thres a q-value threshold for what we consider a significant model hit
+#' @param top_n alternative to look at the top N genes at the given significance threshold
 #' @param background if we ran the model on a subset of genes to begin with (e.g. 
 #' metabolic genes), provide this gene set as a background for enrichment (gene symbols)
-get_stringdb_enrichment <- function(master_df, qval_thres, background) {
+get_stringdb_enrichment <- function(master_df, qval_thres, top_n, background) {
   # Instantiate the string DB object 
   string_db <- STRINGdb$new(version="11.5", species=9606, score_threshold=0, 
                             input_directory="")
@@ -591,7 +617,8 @@ get_stringdb_enrichment <- function(master_df, qval_thres, background) {
   }
   
   # Calculate the enrichment for all sources  
-  stringdb_enrichment <- string_db$get_enrichment(master_df[master_df$q.value < qval_thres, 'T_k.name'])
+  hits <- master_df[master_df$q.value < qval_thres, 'T_k.name']
+  stringdb_enrichment <- string_db$get_enrichment(hits[1:top_n])
   print(head(stringdb_enrichment, n=20))
   
   return(stringdb_enrichment)
@@ -649,21 +676,24 @@ generate_empirical_p_string <- function(string_nw, goi, goi_name, master_df,
     hist(distr_vals, main = "", xlab = paste("\nRandomized STRING Conf. Scores for", 
                                               paste0(goi_name, paste0("\nSamp. Size = # Hits at q<", 
                                                                  paste0(qval_thres, paste0(", # Trials = ", num_trials))))),
-         ylab = "Frequency Across Trials", col = "lightblue") #xlim = c(min(distr_vals), max(distr_vals)))
-    
+         ylab = "Frequency Across Trials", col = "#0072B599") #xlim = c(min(distr_vals), max(distr_vals)))
+     
     # Now, get the confidences for each of our actual hits
     real_conf_scores <- unlist(lapply(master_df_goi_sub$T_k.name, function(x) {
       print(x)
+      if(x %fin% unique(c(string_nw$node1_name, string_nw$node2_name))) {
+        return(as.numeric(unlist(string_nw[(string_nw$node1_name == x) | (string_nw$node2_name == x), 
+                             'combined_score'])))
+      } else {return(NA)}
+    }))
       #as.numeric(string_nw_goi[(string_nw_goi$node2 == x) | (string_nw_goi$node1 == x), 
       #'combined_score'])}))
-      as.numeric(string_nw[(string_nw$from_name == x) | (string_nw$to_name == x), 
-                           'combined_score'])}))
     
-    real_conf_scores_mean <- mean(real_conf_scores)
+    real_conf_scores_mean <- mean(real_conf_scores[!is.na(real_conf_scores)])
     print(real_conf_scores_mean)
     
     # Plot where we fall on this distribution
-    abline(v = real_conf_scores_mean, col = "red")
+    abline(v = real_conf_scores_mean, col = "#BC3C29FF")
     
     # Perform a simple one-sample t-test (assume that we have a random sample
     # of values from a theoretical pool of genes that are called significant by 
@@ -734,9 +764,7 @@ process_stringdb_network_for_goi <- function(goi, all_genes_id_conv) {
 }
 
 # Import the String network file
-string_nw <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/STRING/string_interactions.tsv",
-                      header = TRUE, sep = "\t", check.names = FALSE)
-colnames(string_nw)[1] <- "node1"
+string_nw_full <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Network_Data/STRING/string.9606.protein.links.v11.5.namesAdded.txt")
 
 # Limit to given GOI
 goi <- "P04637"
@@ -748,10 +776,10 @@ goi_name <- "TP53"
 interactions <- process_stringdb_network_for_goi(goi, all_genes_id_conv)
 
 # Call function
-#generate_empirical_p_string(string_nw, goi, goi_name, allgenes_topDrivers_0.025_ucsf_noLasso,
+generate_empirical_p_string(string_nw, goi, goi_name, allgenes_topDrivers_0.025_ucsf_noLasso,
+                           0.2, 1000)
+#generate_empirical_p_string(interactions, goi, goi_name, allgenes_topDrivers_0.025_ucsf_noLasso,
                            # 0.2, 1000)
-generate_empirical_p_string(interactions, goi, goi_name, allgenes_topDrivers_0.025_ucsf_noLasso,
-                            0.2, 1000)
 
 
 ############################################################
@@ -871,6 +899,12 @@ tp53_regulates_metabolism_pw_gns <- unlist(lapply(tp53_regulates_metabolism_pw$M
   unlist(strsplit(x, " ", fixed = TRUE))[2]))
 tp53_regulates_metabolism_pw_gns <- unique(tp53_regulates_metabolism_pw_gns[tp53_regulates_metabolism_pw_gns != "TP53"])
 #tp53_regulates_metabolism_pw_gns <- setdiff(tp53_regulates_metabolism_pw_gns, metabol_p53$T_k.name)
+
+tp53_transcriptional_reg_pw <- read.csv(paste0(nw_path, "Reactome/Transcriptional Regiulation by TP53_R-HSA-3700989.csv"), 
+                                         header = TRUE, check.names = FALSE)
+tp53_transcriptional_reg_pw_gns <- unlist(lapply(tp53_transcriptional_reg_pw$MoleculeName, function(x) 
+  unlist(strsplit(x, " ", fixed = TRUE))[2]))
+tp53_transcriptional_reg_pw_gns <- unique(tp53_transcriptional_reg_pw_gns[tp53_transcriptional_reg_pw_gns != "TP53"])
 
 
 # PIK3CA's TF targets are primarily NFKB, CREB, and FOXO
@@ -997,6 +1031,9 @@ pik3ca_string_nw_targs <- read.table(paste0(nw_path, "STRING/PIK3CA_interactors_
 kras_string_nw_targs <- unique(unlist(read.csv(paste0(nw_path, "STRING/kras_string_interactions_top100.csv"),
                                    header = T, check.names = F)[,1:2]))
 kras_string_nw_targs <- kras_string_nw_targs[kras_string_nw_targs != "KRAS"]
+idh1_string_nw_targs <- unique(unlist(read.csv(paste0(nw_path, "STRING/idh1_string_interactions_top100.csv"),
+                                               header = T, check.names = F)[,1:2]))
+idh1_string_nw_targs <- idh1_string_nw_targs[idh1_string_nw_targs != "IDH1"]
 
 # Import the top 500 STRING network targets
 tp53_string_nw_targs_top500 <- read.table(paste0(nw_path, "STRING/tp53_string_interactions_top500.csv"),

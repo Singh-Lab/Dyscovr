@@ -9,10 +9,14 @@ library(ggrepel)
 library(rstatix)
 library(fpc)
 
+
+# BRCA Data 
 cptac_brca_mutation_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_cptac_2020/data_mutations.txt", 
                                      sep = "\t", header = TRUE, check.names = FALSE)
-cptac_brca_missense_nonsense_mutation_data <- cptac_brca_mutation_data[(cptac_brca_mutation_data$Variant_Classification == "Missense_Mutation") |
-                                                                         (cptac_brca_mutation_data$Variant_Classification == "Nonsense_Mutation"),]
+cptac_brca_nonsyn_mutation_data <- cptac_brca_mutation_data[(cptac_brca_mutation_data$Variant_Classification == "Missense_Mutation") |
+                                                              (cptac_brca_mutation_data$Variant_Classification == "Nonsense_Mutation") |
+                                                              (cptac_brca_mutation_data$Variant_Classification == "Splice_Site") |
+                                                              (cptac_brca_mutation_data$Variant_Classification == "Nonstop_Mutation"),]
 
 cptac_brca_fpkm_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/cBioPortal/brca_cptac_2020/data_mrna_seq_fpkm.txt", 
                                  sep = "\t", header = TRUE, check.names = FALSE)
@@ -42,6 +46,49 @@ cptac_her2_samples <- cptac_brca_clinical_sample[cptac_brca_clinical_sample$PAM5
 cptac_normLike_samples <- cptac_brca_clinical_sample[cptac_brca_clinical_sample$PAM50 == "Normal-like", 'SAMPLE_ID']
 
 
+# GBM Data
+cptac_gbm_mutation_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/CPTAC3/gbm_cptac_2021/data_mutations.txt", 
+                                     sep = "\t", header = TRUE, check.names = FALSE)
+cptac_gbm_nonsyn_mutation_data <- cptac_gbm_mutation_data[(cptac_gbm_mutation_data$Variant_Classification == "Missense_Mutation") |
+                                                              (cptac_gbm_mutation_data$Variant_Classification == "Nonsense_Mutation") |
+                                                              (cptac_gbm_mutation_data$Variant_Classification == "Splice_Site") |
+                                                              (cptac_gbm_mutation_data$Variant_Classification == "Nonstop_Mutation"),]
+
+cptac_gbm_cna_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/CPTAC3/gbm_cptac_2021/data_cna.txt", 
+                               sep = "\t", header = TRUE, check.names = FALSE)
+
+cptac_gbm_methylation_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/CPTAC3/gbm_cptac_2021/data_methylation_epic.txt", 
+                               sep = "\t", header = TRUE, check.names = FALSE)
+
+cptac_gbm_fpkm_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/CPTAC3/gbm_cptac_2021/data_mrna_seq_fpkm.txt", 
+                                 sep = "\t", header = TRUE, check.names = FALSE)
+cptac_gbm_fpkm_data_complete <- cptac_gbm_fpkm_data[rowSums(is.na(cptac_gbm_fpkm_data[,2:ncol(cptac_gbm_fpkm_data)])) == 0,]
+
+cptac_gbm_proteomic_data <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/CPTAC3/gbm_cptac_2021/data_protein_quantification.txt", 
+                                      sep = "\t", header = TRUE, check.names = FALSE, row.names = 1)
+rownames(cptac_gbm_proteomic_data) <- unlist(lapply(rownames(cptac_gbm_proteomic_data), function(x)
+  unlist(strsplit(x, "|", fixed = TRUE))[1]))
+
+cptac_gbm_idh1_mutation <- cptac_gbm_nonsyn_mutation_data[cptac_gbm_nonsyn_mutation_data$Hugo_Symbol == "IDH1",]
+idh1_mut_patients <- unique(cptac_gbm_idh1_mutation$Tumor_Sample_Barcode)
+length(idh1_mut_patients)
+idh1_not_mut_patients <- setdiff(unique(cptac_gbm_nonsyn_mutation_data$Tumor_Sample_Barcode), idh1_mut_patients)
+
+range(as.integer(unlist(cptac_gbm_cna_data[cptac_gbm_cna_data$Hugo_Symbol == "IDH1", 3:ncol(cptac_gbm_cna_data)])), na.rm = T)
+cptac_gbm_idh1_cna <- cptac_gbm_cna_data[cptac_gbm_cna_data$Hugo_Symbol == "IDH1",]
+
+range(as.integer(unlist(cptac_gbm_cna_data[cptac_gbm_cna_data$Hugo_Symbol == "SLC1A5", 3:ncol(cptac_gbm_cna_data)])), na.rm = T)
+cptac_gbm_slc1a5_cna <- cptac_gbm_cna_data[cptac_gbm_cna_data$Hugo_Symbol == "SLC1A5",]
+cptac_gbm_slc1a5_amp <- colnames(cptac_gbm_slc1a5_cna[,(which(as.integer(unlist(cptac_gbm_slc1a5_cna[1, 3:ncol(cptac_gbm_slc1a5_cna)])) > 0)+2)])
+cptac_gbm_slc1a5_del <- colnames(cptac_gbm_slc1a5_cna[,(which(as.integer(unlist(cptac_gbm_slc1a5_cna[1, 3:ncol(cptac_gbm_slc1a5_cna)])) < 0)+2)])
+
+range(as.numeric(unlist(cptac_gbm_methylation_data[grepl("SLC1A5", cptac_gbm_methylation_data$Hugo_Symbol), 2:ncol(cptac_gbm_cna_data)])), na.rm = T)
+cptac_gbm_slc1a5_meth <- cptac_gbm_methylation_data[grepl("SLC1A5", cptac_gbm_methylation_data$Hugo_Symbol), ]
+cptac_gbm_slc1a5_meth_colmeans <- colMeans(cptac_gbm_slc1a5_meth[, 2:ncol(cptac_gbm_slc1a5_meth)], na.rm =T)
+cptac_gbm_slc1a5_methed <- names(cptac_gbm_slc1a5_meth_colmeans)[which(cptac_gbm_slc1a5_meth_colmeans > 0.35)]
+cptac_gbm_slc1a5_notMeth <- names(cptac_gbm_slc1a5_meth_colmeans)[which(cptac_gbm_slc1a5_meth_colmeans < 0.35)]
+
+
 # MTHFD1L + TP53
 ensg <- "ENSG00000120254"
 symbol <- "MTHFD1L"
@@ -69,6 +116,33 @@ boxplot(pik3ca_expression_by_mut_group, ylab = "Expression (FPKM)",
         main = "TYMS Expression By PIK3CA Mutation Status")
 
 wilcox.test(expression_mutants, y = expression_normal)
+
+
+# IDH1 and SLC1A5
+ensg <- "ENSG00000105281"
+symbol <- "SLC1A5"
+
+expression_mutants <- as.numeric(unlist(cptac_gbm_fpkm_data[cptac_gbm_fpkm_data$Hugo_Symbol == symbol, 
+                                                             colnames(cptac_gbm_fpkm_data) %in% idh1_mut_patients]))
+expression_normal <- as.numeric(unlist(cptac_gbm_fpkm_data[cptac_gbm_fpkm_data$Hugo_Symbol == symbol, 
+                                                            !colnames(cptac_gbm_fpkm_data) %in% idh1_mut_patients]))
+idh1_expression_by_mut_group <- list("Mutation" = expression_mutants, "No Mutation" = expression_normal)
+boxplot(idh1_expression_by_mut_group, ylab = "Expression (FPKM)", 
+        main = "SLC1A5 Expression By IDH1 Mutation Status, GBM")
+
+wilcox.test(expression_mutants, y = expression_normal)
+
+prot_expression_mutants <- as.numeric(unlist(cptac_gbm_proteomic_data[rownames(cptac_gbm_proteomic_data) == symbol, 
+                                                            colnames(cptac_gbm_proteomic_data) %in% idh1_mut_patients]))
+prot_expression_normal <- as.numeric(unlist(cptac_gbm_proteomic_data[rownames(cptac_gbm_proteomic_data) == symbol, 
+                                                           !colnames(cptac_gbm_proteomic_data) %in% idh1_mut_patients]))
+idh1_prot_expression_by_mut_group <- list("Mutation" = prot_expression_mutants, "No Mutation" = prot_expression_normal)
+boxplot(idh1_prot_expression_by_mut_group, ylab = "Protein Expression", 
+        main = "SLC1A5 Protein Expression By IDH1 Mutation Status, GBM")
+
+wilcox.test(prot_expression_mutants, y = prot_expression_normal)
+
+
 
 # TP53 + others
 symbol <- "SHMT2"
@@ -195,6 +269,7 @@ fix_proteomic_df <- function(proteomic_df, mutation_df, goi) {
 cptac_brca_proteomic_data_m <- fix_proteomic_df(cptac_brca_proteomic_data,  cptac_brca_tp53_mutation, "TP53")
 cptac_brca_proteomic_data_m <- fix_proteomic_df(cptac_brca_proteomic_data,  cptac_brca_pik3ca_mutation, "PIK3CA")
 
+cptac_brca_proteomic_data_m <- fix_proteomic_df(cptac_gbm_proteomic_data,  cptac_gbm_idh1_mutation, "IDH1")
 
 #' For the given target genes, does a Wilcoxon test to see if there
 #' is significant DE between the GOI mutated and non-mutated CPTAC-3 groups.

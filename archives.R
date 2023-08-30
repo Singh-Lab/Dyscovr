@@ -3765,3 +3765,58 @@ if(TRUE %in% grepl("subtype", colnames(subtype_df), ignore.case = TRUE)) {
 }
 #unique_sub <- unique_sub[!(is.na(unique_sub) | (unique_sub == "NA"))]
 #unique_sub <- paste(names(additional_subtype_info)[i], unique_sub, sep = ".")
+
+#vals <- unlist(lapply(target_genes, function(tg) {
+#  est <- NA
+#  if(type == "Betas") {
+#    est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "estimate"]
+#  } else {
+#    est <- results_table[(results_table$R_i.name == ri) & (results_table$T_k.name == tg), "statistic"]
+#  }
+#  #print(est)
+#  if (length(est) == 0) {est <- NA} 
+#  if (!is.na(beta_thres)) {
+#    if(abs(est) < beta_thres) {est <- NA}
+#  }
+#  return(est)
+#}))
+#return(as.numeric(vals))
+
+
+
+# OLD SPEARMAN/ JACCARD PACKAGES FOR CORRELATION MATRICES
+# Use R's native dist function with the 'binary' option to calculate a Jaccard similarity matrix
+# for binary variables
+#binary_vars <- apply(sample_input_table_dt, 2, function(x) { all(na.omit(x) %fin% 0:1) })
+#lm_input_matrix_sub <- lm_input_matrix[,colnames(lm_input_matrix) %fin% names(binary_vars[which(binary_vars == TRUE)])]
+#sim_mat <- as.matrix(dist(as.data.frame(lm_input_matrix_sub), method = "binary"))
+
+# Alternatively, use the pcaPP cor.fk function to calculate the Kendall's Tau correlation (fast, 0.03 sec, no p-values, however)
+# coefficient, which works with both ordinal and binary variables 
+#corr_mat <- cor.fk(lm_input_matrix)
+
+# misty -- kendall-b a bit slower (12.39 sec) but calculates p-values; kendall-c is prohibitively slow 
+#corr_mat_res <- cor.matrix(lm_input_matrix_sub, method = "kendall-b")
+#corr_mat <- corr_mat_b_res$result$cor
+#corr_mat_p <- corr_mat_b_res$result$p
+#corr_mat_c <- cor.matrix(lm_input_matrix[,colnames(lm_input_matrix) %fin% 
+#                                          names(binary_vars[which(binary_vars == FALSE)])], 
+#                       method = "kendall-c")
+#corr_mat_c <- corr_mat_c_res$result$cor
+#corr_mat_c_p <- corr_mat_c_res$result$p
+# rstatix: corr_mat_rstatix <- cor_test(as.data.frame(sample_input_matrix), alternative = "two.sided", "method" = 'kendall') -- very slow (65.07 sec)
+
+
+corr_mat <- as.data.frame(rcorr(lm_input_matrix, type = "spearman")$r)
+corr_mat_p <- as.data.frame(rcorr(lm_input_matrix, type = "spearman")$P)
+combos <- get_spearman_combos(corr_mat, corr_mat_p)
+print(combos)
+for(c in combos) {
+  if(grepl("MutStat_i", c) & grepl("Cancer", c)) {
+    c_spl <- unlist(strsplit(c, ":", fixed = T))
+    c_st <- c_spl[grepl("Cancer", c_spl)]
+    lm_input_matrix <- lm_input_matrix[, !(colnames(lm_input_matrix) %fin% c_st)]
+    variables_removed <- c(variables_removed, c_st)
+  }
+}
+

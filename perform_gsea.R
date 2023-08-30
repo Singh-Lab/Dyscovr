@@ -12,16 +12,29 @@ BiocManager::install("clusterProfiler")
 BiocManager::install("DOSE")
 BiocManager::install("enrichplot")
 BiocManager::install(c("gage", "gageData"))
+BiocManager::install('fgsea')
+
+# If needed:
+# Check libPaths using .libPaths()
+# Manually set library using "lib = "C:/Users/sarae/AppData/Local/R/win-library/4.3"
 
 library(data.table)
+library(ggnewscale)
 library("gage")
 library('ReactomePA')
 library('clusterProfiler')
 library("DOSE")
 library("enrichplot")
+library('fgsea')
+library(BiocParallel)
 library(org.Hs.eg.db)
 keytypes(org.Hs.eg.db)
 
+# Run when "Error in summary.connection(connection) : invalid connection"
+unregister_dopar <- function() {
+  env <- foreach:::.foreachGlobals
+  rm(list=ls(name=env), pos=env)
+}
 
 output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Output Visualizations/BRCA/GSEA/"
 #output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Output Visualizations/Pan-Cancer/GSEA/"
@@ -43,7 +56,7 @@ perform_gsea <- function(results_table, n, sort_by, output_path) {
   regprot.gsea.rp <- list()
   regprot.gsea.ncg <- list()
   regprot.gsea.go <- list()
-  regprot.gsea.kegg <- list()
+  #regprot.gsea.kegg <- list()
   
   # Loop through all the regulatory proteins
   for (regprot in unique(results_table$R_i.name)) {
@@ -74,15 +87,24 @@ perform_gsea <- function(results_table, n, sort_by, output_path) {
     plotdir <- paste0(output_path, "Linear Model/GSEA/")    
     suppressWarnings(dir.create(plotdir, recursive = TRUE))
     
+    #na_ind <- c()
     regprotBetaScores <- res_table_sub$estimate
-    if(sort_by == "p.value") regprotBetaScores <- res_table_sub$negLogPval
-    names(regprotBetaScores) <- res_table_sub$T_k.entrez
+    if(sort_by == "p.value") {
+      regprotBetaScores <- res_table_sub$negLogPval
+      #na_ind <- which(!is.finite(regprotBetaScores))
+      #regprotBetaScores[na_ind] <- NA
+    }
+    #regprotBetaScores <- regprotBetaScores[-na_ind]
+    #names(regprotBetaScores) <- res_table_sub$T_k.entrez[-na_ind]
+    print(head(regprotBetaScores))
 
     gse.rp <- gsePathway(regprotBetaScores, pvalueCutoff = 1, pAdjustMethod = "BH")
     gse.rp <- setReadable(gse.rp, org.Hs.eg.db)
+    print("hi")
     gse.ncg <- gseNCG(regprotBetaScores, pvalueCutoff = 1, pAdjustMethod = "BH")
     gse.ncg <- setReadable(gse.ncg, org.Hs.eg.db)
-    gse.go <- gseGO(regprotBetaScores, OrgDb = org.Hs.eg.db, pvalueCutoff = 1, 
+    print("howdy")
+    gse.go <- gseGO(regprotBetaScores, pvalueCutoff = 1, 
                     pAdjustMethod = "BH", keyType = "ENTREZID")
     gse.go <- setReadable(gse.go, org.Hs.eg.db)
     #gse.kegg <- gseKEGG(regprotBetaScores, OrgDb = org.Hs.eg.db, pvalueCutoff = 1, 
@@ -131,15 +153,168 @@ perform_gsea <- function(results_table, n, sort_by, output_path) {
   return(res_tab)
 }
 
-enriched_terms <- perform_gsea(master_df_mut_corrected, n = 5, "p.value", output_path)
-enriched_terms <- perform_gsea(master_df_cna_corrected, n = 5, "p.value", output_path)
+enriched_terms <- perform_gsea(master_df_mut_corrected, n = 20, "p.value", output_path)
+enriched_terms <- perform_gsea(master_df_cna_corrected, n = 20, "p.value", output_path)
 
 
 enriched_terms <- enriched_terms@result
 
+# Separate into up and down regulated pathways and calculate Jaccard coefficient
+tp53_enriched_terms_res <- list()
+for (d in c('up','down')) {
+  if (d == 'up') {
+    flag <-  tp53_enriched_terms@result$enrichmentScore > 0
+  } else {
+    flag <-  tp53_enriched_terms@result$enrichmentScore < 0
+  }
+  if (any(flag)) {
+    tp53_enriched_terms_res[[d]] <- tp53_enriched_terms
+    tp53_enriched_terms_res[[d]]@result <- tp53_enriched_terms_res[[d]]@result[which(flag),]
+    tp53_enriched_terms_res[[d]] <- pairwise_termsim(tp53_enriched_terms_res[[d]]) # Computed matrix of pathway similarity (default is Jaccard coef)
+  }
+}
+MIN_JACCARD <- 0.1
+
+# Can look at other parameters in emapplot to make the plot more readable
+p <- emapplot(tp53_enriched_terms_res[["up"]], edge.params = list(min = MIN_JACCARD),
+              cex.params = list(category_label = 0.6), color = "p.adjust")
+p <- emapplot(tp53_enriched_terms_res[["down"]], edge.params = list(min = MIN_JACCARD),
+              cex.params = list(category_label = 0.6), color = "p.adjust")
+
+# Look further down the list
+tp53_enriched_terms_res[["up2"]] <- tp53_enriched_terms_res[["up"]]
+tp53_enriched_terms_res[["up2"]]@result <- tp53_enriched_terms_res[["up2"]]@result[30:nrow(tp53_enriched_terms_res[["up"]]@result),]
+emapplot(tp53_enriched_terms_res[["up2"]], edge.params = list(min = MIN_JACCARD),
+         cex.params = list(category_label = 0.6), color = "p.adjust")
+
+### GSEA USING THE FGSEA PACKAGE
+# https://rdrr.io/bioc/fgsea/f/vignettes/fgsea-tutorial.Rmd
+
+# Use Reactome pathways
+
+# Use this ranking for fast gsea (fgsea)
+#' @param master_df a linear model results data frame with target genes for
+#' a given driver ranked by -log(pval) * sign of estimate
+#' @param goi the gene name of the driver of interest
+#' @param pthres a p-value threshold for significantly enriched pathways
+#' @param max_size a maximum size of gene set for GSEA, see fgsea documentation
+perform_fgsea <- function(master_df, goi, pthres, max_size = 500) {
+  # Subset to a driver of interest
+  master_df_driver <- master_df[master_df$R_i.name == goi,]
+  
+  # Add negative log p-value with directionality
+  master_df_driver$negLogPval <- unlist(lapply(1:nrow(master_df_driver), function(i) {
+    pval <- master_df_driver$p.value[i]
+    estimate <- master_df_driver$estimate[i]
+    est_sign <- ifelse(estimate > 0, 1, -1)
+    return((-log(pval)) * est_sign)
+  }))
+  
+  # Add entrez IDs
+  mapping <- as.data.frame(bitr(master_df_driver$T_k.name, fromType = "SYMBOL", toType = "ENTREZID",
+                                OrgDb=org.Hs.eg.db, drop = TRUE))
+  colnames(mapping) <- c("T_k.name", "T_k.entrez")
+  master_df_driver <- merge(master_df_driver, mapping, all=TRUE, by="T_k.name")
+  
+  # Rank targets by negative log p-value
+  master_df_driver <- master_df_driver[order(master_df_driver$negLogPval, decreasing = TRUE),]
+  
+  # Get reactome pathways for the given target genes
+  react_pathways <- reactomePathways(master_df_driver$T_k.entrez)
+  
+  # Get the ranked list
+  input <- as.numeric(master_df_driver$negLogPval)
+  names(input) <- master_df_driver$T_k.entrez
+  input <- input[!is.na(input)]
+  print(head(input))
+  
+  # Perform gsea
+  fgseaRes <- fgsea(react_pathways, input, maxSize=max_size)  # Can set eps argument to 0 for a more accurate pval
+  fgseaRes <- fgseaRes[order(fgseaRes$padj),]
+  
+  # Subset to only significant pathways
+  fgseaRes_sub <- fgseaRes[fgseaRes$padj < pthres,]
+  
+  # Collapse pathways
+  #collapsed_pathways <- collapsePathways(fgseaRes = fgseaRes_sub, pathways = react_pathways, stats = input)
+  sig_hits <- unlist(master_df_driver[master_df_driver$q.value < 0.1,])
+  foraRes <- fora(react_pathways, genes=sig_hits, universe=names(input))
+  collapsedPathways <- collapsePathwaysORA(foraRes[order(pval)][padj < pthres],
+                                           react_pathways,
+                                           genes=sig_hits,
+                                           universe=names(input), pval.threshold = 0.05)
+
+  mainPathways <- foraRes[pathway %in% collapsedPathways$mainPathways][order(pval), pathway]
+  print(mainPathways)
+  
+  # Plot enrichment
+  plotGseaTable(react_pathways[mainPathways], input, fgseaRes_sub)
+  
+  return(list(fgseaRes, mainPathways))
+}
+
+fgseaRes_pik3ca <- perform_fgsea(pc_allGenes, "PIK3CA", 0.05)
+fgseaRes_pik3ca_df <- fgseaRes_pik3ca[[1]]
+fgseaRes_pik3ca_mainPathways <- fgseaRes_pik3ca[[2]]
+
+
+# Create a heat map with the results for significant, overlapping pathways 
+#' @param list_of_results_gsea a named list of GSEA results from fgsea
+#' @param sig_thres an adjusted p-value significance threshold
+create_sig_pathway_overlap_grid_fgsea <- function(list_of_results_gsea, sig_thres) {
+  # Get all the pathways significant in at least one driver
+  all_sig_pws <- unique(unlist(lapply(list_of_results_gsea, function(df) df[df$padj < sig_thres, 'pathway'])))
+  
+  # Set up the driver x pathway matrix that we will fill and use to plot
+  input_df <- data.frame(matrix(nrow = length(all_sig_pws), ncol = length(list_of_results_gsea)))
+  rownames(input_df) <- all_sig_pws
+  colnames(input_df) <- names(list_of_results_gsea)
+  
+  for(i in 1:length(list_of_results_gsea)) {
+    driver <- names(list_of_results_gsea)[i]
+    gsea_res <- list_of_results_gsea[[i]]
+    sig_hits <- gsea_res[gsea_res$padj < sig_thres, 'pathway']
+    input_df[,driver] <- unlist(lapply(all_sig_pws, function(pw) 
+      ifelse(pw %fin% sig_hits, 1, 0)))  # could change this to return the actual directional pval
+  }
+  
+  # Limit to just pathways with a 1 in more than one driver
+  print(input_df)
+  input_df <- input_df[which(rowSums(input_df) > 1),]
+  #input_df <- apply(input_df, MARGIN = 2, function(y) as.integer(y))
+  print(input_df)
+  
+  # Make heatmap
+  pheatmap(input_df, angle_col = "45", main = "",
+           color=c("white", "#0072B5FF"), fontsize_row = 9, fontsize_col = 14,
+           fontface_col = "bold", legend = FALSE, cellwidth=20, cellheight = 10) 
+  
+}
+
+create_sig_pathway_overlap_grid(list("TP53" = results_gsea_tp53, "PIK3CA" = results_gsea_pik3ca, 
+                                     "KRAS" = results_gsea_kras, "IDH1" = results_gsea_idh1), 0.2)
+
+# Alternatively, make a heatmap just from the main pathways
+# Make heatmap
+unique_main_pathways <- unique(c(fgseaRes_tp53_mainPathways, fgseaRes_pik3ca_mainPathways,
+                                 fgseaRes_kras_mainPathways, fgseaRes_idh1_mainPathways))
+driver_pathways <- list("TP53" = fgseaRes_tp53_mainPathways, "PIK3CA" = fgseaRes_pik3ca_mainPathways, 
+                        "KRAS" = fgseaRes_kras_mainPathways, "IDH1" = fgseaRes_idh1_mainPathways)
+input_df <- data.frame(matrix(nrow = length(unique_main_pathways), ncol = length(driver_pathways)))
+rownames(input_df) <- unique_main_pathways
+colnames(input_df) <- names(driver_pathways)
+for (i in 1:ncol(input_df)) {
+  driver <- colnames(input_df)[i]
+  binary_vals <- unlist(lapply(rownames(input_df), function(pw) ifelse(pw %fin% driver_pathways[[i]], 1, 0)))
+  input_df[,i] <- binary_vals
+}
+print(input_df)
+pheatmap(input_df, angle_col = "45", main = "",
+         color=c("white", "#0072B5FF"), fontsize_row = 9, fontsize_col = 14,
+         fontface_col = "bold", legend = FALSE, cellwidth=20, cellheight = 10) 
 
 #####################################
-# ORIGINAL CODE
+# JOSH ORIGINAL CODE
 
 if(PERFORM_GSEA) {
   clust.gsea.rp <- list()

@@ -92,6 +92,7 @@ recombine_into_df_and_write(ibindingpos_prots_nucacids, ibindingpos_prots_nucaci
 #' which to include the given gene
 #' @param pat_ct_mapping if not NA, then we are either a) applying the thresholds above to each
 #' individual cancer type and recombining, or b) writing a separate file per cancer type
+#' @param intersecting_ids, if pat_ct_mapping is not NA, we include intersecting IDs 
 #' @param spec_label a specificity label (e.g. "i-protein", "i-domain", or "i-bindingpos")
 #' @param patient_ids a set of unique patient/ sample IDs for the given cohort
 #' @param driver_df if not NA, use known driver DF to limit to only proteins with known drivers
@@ -99,12 +100,14 @@ recombine_into_df_and_write(ibindingpos_prots_nucacids, ibindingpos_prots_nucaci
 #' @param string_db OPT: a STRING network with confidence scores between sets of genes
 #' @param string_conf_thres OPT: a confidence threshold above which drivers are considered
 #' to be closely related (and only the more highly mutated one is maintained)
-#' @param data_type either 'TCGA' or 'METABRIC'
+#' @param data_type either 'TCGA','METABRIC', or 'Chinese_TN'
+#' @param top_n option to provide an "n" to limit to only the top n genes above the 
+#' given frequency threshold
 #' @param min_num_cts the minimum number of cancer types in which a given driver must 
 #' exceed the mutation frequency threshold in order to be included for pan-cancer runs
 create_regulatory_prot_input_df <- function(regprot_df, mut_freq_thres, abs_mut_count_thres, pat_ct_mapping,
-                                            spec_label, patient_ids, driver_df, all_genes_id_conv,  
-                                            string_db, string_conf_thres, data_type, min_num_cts = 2) {
+                                            intersecting_ids, spec_label, patient_ids, driver_df, all_genes_id_conv,  
+                                            string_db, string_conf_thres, data_type, top_n, min_num_cts = 2) {
 
   # Calculate the minimum number of mutated samples needed to keep a given gene
   mut_count_thres <- mut_freq_thres * length(patient_ids)
@@ -113,73 +116,74 @@ create_regulatory_prot_input_df <- function(regprot_df, mut_freq_thres, abs_mut_
   
   # Extract the ENSG and Swissprot IDs
   #uniprot_ids <- extract_regprots(spec_label, regprot_df, data_type, patient_ids, mut_count_thres)
-  uniprot_ids <- extract_regprots_mutCountMat(regprot_df, data_type, patient_ids, mut_count_thres, all_genes_id_conv)
+  uniprot_ids <- extract_regprots_mutCountMat(regprot_df, data_type, patient_ids, 
+                                              mut_count_thres, all_genes_id_conv,
+                                              driver_df, top_n)
   
-  ensg_ids <- unlist(lapply(uniprot_ids, function(x) 
-    paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id %in% unlist(strsplit(x, ";", fixed = TRUE)), 
-                                   'ensembl_gene_id']), collapse = ";")))
-  
-  output_df <- data.frame("swissprot_ids" = uniprot_ids, "ensg_ids" = ensg_ids)
-  print(output_df)
-  
-  # If we have multiple cancer types, split regprot DF by cancer types, generate thresholds for each, and run
-  # separately. In the end, keep only those drivers that are mutated above the given threshold in at least 
-  # a given number of cancer types. If we want to create a file per cancer type, do not recombine.
-  new_output_df <- output_df
-  
-  if(length(pat_ct_mapping) > 1) {
-    per_ct_thresholds <- lapply(pat_ct_mapping, function(m) {
-      count_thres <- mut_freq_thres * length(m) 
-      if(count_thres < abs_mut_count_thres) {count_thres <- abs_mut_count_thres}
-      return(count_thres)
-    })
-    names(per_ct_thresholds) <- names(pat_ct_mapping)
-
-    # For each regprot in the above output DF, check whether it exceeds the count thres in enough individual c.t.
-    new_output_df_rows <- lapply(1:nrow(output_df), function(i) {
-      regprot <- output_df[i, 'swissprot_ids']
-      samples <- colnames(regprot_df)[2:ncol(regprot_df)]
-      patients <- unlist(lapply(samples, function(s) unlist(strsplit(s, "-", fixed = TRUE))[1]))
-
-      exceeded_per_ct <- unlist(lapply(1:length(per_ct_thresholds), function(j) {
-        ct <- names(per_ct_thresholds)[j]
-        ct_thres <- as.numeric(unlist(per_ct_thresholds[j]))
-        ct_pats <- as.character(unlist(pat_ct_mapping[names(pat_ct_mapping) == ct]))
-        num_ct_pats_w_mut <- length(intersect(ct_pats, patients))
-        if(num_ct_pats_w_mut > ct_thres) {return(TRUE)}
-        else {return(FALSE)}
-      }))
-
-      if(length(exceeded_per_ct[exceeded_per_ct == TRUE]) > min_num_cts) {
-        return(output_df[i,])
-      } else {return(NA)}
-    })
-    new_output_df_rows <- new_output_df_rows[!is.na(new_output_df_rows)]
-    new_output_df <- do.call(rbind, new_output_df_rows)
-  }
-  print(head(new_output_df))
-  
-  # If driver_df is not NA, then we want to limit to only driver genes
-  if(length(driver_df) > 1) {
-    new_output_df <- new_output_df[which(new_output_df$ensg_ids %fin% driver_df$ensembl_gene_id),]
+  if(length(uniprot_ids) > 0) {
+    ensg_ids <- unlist(lapply(uniprot_ids, function(x) 
+      paste(unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id %in% unlist(strsplit(x, ";", fixed = TRUE)), 
+                                     'ensembl_gene_id']), collapse = ";")))
+    
+    output_df <- data.frame("swissprot_ids" = uniprot_ids, "ensg_ids" = ensg_ids)
+    print(output_df)
+    
+    # If we have multiple cancer types, split regprot DF by cancer types, generate thresholds for each, and run
+    # separately. In the end, keep only those drivers that are mutated above the given threshold in at least 
+    # a given number of cancer types. If we want to create a file per cancer type, do not recombine.
+    new_output_df <- output_df
+    
+    if(length(pat_ct_mapping) > 1) {
+      per_ct_thresholds <- lapply(pat_ct_mapping, function(m) {
+        count_thres <- mut_freq_thres * length(intersect(m, intersecting_ids)) 
+        if(count_thres < abs_mut_count_thres) {count_thres <- abs_mut_count_thres}
+        return(count_thres)
+      })
+      names(per_ct_thresholds) <- names(pat_ct_mapping)
+      
+      # For each regprot in the above output DF, check whether it exceeds the count thres in enough individual c.t.
+      new_output_df_rows <- lapply(1:nrow(output_df), function(i) {
+        regprot <- output_df[i, 'swissprot_ids']
+        samples <- colnames(regprot_df)[2:ncol(regprot_df)]
+        patients <- unlist(lapply(samples, function(s) unlist(strsplit(s, "-", fixed = TRUE))[1]))
+        
+        exceeded_per_ct <- unlist(lapply(1:length(per_ct_thresholds), function(j) {
+          ct <- names(per_ct_thresholds)[j]
+          ct_thres <- as.numeric(unlist(per_ct_thresholds[j]))
+          ct_pats <- as.character(unlist(pat_ct_mapping[names(pat_ct_mapping) == ct]))
+          num_ct_pats_w_mut <- length(intersect(ct_pats, patients))
+          if(num_ct_pats_w_mut > ct_thres) {return(TRUE)}
+          else {return(FALSE)}
+        }))
+        
+        if(length(exceeded_per_ct[exceeded_per_ct == TRUE]) > min_num_cts) {
+          return(output_df[i,])
+        } else {return(NA)}
+      })
+      new_output_df_rows <- new_output_df_rows[!is.na(new_output_df_rows)]
+      new_output_df <- do.call(rbind, new_output_df_rows)
+    }
+    print(head(new_output_df))
     
     # An optional filter to remove drivers that are closely related to one another
     if(!is.na(string_db)) {
       new_output_df <- filter_string_relatives(new_output_df, string_db, string_conf_thres)
     }
+    
+    return(new_output_df)
   }
-  
-  return(new_output_df)
+  else {return(NA)}
 }
 
 
 #' Helper function to get and return just the regprots from a regprot DF subset
 #' @param spec_label a specificity label (e.g. "i-protein", "i-domain", or "i-bindingpos")
 #' @param regprot_df a regulatory mutation data frame for a given specificity/ mutation type
-#' @param data_type either 'TCGA' or 'METABRIC'
+#' @param data_type either 'TCGA', 'METABRIC', or 'Chinese_TN'
 #' @param patient_ids a set of unique patient/ sample IDs for the given cohort
 #' @param mut_count_thres mutation count threshold
-extract_regprots <- function(spec_label, regprot_df, data_type, patient_ids, mut_count_thres) {
+extract_regprots <- function(spec_label, regprot_df, data_type, patient_ids, 
+                             mut_count_thres) {
   if(spec_label == "i-protein") {
     unique_regprots <- unique(regprot_df$Swissprot)
     print(length(unique_regprots))
@@ -190,7 +194,7 @@ extract_regprots <- function(spec_label, regprot_df, data_type, patient_ids, mut
       if(data_type == "TCGA") {
         patients_justID <- unlist(lapply(patients, function(x) 
           unlist(strsplit(x, "-", fixed = TRUE))[1]))
-      } else if(data_type == "METABRIC") {
+      } else if(data_type %in% c("METABRIC", "Chinese_TN")) {
         patients_justID <- patients
       } else {
         print("Unknown data type.")
@@ -213,7 +217,7 @@ extract_regprots <- function(spec_label, regprot_df, data_type, patient_ids, mut
       if(data_type == "TCGA") {
         patients_justID <- unlist(lapply(patients, function(x) 
           unlist(strsplit(x, "-", fixed = TRUE))[1]))
-      } else if(data_type == "METABRIC") {
+      } else if(data_type %in% c("METABRIC", "Chinese_TN")) {
         patients_justID <- patients
       } else {
         print("Unknown data type.")
@@ -233,51 +237,91 @@ extract_regprots <- function(spec_label, regprot_df, data_type, patient_ids, mut
 
 #' Helper function to get and return just the regprots from a mutation count matrix
 #' @param regprot_df a regulatory mutation data frame for a given specificity/ mutation type
-#' @param data_type either 'TCGA' or 'METABRIC'
+#' @param data_type either 'TCGA', 'METABRIC', or 'Chinese_TN'
 #' @param patient_ids a set of unique patient/ sample IDs for the given cohort
 #' @param mut_count_thres mutation count threshold
+#' @param driver_gene_df if not NA, use known driver DF to limit to only proteins with known drivers
+#' @param top_n option to provide an "n" to limit to only the top n genes above the 
+#' given frequency threshold
 extract_regprots_mutCountMat <- function(mut_count_matrix, data_type, patient_ids, 
-                                         mut_count_thres, all_genes_id_conv) {
+                                         mut_count_thres, all_genes_id_conv, 
+                                         driver_gene_df, top_n) {
   
+  # First, make things faster by limiting to regprots with a row sum greater than 5
+  mut_count_matrix <- mut_count_matrix[which(rowSums(mut_count_matrix[,2:(ncol(mut_count_matrix)-1)]) >= 5),]
+
   # Get the number of unique potential regulatory proteins
   unique_regprots <- unique(as.character(mut_count_matrix$Gene_Symbol))
   print(length(unique_regprots))
   
   # Get the patients in the particular cancer type or subtype
-  patients <- as.character(unlist(colnames(mut_count_matrix)[!(colnames(mut_count_matrix) %in% c('Gene_Symbol', 'Gene_Symbol.1', "Swissprot"))]))
+  patients <- as.character(unlist(colnames(mut_count_matrix)[!(colnames(mut_count_matrix) %in% 
+                                                                 c('Gene_Symbol', "Swissprot"))]))
+  
   # Limit to just patients in the intersecting set
   if(data_type == "TCGA") {
     patients_justID <- unlist(lapply(patients, function(x) 
       unlist(strsplit(x, "-", fixed = TRUE))[1]))
-  } else if(data_type == "METABRIC") {
+  } else if(data_type %in% c("METABRIC", "Chinese_TN")) {
     patients_justID <- patients
   } else {
     print("Unknown data type.")
     patients_justID <- ""
   }
   #patients_final <- patients[which(patients_justID %in% patient_ids)]
+  print(patients_justID)
+  print(patient_ids)
   
   # Subset the count matrix to include only these patients
-  mut_count_matrix_sub <- mut_count_matrix[, c(1, (which(patients_justID %in% patient_ids)+1), ncol(mut_count_matrix)), with = F]
-
+  #mut_count_matrix_sub <- mut_count_matrix[, c(1, (which(patients_justID %in% patient_ids)+1), ncol(mut_count_matrix)), with = F]
+  mut_count_matrix_sub <- mut_count_matrix[, c(1, (which(patients_justID %in% patient_ids)+1)), with = F]
+  print(mut_count_matrix_sub)
+  
   # Check how many of these patients have a nonsynonymous mutation in each regprot
-  regprots <- unlist(lapply(unique_regprots, function(regprot) {
-    mat_regprot_vals <- as.integer(unlist(mut_count_matrix_sub[mut_count_matrix_sub$Gene_Symbol == regprot,]))
+  regprots_counts <- lapply(unique_regprots, function(regprot) {
+    mat_regprot_vals <- as.integer(unlist(mut_count_matrix_sub[mut_count_matrix_sub$Gene_Symbol == regprot, 
+                                                               2:(ncol(mut_count_matrix_sub)-1)]))
     
     num_pats_w_mut <- length(mat_regprot_vals[mat_regprot_vals > 0])
-
+    
     if (num_pats_w_mut > mut_count_thres) {
-      regprot_swissprot <- as.character(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == regprot, 
-                                       'uniprot_gn_id']))[1]
+      print(regprot)
+      
+      if(length(driver_gene_df) > 1) {
+        if(regprot %fin% driver_gene_df$primary_gene_names) {
+          print("says we're in driver gene DF")
+          regprot_swissprot <- as.character(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == regprot, 
+                                                                     'uniprot_gn_id']))[1]
+          # mut_count_matrix_sub[mut_count_matrix_sub$Gene_Symbol == regprot, 'Swissprot']
+          return(data.frame("regprot" = as.character(regprot_swissprot), "count" = num_pats_w_mut))
+        } else  {return(data.frame("regprot" = NA, "count" = NA))}
+      } else {
+        regprot_swissprot <- as.character(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == regprot, 
+                                                                   'uniprot_gn_id']))[1]
         # mut_count_matrix_sub[mut_count_matrix_sub$Gene_Symbol == regprot, 'Swissprot']
-      return(as.character(regprot_swissprot))
-    } else {return(NA)}
-  }))
+        return(data.frame("regprot" = as.character(regprot_swissprot), "count" = num_pats_w_mut))
+      }
+    } else {return(data.frame("regprot" = NA, "count" = NA))}
+  })
+  regprots_counts_df <- do.call(rbind, regprots_counts)
+  colnames(regprots_counts_df) <- c("regprot", "count")
+  regprots_counts_df <- regprots_counts_df[!(is.na(regprots_counts_df$regprot) | (length(regprots_counts_df$regprot) == 0)), ]
+  regprots_counts_df$count <- as.integer(regprots_counts_df$count)
+  print(head(regprots_counts_df))
   
-  regprots <- unique(regprots[!is.na(regprots)])
-  print(head(regprots))
-  
-  return(regprots)
+  if(nrow(regprots_counts_df) > 0) {
+    # Restrict to the top N, if needed
+    if(!is.na(top_n)) {
+      regprots_counts_df <- regprots_counts_df[order(regprots_counts_df$count, decreasing = T),]
+      regprots_counts_df <- regprots_counts_df[1:top_n,]
+    }
+    
+    regprots <- unique(regprots_counts_df$regprot)
+    
+    print(head(regprots))
+    
+    return(regprots)
+  } else {return(c())}
 }
 
 
@@ -517,16 +561,16 @@ patient_set_brca_blca_hnsc <- intersect(read.table(paste0(main_path, "Linear Mod
 
 driver_gene_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/GRCh38_driver_gene_list.tsv", 
                            sep = "\t", header = TRUE, comment.char = "#", skip = 10)
-
+driver_gene_df_vogelstein <- driver_gene_df[grepl("V", driver_gene_df$cancer_driver_status),]
 
 #mut_freq_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_nonsynonymous_IntersectPatientsWashU.csv",
 #                        row.names = 1, check.names = FALSE, header = TRUE)
-mut_freq_df <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_nonsynonymous_IntersectPatientsWashU.csv",
+mut_freq_df <- fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_nonsynonymous_uniformHypermutRm_IntersectPatientsWashU.csv",
                         header = TRUE)
 #mutation_regprot_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/Linear Model/Tumor_Only/Regprot_Mutation/iprotein_results_nonsynonymous_IntersectPatientsWashU.csv",
                                                         #row.names = 1, check.names = FALSE, header = TRUE)
 
-clinical_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/clinical_data_subset_w_Nonsyn_MutCounts.csv",
+clinical_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/clinical_data_subset.csv",
                         header = T, check.names = F)
 
 # Generate a sample/patient to cancer type mapping
@@ -546,11 +590,12 @@ get_patient_cancer_mapping <- function(clinical_df) {
 patient_cancer_mapping <- get_patient_cancer_mapping(clinical_df)
 
 # Call function
-regprot_input_df_all_5perc <- create_regulatory_prot_input_df(mut_freq_df, 0.05, 5, patient_cancer_mapping, "i-protein",
-                                                              intersecting_patients, NA, all_genes_id_conv, NA, NA, "TCGA")
-regprot_input_df_driver_5perc <- create_regulatory_prot_input_df(mut_freq_df, 0.05, 5, patient_cancer_mapping, "i-protein",
-                                                                 intersecting_patients, driver_gene_df, all_genes_id_conv, NA, NA, "TCGA")
-# Write to file
+regprot_input_df_all_5perc <- create_regulatory_prot_input_df(mut_freq_df, 0.05, 5, patient_cancer_mapping, 
+                                                              intersecting_patients, "i-protein", intersecting_patients, 
+                                                              NA, all_genes_id_conv, NA, NA, "TCGA")
+regprot_input_df_driver_5perc <- create_regulatory_prot_input_df(mut_freq_df, 0.05, 5, patient_cancer_mapping, 
+                                                                 intersecting_patients, "i-protein", intersecting_patients, 
+                                                                 driver_gene_df, all_genes_id_conv, NA, NA, "TCGA")# Write to file
 write.csv(regprot_input_df_driver_5perc, paste0(main_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_drivers_missense.csv"))
 
 # Print out the names of the drivers that were written to a given file
@@ -563,7 +608,7 @@ regprot_input_df_driver_5perc_list <- lapply(1:length(patient_cancer_mapping), f
   pats <- intersect(intersecting_ids, patient_cancer_mapping[[i]])
   print(length(pats))
   
-  regprot_input_df <- create_regulatory_prot_input_df(mut_freq_df, 0.05, 5, NA, 
+  regprot_input_df <- create_regulatory_prot_input_df(mut_freq_df, 0.05, 5, NA, NA,
                                                       "i-protein", pats, driver_gene_df, 
                                                       all_genes_id_conv, NA, NA, "TCGA")
   return(regprot_input_df)
@@ -575,11 +620,30 @@ for(i in 1:length(regprot_input_df_driver_5perc_list)) {
   write.csv(df, paste0(main_path, paste0("Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_drivers_nonsynonymous_", paste0(ct, ".csv"))))
 }
 
+# Print out the names of the drivers that were written to a given file
+for(i in 1:length(regprot_input_df_driver_5perc_list)) {
+  df <- regprot_input_df_driver_5perc_list[[i]]
+  ct <- unlist(strsplit(names(regprot_input_df_driver_5perc_list)[i], "-", fixed = TRUE))[2]
+  if(length(df) > 0) {
+    if(nrow(df) > 0) {
+      print(ct)
+      df <- df[df$swissprot_ids != "",]
+      genes <- sort(unique(unlist(lapply(df$swissprot_ids, function(id) 
+        all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == id, 'external_gene_name']))))
+      if(length(genes) > 30) {
+        print(length(genes))
+      } else {
+        print(paste(genes, collapse = ", "))
+      }
+    }
+  }
+}
+
 regprot_input_df_all_5perc_list <- lapply(1:length(patient_cancer_mapping), function(i) {
   #ct <- names(patient_cancer_mapping)[i]
   pats <- patient_cancer_mapping[[i]]
   
-  regprot_input_df <- create_regulatory_prot_input_df(mut_freq_df, 0.05, 5, NA, 
+  regprot_input_df <- create_regulatory_prot_input_df(mut_freq_df, 0.05, 5, NA, NA,
                                                       "i-protein", pats, NA, 
                                                       all_genes_id_conv, NA, NA, "TCGA")
   return(regprot_input_df)
@@ -590,6 +654,17 @@ for(i in 1:length(regprot_input_df_all_5perc_list)) {
   ct <- unlist(strsplit(names(regprot_input_df_all_5perc_list)[i], "-", fixed = TRUE))[2]
   write.csv(df, paste0(main_path, paste0("Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_all_nonsynonymous_", paste0(ct, ".csv"))))
 }
+
+# Read back
+files_5perc <- list.files(paste0(main_path, "Mutation/Files for Linear Model/"), pattern = "iprotein_protein_ids_df_gr0.05Freq_drivers_nonsynonymous_")
+files_5perc <- files_5perc[!(files_5perc == "iprotein_protein_ids_df_gr0.05Freq_drivers_nonsynonymous_hypermutFilt.csv")]
+files_10perc <- list.files(paste0(main_path, "Mutation/Files for Linear Model/"), pattern = "iprotein_protein_ids_df_gr0.1Freq_drivers_nonsynonymous_")
+files_10perc <- files_5perc[!(files_5perc == "iprotein_protein_ids_df_gr0.1Freq_drivers_nonsynonymous_hypermutFilt.csv")]
+
+files_5perc_list <- lapply(files_5perc, function(x) 
+  read.csv(paste0(main_path, paste0("Mutation/Files for Linear Model/", x))))
+files_10perc_list <- lapply(files_10perc, function(x) 
+  read.csv(paste0(main_path, paste0("Mutation/Files for Linear Model/", x))))
 
 ####################################################################
 

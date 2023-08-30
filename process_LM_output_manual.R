@@ -28,6 +28,7 @@ library(scales)
 library(reshape2)
 library(ggsci)
 library(parallel)
+library(forcats)
 
 # NEJM color palatte: https://nanx.me/ggsci/reference/pal_nejm.html
 
@@ -44,6 +45,87 @@ output_path <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Output
 # Generalized ID conversion table from BiomaRt
 all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/all_genes_id_conv.csv", header = TRUE)
 
+
+## Read in the master DF output files from multiple cancer types
+top_drivers_0.05_fns <- intersect(list.files(path = "C:/Users/sarae/top_0.05/", recursive = T,
+                                   pattern = "_corrected_MUT"), intersect(
+                                  list.files(path = "C:/Users/sarae/top_0.05/", recursive = T,
+                                             pattern = "metabolicTargs"),
+                                  list.files(path = "C:/Users/sarae/top_0.05/", recursive = T,
+                                             pattern = "Nonsyn.Drivers.Vogel.Top5")))
+top_drivers_0.05_fns <- top_drivers_0.05_fns[!grepl("Archives", top_drivers_0.05_fns)]
+top_drivers_0.1_fns <- intersect(list.files(path = "C:/Users/sarae/top_0.1/", recursive = T,
+                                   pattern = "_corrected_MUT"),intersect(
+                                     list.files(path = "C:/Users/sarae/top_0.1/", recursive = T,
+                                                pattern = "metabolicTargs"),
+                                     list.files(path = "C:/Users/sarae/top_0.1/", recursive = T,
+                                                pattern = "Nonsyn.Drivers.Vogel")))
+top_drivers_0.15_fns <- intersect(list.files(path = "C:/Users/sarae/top_0.15/", recursive = T,
+                                            pattern = "_corrected_MUT"),intersect(
+                                              list.files(path = "C:/Users/sarae/top_0.15/", recursive = T,
+                                                         pattern = "metabolicTargs"),
+                                              list.files(path = "C:/Users/sarae/top_0.15/", recursive = T,
+                                                         pattern = "Nonsyn.Drivers.Vogel")))
+top_drivers_0.05 <- lapply(top_drivers_0.05_fns, function(f) 
+  fread(paste0("C:/Users/sarae/top_0.05/", f), header = T))
+names(top_drivers_0.05) <- unlist(lapply(top_drivers_0.05_fns, function(x)
+  unlist(strsplit(x, "/", fixed = T))[1]))
+top_drivers_0.1 <- lapply(top_drivers_0.1_fns, function(f) 
+  fread(paste0("C:/Users/sarae/top_0.1/", f), header = T))
+names(top_drivers_0.1) <- unlist(lapply(top_drivers_0.1_fns, function(x)
+  unlist(strsplit(x, "/", fixed = T))[1]))
+top_drivers_0.15 <- lapply(top_drivers_0.15_fns, function(f) 
+  fread(paste0("C:/Users/sarae/top_0.15/", f), header = T))
+names(top_drivers_0.15) <- unlist(lapply(top_drivers_0.15_fns, function(x)
+  unlist(strsplit(x, "/", fixed = T))[1]))
+
+# If each cancer type has multiple files, combine them
+top_drivers_0.05 <- lapply(unique(names(top_drivers_0.05)), function(ct)
+  do.call(rbind, top_drivers_0.05[names(top_drivers_0.05) == ct]))
+names(top_drivers_0.05) <- unique(unlist(lapply(top_drivers_0.05_fns, function(x)
+  unlist(strsplit(x, "/", fixed = T))[1])))
+# Redo the MHT correction
+top_drivers_0.05 <- lapply(top_drivers_0.05, function(x) mh_correct(x, T))
+top_drivers_0.05 <- lapply(top_drivers_0.05, function(x) x[order(x$q.value),])
+
+# Write these back
+lapply(1:length(top_drivers_0.05), function(i) {
+  df <- top_drivers_0.05[[i]]
+  ct <- names(top_drivers_0.05)[i]
+  write.csv(df, paste0("C:/Users/sarae/top_0.05/", 
+                       paste(ct, "res_top_0.05_allGenes_quantile_rawCNA_methMRaw_3PCs_Nonsyn.Drivers.Vogel.elim.vif.5_corrected_MUT.csv", sep = "/")))
+})
+
+# If we've already done this 
+top_drivers_0.05_fns <- top_drivers_0.05_fns[!grepl("pt", top_drivers_0.05_fns)]
+top_drivers_0.05 <- lapply(top_drivers_0.05_fns, function(f) 
+  fread(paste0("C:/Users/sarae/top_0.05/", f), header = T))
+names(top_drivers_0.05) <- unlist(lapply(top_drivers_0.05_fns, function(x)
+  unlist(strsplit(x, "/", fixed = T))[1]))
+
+
+top_drivers_0.05_fns_metabol_top5only <- top_drivers_0.05_fns_metabol_top5only[(grepl("BLCA", top_drivers_0.05_fns_metabol_top5only)) | (grepl("HNSC", top_drivers_0.05_fns_metabol_top5only)) | grepl("COAD", top_drivers_0.05_fns_metabol_top5only) | (grepl("ESCA", top_drivers_0.05_fns_metabol_top5only)) | grepl("LGG", top_drivers_0.05_fns_metabol_top5only) | grepl("LUSC", top_drivers_0.05_fns_metabol_top5only) | grepl("UCEC", top_drivers_0.05_fns_metabol_top5only)]
+top_drivers_0.05_fns_metabol_top5only <- top_drivers_0.05_fns_metabol_top5only[!grepl("Full_Vogel", top_drivers_0.05_fns_metabol_top5only)]
+top_drivers_0.05_fns_metabol_top5only <- top_drivers_0.05_fns_metabol_top5only[!grepl("male", top_drivers_0.05_fns_metabol_top5only)]
+top_drivers_0.05_metabol_top5only <- lapply(top_drivers_0.05_fns_metabol_top5only, function(f) 
+  fread(paste0("C:/Users/sarae/top_0.05/", f), header = T))
+names(top_drivers_0.05_metabol_top5only) <- unlist(lapply(top_drivers_0.05_fns_metabol_top5only, function(x)
+  unlist(strsplit(x, "/", fixed = T))[1]))
+
+# Make simple version for user viewing
+top_drivers_0.05_simple <- lapply(top_drivers_0.05, function(x) 
+  x[, c("estimate", "std.error", "statistic", "p.value", "q.value", "T_k.name", "R_i.name")])
+top_drivers_0.05_simple <- lapply(top_drivers_0.05_simple, function(x) 
+  do.call(cbind, list(x[,"R_i.name"], x[,"T_k.name"], x[, c("estimate", "std.error", "statistic", "p.value", "q.value")])))
+top_drivers_0.05_simple <- lapply(top_drivers_0.05_simple, function(x) {
+  colnames(x) <- c("Driver_Name", "Target_Name", "Mutation_Coefficient", "Standard_Error", 
+                   "TStatistic", "pvalue", "qvalue")
+  return(x)
+})
+lapply(1:length(top_drivers_0.05_simple), function(i) {
+  fn <- paste0("TCGA_", paste0(names(top_drivers_0.05_simple)[i], "_Output.csv"))
+  write.csv(top_drivers_0.05_simple[[i]], paste0("C:/Users/sarae/top_0.05/", fn))
+})
 
 ############################################################
 ############################################################
@@ -82,10 +164,21 @@ dev.off()
 #' of regulatory protein r_i beta values across all linear models.
 #' @param results_table a master DF produced from run_linear_model()
 visualize_pval_distrib <- function(results_table) {
-  pvals <- results_table$p.value[!is.na(results_table$p.value) & 
-                                   !is.infinite(results_table$p.value)]
-  hist(pvals, main = "",
-       xlab = "p-value", ylab = "Frequency", col = "blueviolet")
+  #pvals <- results_table$p.value[!is.na(results_table$p.value) & 
+                                   #!is.infinite(results_table$p.value)]
+  #hist(pvals, main = "",
+       #xlab = "p-value", ylab = "Frequency", col = "blueviolet")
+  
+  ggplot(results_table, aes(x = p.value)) + 
+    geom_histogram(alpha = 1, position = "identity", bins = 50, fill = "#0072B5FF") + 
+    theme_minimal() + xlab("P-Value") + ylab("Frequency") + 
+    labs(fill = "") + theme(axis.title = element_text(face = "bold", size = 14),
+                            axis.text = element_text(face = "bold", size = 12),
+                            legend.text = element_text(size=12),
+                            legend.title = element_text(face = "bold", size = 14)) +
+    geom_vline(xintercept = 0.05, linetype='dashed', size = 1)+
+    annotate("text", y = 100, x = 0.01, label = "p < 0.05", hjust = -0.5, size = 5, fontface = "bold")
+  
 }
 
 # Call this function & save output
@@ -109,7 +202,7 @@ dev.off()
 #' @param results_table a master DF produced from run_linear_model()
 qqplot_pvals <- function(results_table) {
   qqnorm(results_table$p.value, pch = 1, frame = FALSE)
-  qqline(results_table$p.value, col = "steelblue", lwd = 2)
+  qqline(results_table$p.value, col = "#0072B5FF", lwd = 2)
 }
 
 #' Function plots a Q-Q plot to visualize the distribution of standard error valeus
@@ -117,7 +210,7 @@ qqplot_pvals <- function(results_table) {
 #' @param results_table a master DF produced from run_linear_model()
 qqplot_stderror <- function(results_table) {
   qqnorm(results_table$std.error, pch = 1, frame = FALSE)
-  qqline(results_table$std.error, col = "steelblue", lwd = 2)
+  qqline(results_table$std.error, col = "#0072B5FF", lwd = 2)
 }
 
 
@@ -205,6 +298,8 @@ master_df_cna_corrected <- mh_correct(master_df_cna, T)
 
 #Q-Value Visualization (I-Protein, FPKM, rawCNA, methBeta, iciTotFrac)
 
+top_drivers_0.05 <- lapply(top_drivers_0.05, function(x) if(nrow(x) > 0) mh_correct(x, T))
+top_drivers_0.1 <- lapply(top_drivers_0.1, function(x) if(nrow(x) > 0) mh_correct(x, T))
 
 ############################################################
 ############################################################
@@ -239,6 +334,8 @@ master_df_cna_corrected <- add_targ_regprot_gns(master_df_cna_corrected, all_gen
 fwrite(master_df_mut_corrected, paste(main_path, "Linear Model/TP53/Non-Tumor-Normal Matched/eQTL/output_results_P53_chipeat_iprotein_TMM_rawCNA_cibersortTotFrac_corrected_MUT.csv", sep = ""))
 fwrite(master_df_cna_corrected, paste(main_path, "Linear Model/TP53/Non-Tumor-Normal Matched/eQTL/output_results_P53_chipeat_iprotein_TMM_rawCNA_cibersortTotFrac_corrected_CNA.csv", sep = ""))
 
+top_drivers_0.05 <- lapply(top_drivers_0.05, function(x) if(nrow(x) > 0) add_targ_regprot_gns(x, all_genes_id_conv))
+top_drivers_0.1 <- lapply(top_drivers_0.1, function(x) if(nrow(x) > 0) add_targ_regprot_gns(x, all_genes_id_conv))
 
 ############################################################
 ############################################################
@@ -283,17 +380,11 @@ fwrite(master_df_cna_sig, paste(main_path, "Linear Model/TP53/Non-Tumor-Normal M
 #' Create barplot with the number of missense/nonsense and silent significant hits 
 #' for drivers and non-drivers
 #' @param list_of_master_dfs a list of master DFs, with the names of the list corresponding
-#' to the names of the regulatory proteins of interest
+#' to the names of the regulatory proteins of interest; alternatively, could be one combined master DF
 #' @param q_thres a q-value threshold for significance
 #' @param list_of_silent_dfs OPT: a corresponding list of silent DFs to include in the chart
 create_num_sig_hits_barplot <- function(list_of_master_dfs, q_thres, list_of_silent_dfs) {
   # Get the number of significant hits for each master DF
-  #sig_hits_df <- data.frame("Gene" = names(list_of_master_dfs), 
-  #                          "Num.Signif.Hits.q" = rep(0, times = length(list_of_master_dfs)))
-  #colnames(sig_hits_df)[2] <- paste0(colnames(sig_hits_df)[2], q_thres)
-  #sig_hits_df[,2] <- unlist(lapply(list_of_master_dfs, function(df) {
-  #  return(nrow(df[df$q.value < q_thres,]))
-  #}))
   df <- list_of_master_dfs[[1]]
   unique_drivers <- unique(df$R_i.name)
   sig_hits_df <- data.frame("Gene" = unique_drivers, 
@@ -350,6 +441,22 @@ list_of_master_dfs <- list("TP53" = allgenes_p53, "PIK3CA" = allgenes_pik3ca,
 
 create_num_sig_hits_barplot(list_of_master_dfs, 0.2, NA)
 create_num_sig_hits_barplot(list_of_master_dfs, 0.1, NA)
+
+
+#' Simpler version for one DF
+qval_thres <- 0.01
+sig_hits_df <- master_df[master_df$q.value < qval_thres,]
+sig_hits_df_freq <- melt(table(sig_hits_df$R_i.name))
+colnames(sig_hits_df_freq) <- c("Driver", "Num.Hits")
+sig_hits_df_freq <- sig_hits_df_freq[order(sig_hits_df_freq$Num.Hits),]
+ggplot(sig_hits_df_freq, aes(y = Num.Hits, fill = Driver, 
+                             x = reorder(Driver, -Num.Hits, mean))) + 
+  geom_bar(position = "dodge", width = 0.95, stat = "identity", show.legend = FALSE, color = "black") + 
+  scale_fill_manual(values = c("#FFDC91FF", "#20854EFF", "#BC3C29FF", "#0072B5FF", "gray")) + #scale_color_nejm() +
+  xlab("Driver") + ylab(paste0("\n", paste0("Number of hits (q < ", paste0(qval_thres, ")")))) +
+  theme(axis.text = element_text(face="bold", size = 16), 
+        axis.title=element_text(size=18, face="bold"), panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'white'))
 
 
 #' Creates a stacked bar plot to show the number of significant hits
@@ -694,13 +801,46 @@ visualize_pathway(master_df_corrected, pathway_pi3k_akt1, "topDrivers_allGeneTar
 master_df <- master_df[master_df$term != "(Intercept)",]
 
 # Of the top X remaining tests, get what the terms are and plot the proportions
-x <- 500
+x <- 1000
 master_df_topx <- master_df[1:x,]
 terms <- unique(master_df_topx$term)
 terms_counts <- unlist(lapply(terms, function(x) nrow(master_df_topx[master_df_topx$term == x,])))
-terms_counts_df <- data.frame('term' = terms, 'freq' = terms_counts)
-pie(terms_counts_df$freq, labels = terms_counts_df$term, main = paste("Most Significant Covariates (Top", paste(x, "from All Tests)")))
+terms_counts_df <- data.frame('Term' = terms, 'freq' = terms_counts)
+pie(terms_counts_df$freq, labels = terms_counts_df$Term, main = paste("Most Significant Covariates (Top", paste(x, "from All Tests)")))
 
+# Visualize this as a barplot instead
+ggplot(data = terms_counts_df[1:7,], aes(x = reorder(Term, -freq), y = freq, fill = Term)) + 
+  geom_bar(position = "dodge", stat = "identity") + theme_minimal() + scale_fill_nejm() +
+  xlab("Covariate") + ylab(paste0("\n", paste0("Frequency Among Top ", x))) +
+  theme(axis.text = element_text(size = 16), axis.text.x = element_text(angle = 45, vjust =1, hjust=1), 
+        axis.title=element_text(size=18,face="bold"), legend.title=element_text(size=14, face="bold"),
+        legend.text = element_text(size=12))
+
+# Merge bucketed variables and fix names
+unique_terms <- unique(unlist(lapply(terms_counts_df$Term, function(x) {
+  if(grepl("_b", x)) {
+    spl_x <- unlist(strsplit(x, "_", fixed = T))
+    return(paste(spl_x[1:(length(spl_x)-1)], collapse = "_"))
+  } else {return(x)}
+})))
+unique_terms_counts <- unlist(lapply(unique_terms, function(t) 
+  sum(terms_counts_df[grepl(t, terms_counts_df$Term), 'freq'])))
+names(unique_terms_counts) <- unique_terms
+unique_terms_df <- as.data.frame(unique_terms_counts)
+
+# Manually adjust names
+unique_terms_df$Term <- c("Methylation Status (Target)", "Frac of Immune Cell Infiltration", 
+                               "Cancer Type + Subtype", "CNA Status (Target)", "TP53 CNA Status") #, 
+                               #"PIK3CA CNA Status", "Gender")
+colnames(unique_terms_df)[1] <- "Frequency"
+
+# Visualize
+ggplot(data = unique_terms_df, aes(x = reorder(Term, -Frequency), y = Frequency, fill = Term)) + 
+  geom_bar(position = "dodge", stat = "identity") + theme_minimal() + scale_fill_nejm() +
+  xlab("Covariate") + ylab(paste0("\n", paste0("Frequency Among Top ", x))) +
+  theme(axis.text = element_text(size = 16), axis.text.x = element_text(angle = 45, vjust =1, hjust=1), 
+        axis.title=element_text(size=18,face="bold"), legend.title=element_text(size=14, face="bold"),
+        legend.text = element_text(size=12), legend.position = c(0.75,0.75))
 
 # Get the proportions of all the tests with q-value <0.05
 master_df_sig <- master_df[master_df$p.value < 0.05,]
@@ -726,6 +866,36 @@ pie(terms_counts_df$freq, labels = terms_counts_df$term, main = "Categories of S
 #' @param all_genes_id_conv a conversion table to convert R_i uniprot IDs to 
 #' intelligible gene names
 create_driver_pie <- function(master_df, tophit_thres, perc_or_qval_or_ss, all_genes_id_conv) {
+  
+  freq.table.m <- generate_frequency_input_table(master_df, tophit_thres, perc_or_qval_or_ss, all_genes_id_conv)
+  
+  ggplot(freq.table.m, aes(x = "", y = Frequency, fill = Driver)) + geom_col(color = "black") +
+    coord_polar(theta = "y") + theme_void() + 
+    geom_text(aes(label = Frequency), position = position_stack(vjust = 0.5),
+              fontface = "bold", size = 6) +
+    scale_fill_manual(values = c("TP53" = "#0072B5FF", "EP300" = "#7876B1FF", "PIK3CA" = "#BC3C29FF", "KRAS" = "#20854EFF",
+                                 "CSMD3" = "#FFDC91FF", "IDH1" = "#EE4C97FF", "CIC" = "beige", "CTNNB1" = "cornflowerblue", 
+                                 "PPP2R1A" = "lightpink", "FLG" = "gray", "KMT2C" = "seagreen2", "GATA3" = "lightpink", "PDE4DIP" = "#E18727FF", "MAP3K1" ="gray",
+                                 "FBXW7" = "#E18727FF", "NSD1" = "mediumaquamarine", "SETD2" = "palevioletred4", "MET" = "lightpink", "STK11" = "wheat3",
+                                 "SMAD4" = "lightyellow", "HRAS" = "mediumorchid3", "SPOP" = "#FFDC91FF", "BRAF" = "seagreen2", "NRAS" = "lightgray", "ARID1A" = "palevioletred2",
+                                 "FGFR3" = "seagreen3", "KDM6A" = "lightblue", "CASP8" = "wheat2", "NOTCH1" = "lightpink3", "PTEN" = "red3", "SMARCA4" = "cyan", "NFE2L2" = "orange",
+                                 "TSC1" = "cornflowerblue", "RB1" = "lightblue", "STAG2" = "cyan", "CREBBP" = "red2", "ATM" = "lightyellow", "PBRM1" = "pink2")) +
+    theme(legend.title = element_text(face = "bold", size = 14),
+          legend.text = element_text(size = 12)) #, legend.position = "bottom")
+  
+}
+
+
+#' Helper function to generate the input frequency table for drivers, given appropriate
+#' significance thresholds
+#' @param master_df output master DF with target gene names and q-values
+#' @param tophit_thres a percentage or q-value threshold (e.g. 0.05) within which to 
+#' consider a hit "significant" or important enough for inclusion in pie chart
+#' @param perc_or_qval_or_ss whether the threshold is a percentage or a q-value or a stability score
+#' @param all_genes_id_conv a conversion table to convert R_i uniprot IDs to 
+#' intelligible gene names
+generate_frequency_input_table <- function(master_df, tophit_thres, 
+                                           perc_or_qval_or_ss, all_genes_id_conv) {
   if(perc_or_qval_or_ss == "perc") {
     # Get the top n% of hits
     master_df_topn <- master_df[1:(tophit_thres*nrow(master_df)),]
@@ -747,58 +917,329 @@ create_driver_pie <- function(master_df, tophit_thres, perc_or_qval_or_ss, all_g
     print("The only possible thresholding options are perc or qval. Please try again.")
     return(NA)
   }
-
+  
   # Get the unique drivers, and create a frequency table of the number of 
   # times that each driver appears
-  unique_drivers <- unique(master_df_topn$term)
-  unique_drivers <- unique_drivers[!is.na(unique_drivers)]
+  if(nrow(master_df_topn) > 0) {
+    unique_drivers <- unique(master_df_topn$term)
+    unique_drivers <- unique_drivers[!is.na(unique_drivers)]
+    
+    freq.table <- as.data.frame(lapply(unique_drivers, function(x)
+      nrow(master_df_topn[master_df_topn$term == x,])))
+    unique_driver_names <- unlist(lapply(unique_drivers, function(d) {
+      driver_uniprot <- unlist(strsplit(d, "_", fixed = TRUE))[1]
+      driver_gn <- unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == driver_uniprot, 
+                                            'external_gene_name'])
+      return(driver_gn)
+    }))
+    names(freq.table) <- unique_driver_names
+    print(freq.table)
+    
+    #pie(as.integer(freq.table[1,]), labels = colnames(freq.table))
+    
+    freq.table.m <- melt(freq.table)
+    colnames(freq.table.m) <- c("Driver", "Frequency")
+    freq.table.m <- freq.table.m[order(freq.table.m$Frequency, decreasing = TRUE),]
+    print(freq.table.m)
+    
+    return(freq.table.m)
+  }
+  else {return(NA)}
+}
+#"#BC3C29FF", "#E18727FF", "#FFDC91FF", "khaki1", "seagreen2", "#20854EFF", "mediumaquamarine",
+#"cyan2", "skyblue1", "#0072B5FF",  "darkblue", "#7876B1FF", "mediumorchid", "plum1",
+#"lightpink", "#EE4C97FF", "palevioletred4", "beige", "wheat3", "saddlebrown", "gray", "black"
+
+# Call function
+create_driver_pie(master_df, 0.2, "qval", all_genes_id_conv)
+
+
+#' Create driver bar -- a more aesthetic alternative to the pie charts (above)
+#' @param list_of_master_dfs list of output master DFs with target gene names and q-values,
+#' names are cancer types or subtypes
+#' @param tophit_thres a percentage or q-value threshold (e.g. 0.05) within which to 
+#' consider a hit "significant" or important enough for inclusion in pie chart
+#' @param perc_or_qval_or_ss whether the threshold is a percentage or a q-value or a stability score
+#' @param all_genes_id_conv a conversion table to convert R_i uniprot IDs to 
+#' intelligible gene names
+create_driver_bar <- function(list_of_master_dfs, tophit_thres, perc_or_qval_or_ss, all_genes_id_conv) {
   
-  freq.table <- as.data.frame(lapply(unique_drivers, function(x)
-    nrow(master_df_topn[master_df_topn$term == x,])))
-  unique_driver_names <- unlist(lapply(unique_drivers, function(d) {
-    driver_uniprot <- unlist(strsplit(d, "_", fixed = TRUE))[1]
-    driver_gn <- unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == driver_uniprot, 
-                                   'external_gene_name'])
-    return(driver_gn)
+  freq.tables <- lapply(1:length(list_of_master_dfs), function(i) {
+    master_df <- list_of_master_dfs[[i]]
+    cancer_type <- names(list_of_master_dfs)[[i]]
+    
+    # Create the frequency table
+    freq.table <- generate_frequency_input_table(master_df, tophit_thres, perc_or_qval_or_ss, all_genes_id_conv)
+    if(length(freq.table) < 2) {return(NA)}
+    
+    # Add a column of percentages
+    sum <- sum(freq.table$Frequency)
+    if(sum < 10) {return(NA)}
+    freq.table$Percentage <- unlist(lapply(freq.table$Frequency, function(x) (x/sum)*100))
+    
+    # Add the cancer type
+    freq.table$Cancer_Type <- cancer_type
+    
+    # Adjust the column names to include the cancer type
+    #colnames(freq.table)[2:3] <- c(paste0("Freq.", cancer_type), paste0("Perc.", cancer_type))
+    return(freq.table)
+  })
+  #freq.table <- Reduce(function(x, y) merge(x, y, by = "Driver", all = T), freq.tables)
+  freq.tables <- freq.tables[!is.na(freq.tables)]
+  freq.table <- do.call(rbind, freq.tables)
+  freq.table[is.na(freq.table)] <- 0
+  #print(freq.table)
+  
+  # Adjust the order of the drivers based on total frequency + number of cancer types
+  freq.per.driver <- lapply(unique(freq.table$Driver), function(d) 
+    sum(freq.table[freq.table$Driver == d, 'Frequency']))
+  names(freq.per.driver) <- unique(freq.table$Driver)
+  freq.per.driver.df <- melt(as.data.frame(freq.per.driver))
+  colnames(freq.per.driver.df) <- c("Driver", "Total.Frequency")
+  
+  # Add the number of cancer types as well
+  freq.per.driver.df$Num.CTs <- unlist(lapply(freq.per.driver.df$Driver, function(d)
+    length(unique(freq.table[freq.table$Driver == d, 'Cancer_Type']))))
+  
+  freq.per.driver.df <- freq.per.driver.df[with(freq.per.driver.df, order(Num.CTs, Total.Frequency, decreasing = T)),]
+  freq.per.driver.df$Rank <- 1:nrow(freq.per.driver.df)
+  print(freq.per.driver.df)
+  
+  freq.table <- merge(freq.table, freq.per.driver.df, by = "Driver", all = T)
+  freq.table <- freq.table[order(freq.table$Rank),]
+  
+  freq.table$Frequency.Label <- unlist(lapply(1:nrow(freq.table), function(i) {
+    perc <- freq.table[i, "Percentage"]
+    freq <- freq.table[i, "Frequency"]
+    return(ifelse(perc > 2.5, freq, ""))
   }))
-  names(freq.table) <- unique_driver_names
-  print(freq.table)
+  freq.table$Driver <- as.factor(freq.table$Driver)
+  freq.table$Cancer_Type <- as.factor(freq.table$Cancer_Type)
   
-  #pie(as.integer(freq.table[1,]), labels = colnames(freq.table))
+  # Add the rank of each cancer type based on the total frequency of the top drivers
+  drivers <- unique(as.character(freq.table$Driver))
+  remaining_cancer_types <- unique(as.character(freq.table$Cancer_Type))
+  ranks <- list()
+  for(d in drivers) {
+    print(d)
+    print(remaining_cancer_types)
+    if(length(remaining_cancer_types) == 0) {break}
+    sub <- freq.table[(freq.table$Driver == d) & 
+                        (freq.table$Cancer_Type %fin% remaining_cancer_types),]
+    new_ranks <- c()
+    if(length(ranks) > 0) {
+      new_ranks <- rank(desc(sub$Percentage)) + max(as.numeric(ranks))
+    } else {new_ranks <- rank(desc(sub$Percentage))}
+    names(new_ranks) <- sub$Cancer_Type
+    print(new_ranks)
+    ranks <- c(ranks, new_ranks)
+    print(ranks)
+    remaining_cancer_types <- setdiff(remaining_cancer_types, sub$Cancer_Type)
+  }
+  #print(ranks)
+  freq.table$rank_from_driver <- unlist(lapply(freq.table$Cancer_Type, function(ct)
+    ranks[names(ranks) == ct]))
   
-  freq.table.m <- melt(freq.table)
-  colnames(freq.table.m) <- c("Driver", "Frequency")
-  freq.table.m <- freq.table.m[order(freq.table.m$Frequency, decreasing = TRUE),]
-  print(freq.table.m)
+  #freq.table.list <- c()
+  #for(i in 1:length(unique(freq.table$Driver))) {
+  #  d <- unique(freq.table$Driver)[i]
+  #  sub <- freq.table[freq.table$Driver == d,]
+  #  sub$rank_within_driver <- rank(sub$Percentage) 
+  #  freq.table.list[[i]] <- sub
+  #}
+  #freq.table.upd <- do.call(rbind, freq.table.list)
+  #freq.table.upd <- freq.table.upd[order(freq.table.upd$Rank),]
+  #lvls <- names(sort(tapply(freq.table$Driver == "TP53", freq.table$Cancer_Type, mean), decreasing = T))
+  #print(lvls)
+  #print(freq.table)
   
-  ggplot(freq.table.m, aes(x = "", y = Frequency, fill = Driver)) + geom_col(color = "black") +
-    coord_polar(theta = "y") + theme_void() + 
-    geom_text(aes(label = Frequency), position = position_stack(vjust = 0.5),
-              fontface = "bold", size = 6) +
-    scale_fill_manual(values = c("#0072B5FF", "#BC3C29FF", "#20854EFF", "#E18727FF", 
-                                            "#7876B1FF", "#FFDC91FF", "#EE4C97FF")) +#, "gray", "white", "brown", "beige", "cornflowerblue", "lightpink")) +
-    theme(legend.title = element_text(face = "bold", size = 14),
+  # Option to not show the legend for small, unreadable boxes
+  
+  
+  ggplot(freq.table, aes(x = fct_reorder(Cancer_Type, rank_from_driver), y = Percentage, 
+                         fill = fct_reorder(Driver, Rank, .desc = T), label = Frequency.Label)) + 
+    geom_bar(position="stack", stat="identity", color = "black") +
+    theme_minimal() + xlab("Cancer Type") + ylab(paste0("Percentage of Hits q<", tophit_thres)) +
+    scale_fill_manual(values = c("TP53" = "#0072B5FF", "PIK3CA" = "#BC3C29FF", "KRAS" = "#20854EFF", "IDH1" = "#FFDC91FF", 
+                                 "CTNNB1" = "#E18727FF", "BRAF" = "#7876B1FF", "NSD1" = "#EE4C9799", "SPOP" = "cyan3",
+                                 "NRAS" = "mediumaquamarine", "NFE2L2" = "beige", "NOTCH1" = "slategray1", 
+                                 "FBXW7" = "palevioletred3", "FGFR3" = "darkolivegreen3", "STK11" = "orange4", 
+                                 "CASP8" = "#6F99AD99", "TSC1" = "cornflowerblue", "RB1" = "yellow3", "SMARCA4" = "thistle2",
+                                 "HRAS" = "honeydew2", "SETD2" = "tan", "CIC" = "coral3", "PTEN" = "plum3",
+                                 "FGFR2" = "palegreen2", "ZNF521" = "lightsalmon", "MET" = "seagreen3",
+                                 "SMAD4" = "slateblue3", "NF1" = "orchid4", "CREBBP" = "paleturquoise2", "PBRM1" = "lightcoral",
+                                 "EGFR" = "navy", "ATM" = "white", "STAG2" = "greenyellow", "GNAS" = "gainsboro", 
+                                 "EP300" = "darkseagreen", "PPP2R1A" = "deepskyblue"),
+                      breaks = as.character(freq.per.driver.df$Driver),
+                      name = "Driver") +
+    geom_text(size = 3, position = position_stack(vjust = 0.5)) +
+    theme(axis.title = element_text(face = "bold", size = 14), 
+          axis.text = element_text(face = "bold", size = 12),
+          legend.title = element_text(face = "bold", size = 14),
           legend.text = element_text(size = 12))
   
 }
 
-
-create_driver_pie(master_df, 0.2, "qval", all_genes_id_conv)
-
+create_driver_bar(top_drivers_0.05, 0.2, "qval", all_genes_id_conv)
 
 
 
+# OLD COLOR SCHEME:
+scale_fill_manual(values = c("TP53" = "#0072B5FF", "EP300" = "mediumorchid1", "PIK3CA" = "#BC3C29FF", "KRAS" = "#20854EFF",
+                             "CSMD3" = "#FFDC91FF", "IDH1" = "#EE4C97FF", "CIC" = "beige", "CTNNB1" = "cornflowerblue", 
+                             "PPP2R1A" = "lightpink", "FLG" = "gray", "GATA3" = "lightpink", "PDE4DIP" = "orange", "MAP3K1" ="gray4",
+                             "FBXW7" = "mediumaquamarine", "NSD1" = "#E18727FF", "SETD2" = "palevioletred3", "MET" = "#7876B1FF", "STK11" = "palevioletred2",
+                             "SMAD4" = "lightsalmon", "HRAS" = "mediumorchid3", "SPOP" = "seagreen3", "BRAF" = "#FFDC91FF", "NRAS" = "lightgray", "ARID1A" = "black",
+                             "FGFR3" = "seagreen1", "KDM6A" = "lightblue", "CASP8" = "wheat2", "NOTCH1" = "lightpink3", "PTEN" = "red4", "SMARCA4" = "cyan2", "NFE2L2" = "yellow2",
+                             "TSC1" = "palevioletred4", "RB1" = "lightblue", "STAG2" = "cyan3", "CREBBP" = "red2", "ATM" = "orange3", "GNAS" = "yellow3",
+                             "ZNF521" = "tan", "NF1" = "gray", "FGFR2" = "coral3", "EGFR" = "darkblue", "PBRM1" = "darkolivegreen2")) #"KMT2C" = "seagreen2"
+                  
 
 
+############################################################
+############################################################
+#### RECOMBINE P-VALUES USING FISHER'S OR STOUFFER's METHODS
+#### FOR TESTS ACROSS MULTIPLE SUBTYPES OR CANCER TYPES
+############################################################
+############################################################
+#' Using the metap package, recombine the p-values from across 
+#' cancer types of subtypes to explore global effects
+#' @param list_of_master_dfs a list of data frames, with the names of the list
+#' corresponding to the cancer type or subtype; should already be subsetted to
+#' only include one R_i
+recombine_pvals <- function(list_of_master_dfs) {
+  # Get all the unique target genes 
+  unique_targets <- unique(unlist(lapply(list_of_master_dfs, function(x) 
+    unlist(x$T_k.name))))
+  
+  # For each of these, get the p-values from across the various cancer types or subtypes
+  new_pvals <- unlist(lapply(unique_targets, function(targ) {
+    print(targ)
+    pvals <- unlist(lapply(list_of_master_dfs, function(df) {
+      if(targ %in% df$T_k.name) {
+        return(df[df$T_k.name == targ, 'p.value'])
+      }
+    }))
+    # Do the correction using these p-values
+    pval_new <- metap::sumlog(pvals, log.p = FALSE)$p
+    print(pval_new)
+    return(pval_new)
+  }))
+  
+  # Create a new data frame with all targets and their p-values
+  new_df <- data.frame("T_k.name" = unique_targets, "p.value" = new_pvals)
+  
+  # Multiple hypothesis testing correction
+  new_df$q.value <- qvalue(new_df$p.value)$qvalues
+  
+  return(new_df)
+}
+
+# Call function 
+new_master_0.05 <- recombine_pvals(list_of_master_dfs_0.05)
+
+new_master_0.05 <- new_master_0.05[order(new_master_0.05$q.value),]
+
+new_master_0.05_tp53$R_i.name <- "TP53"
+
+############################################################
+############################################################
+#### DETERMINE WHICH VARIABLES WERE REMOVED MOST OFTEN WHEN
+#### CORRECTING FOR COLLINEARITY
+############################################################
+############################################################
+#' Uses the files output from the correct_collinearity functions to calculate 
+#' the number of times each variable was removed due to collinearity
+#' @param elim_vars_df a data frame with the variables removed from the regression 
+#' for each target gene
+calculate_collinearity_removal_freq <- function(elim_vars_df) {
+  elim_vars <- unlist(lapply(elim_vars_df$Variables.Removed, function(x) 
+    unlist(strsplit(x, ",", fixed = T))))
+  print(unique(elim_vars))
+  #elim_vars <- unlist(lapply(elim_vars, function(x) 
+    #ifelse(grepl("Cancer_type", x), "Cancer_type", x)))
+  
+  elim_vars_table <- table(elim_vars)
+  print(elim_vars_table)
+
+}
 
 
+############################################################
+############################################################
+#### FOR A GIVEN PAN-CANCER HIT, DETERMINE WHICH INDIVIDUAL
+#### CANCER TYPES IT IS ALSO SIGNIFICANT IN (AND DIRECTIONALITY)
+############################################################
+############################################################
+#' For a given pan-cancer hit, see which individual cancer types it is 
+#' significant in (for potential experiments). Returns a data frame with
+#' this information and prints it to the console.
+#' @param top_drivers_0.05 a list of master DFs from individual cancer types,
+#' with name corresponding to the cancer type
+#' @param gois list of gene names that are pan-cancer targets of a given driver
+#' @param driver the gene name of the driver for which this gene is a hit
+#' @param qval_thres a q-value threshold for determining hit significance
+get_per_cancer_analysis_of_pc_hit <- function(top_drivers_0.05, gois, driver, qval_thres) {
+  pvals_and_betas <- lapply(1:length(top_drivers_0.05), function(i) {
+    df <- top_drivers_0.05[[i]]
+    ct <- names(top_drivers_0.05)[i]
+    
+    if(driver %fin% df$R_i.name) {
+      df_sub <- df[(df$T_k.name %fin% gois) & (df$R_i.name == driver), ]
+      df_sub_sig <- df_sub[df_sub$q.value < qval_thres]
+      if(nrow(df_sub_sig) > 0) {
+        to_return <- df_sub_sig[, c('T_k.name', 'R_i.name', 'estimate', 'q.value')]
+        to_return$cancer_type <- ct
+        return(to_return)
+      } else {return(NA)}
+    } else {return(NA)}
+  })
+  pvals_and_betas <- pvals_and_betas[!is.na(pvals_and_betas)]
+  
+  pvals_and_betas_df <- do.call(rbind, pvals_and_betas)
+  
+  print(paste("For driver and target combinations for", driver))
+  print(pvals_and_betas_df)
+  
+  return(pvals_and_betas_df)
+}
 
+kras_metabolic_pc_hits <- c("NT5E", "TBXAS1", "SLC27A1", "FPGS", "CANT1", "GALNT10", "ALDH3B1", "FAXDC2",
+                            "SAT1", "DPYSL2", "AGPAT2", "GMDS", "SRD5A3", "SLC18A1", "SLC26A9", 
+                            "B4GALNT3", "ACOX2", "SLC14A1", "ATP6V0A4", "MGLL", "PIP5K1C", "PLCB3",
+                            "SLC12A2", "CYP3A5", "ST3GAL5", "PFKP", "CPS1", "MTMR14", "CHPF2",
+                            "ACO1", "ABCC3", "AQP5", "GNE", "PDHB", "CA8", "SLCO4A1", "SLC3A1",
+                            "SLC37A1", "SLC35C1", "DOLPP1")
+pik3ca_metabolic_pc_hits <- c("PIK3R1", "PIK3R3", "CYP4X1", "PLCE1", "SGPL1", "PPIP5K2",
+                              "HADH", "CRAT", "MYO5B", "IDH2", "HMGCR", "PIGN",
+                              "GPX8", "ASRGL1", "SLC37A1", "UGT2B11", "SPTLC2")
+idh1_metabolic_pc_hits <- c("INPPL1", "CYP2U1", "CHST14", "B4GALT1", "SLC14A1", "MTHFD2",
+                              "AHCYL1", "LPL", "UCP2", "IMPDH2", "DERA", "CBR4", "SLC12A4",
+                            "SLC11A1", "ABCA1", "SLC35B2")
+tp53_metabolic_pc_hits <-c("ENO1", "TK1", "SLC35A2", "G6PD", "RRM2", "PRPS1", 
+                           "GMPS", "PGK1", "PDHA1", "PRDX1", "CAD", "SMS", "SRM", "IL4I1", "MTHFD2", "ME1",
+                           "HPRT1", "RPIA", "ABCD1", "SUV39H1", "GLO1", "PPAT", "PPT1",
+                           "MTHFD1L", "CHKA", "PGD", "SLC25A19", "DEGS1", "GAPDH", "PSAT1",
+                           "SPHK1", "CHST11", "RPE", "FTL", "SLC29A4", "ACYP1", "NOL9",
+                           "PYCR1", "AK4", "PDE6D", "PIGU", "B4GALNT1", "CTSA", 
+                           "GNPDA1", "GFPT2", "DTYMK", "PFKFB4", "PIGW", "CYP27B1",
+                           "SMYD3", "TXNRD1", "OSER1", "SLC7A5", "LBR", "SLC38A1",
+                           "B4GALT5", "PTPDC1", "B3GNT4", "PHEX", "ST6GALNAC5", "PTDSS1",
+                           "HSD17B10", "CTPS1", "IMPDH1", "PHGDH", "BCAT1", "UMPS",
+                           "SMPD4", "FUCA2", "PKM", "MTHFD1L", "ENO2", "ALDOA", "GPI", 
+                           "HK1", "GART", "PFAS", "NME3", "CTPS1", "CTPS2", "H6PD", "MTR", "MTHFR", "FGFR3")
 
+get_per_cancer_analysis_of_pc_hit(top_drivers_0.05, kras_metabolic_pc_hits, "KRAS", 0.2)
+get_per_cancer_analysis_of_pc_hit(top_drivers_0.05, pik3ca_metabolic_pc_hits, "PIK3CA", 0.2)
+get_per_cancer_analysis_of_pc_hit(top_drivers_0.05, idh1_metabolic_pc_hits, "IDH1", 0.2)
+get_per_cancer_analysis_of_pc_hit(top_drivers_0.05, tp53_metabolic_pc_hits, "TP53", 0.2)
 
-
-
-
-
+# Get the genes from a KEGG GSEA file:
+print.table(unlist(strsplit(results_gsea_pik3ca_tbl_sig[results_gsea_pik3ca_tbl_sig$Description == "Valine, leucine and isoleucine degradation", 'core_enrichment'], "/", fixed = T)), 
+            quote=F, row.names = F)
+# Convert to gene names using the following: https://www.genome.jp/kegg/tool/conv_id.html
+tmp <- master_df[(master_df$T_k.name %in% valine_leucine_genes) & (master_df$q.value < 0.01),]
+print(tmp[order(tmp$T_k.name),])
 
 
 # ASIDE: JOSH GRANT FIGURE #

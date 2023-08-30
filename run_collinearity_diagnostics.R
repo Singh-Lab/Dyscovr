@@ -23,21 +23,20 @@ library(stringr)
 #' @param fit_lm the linear model fit, in the form of an lm object produced from lm()
 #' @param path the path for the output files
 #' @param fn the generic filename to modify for the output files
-#' @param name_regprot the name of the regulatory protein from the fit
 #' @param name_targ the name of the target gene from the fit
-get_diag_tables <- function(fit_lm, path, fn, name_regprot, name_targ) {
+get_diag_tables <- function(fit_lm, path, fn, name_targ) {
   
   ols_diagn_tabs <- ols_coll_diag(fit_lm)
   vif_tab <- ols_diagn_tabs[[1]]
   eig_cindex_tab <- ols_diagn_tabs[[2]]
   
-  fn <- str_replace(fn, "output_results", paste(name_regprot[1], name_targ[1], sep = "_"))
+  fn <- str_replace(fn, "output_results", name_targ[1])
   fn <- paste(path, fn, sep = "/")
   fwrite(vif_tab, paste(fn, "vif_tab.csv", sep = "_"))
   fwrite(eig_cindex_tab, paste(fn, "eig_cindex_tab.csv", sep = "_"))
 }
 
-get_diag_tables(fit_lm, outpath, outfn, regprot, targ)
+get_diag_tables(fit_lm, outpath, outfn, targ)
 
 
 ############################################################
@@ -49,11 +48,10 @@ get_diag_tables(fit_lm, outpath, outfn, regprot, targ)
 #' @param fit_lm the linear model fit, in the form of an lm object produced from lm()
 #' @param path the path for the output files
 #' @param fn the generic filename to modify for the output visualizations
-#' @param name_regprot the name of the regulatory protein from the fit
 #' @param name_targ the name of the target gene from the fit
-assess_model_fit <- function(fit_lm, path, fn, name_regprot, name_targ) {
+assess_model_fit <- function(fit_lm, path, fn, name_targ) {
   outpath_vis <- str_replace(outpath, "output_files", "output_visualizations")
-  fn <- str_replace(fn, "output_results", paste(name_regprot, name_targ, sep = "_"))
+  fn <- str_replace(fn, "output_results", name_targ)
   fn <- paste(path, fn, sep = "/")
   
   # Residual fit spread plot
@@ -71,7 +69,7 @@ assess_model_fit <- function(fit_lm, path, fn, name_regprot, name_targ) {
   dev.off()
 }
 
-assess_model_fit(fit_lm, outpath, outfn, regprot, targ)
+assess_model_fit(fit_lm, outpath, outfn, targ)
 
 
 ############################################################
@@ -82,10 +80,9 @@ assess_model_fit(fit_lm, outpath, outfn, regprot, targ)
 #' variable plot and residual plus component plot
 #' @param fit_lm the linear model fit, in the form of an lm object produced from lm()
 #' @param path the path for the output files
-#' @param name_regprot the name of the regulatory protein from the fit
 #' @param name_targ the name of the target gene from the fit
-assess_variable_contributions <- function(fit_lm, path, fn, name_regprot, name_targ) {
-  fn <- str_replace(fn, "output_results", paste(name_regprot, name_targ, sep = "_"))
+assess_variable_contributions <- function(fit_lm, path, fn, name_targ) {
+  fn <- str_replace(fn, "output_results", name_targ)
   path <- str_replace(path, "output_files", "output_visualizations")
   fn <- paste(path, fn, sep = "/")
   

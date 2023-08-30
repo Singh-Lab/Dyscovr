@@ -52,7 +52,6 @@ if(args$dataset == "TCGA") {
 }
 output_vis_path <- paste(output_vis_path, args$QTLtype, sep = "/")
 
-print(ct)
 if ((args$cancerType == "PanCancer") & (!(args$specificTypes == "ALL"))) {
   output_vis_path <- paste(output_vis_path, ct, sep = "/")
 }

@@ -404,14 +404,28 @@ if(debug) {
 ############################################################
 # IMPORT PATIENT/SAMPLE FILES
 ############################################################
-patient_df <- fread(paste(main_path, paste("patient/", args$patient_df, sep = ""), sep = ""),
-                    header = TRUE)
-colnames(patient_df)[1] <- "sample_id"
+# If we are looking per-cancer, read in each individual patient DF
+if((args$cancerType == "PanCancer") & (args$specificTypes != "ALL")) {
+  patient_path <- paste0(main_path, "patient/per_cancer_type/")
+  per_cancer_fns <- list.files(patient_path, pattern = args$patient_df)
+  patient_df <- lapply(per_cancer_fns, function(x) {
+    df <- fread(paste0(patient_path, x), header = T)
+    colnames(df)[1] <- "sample_id"
+    return(df)
+  })
+  names(patient_df) <- unlist(lapply(per_cancer_fns, function(x) 
+    unlist(strsplit(x, "_", fixed = T))[7]))
+  
+} else {
+  patient_df <- fread(paste(main_path, paste("patient/", args$patient_df, sep = ""), sep = ""),
+                      header = TRUE)
+  colnames(patient_df)[1] <- "sample_id"
+}
 
 # Restrict the Mut_PC columns to only those given in the argument vector
-if(args$dataset == "TCGA") {
-  patient_df <- restrict_mut_pc_cols(patient_df, args$mut_pc_vect)
-}
+#if(args$dataset == "TCGA") {
+#  patient_df <- restrict_mut_pc_cols(patient_df, args$mut_pc_vect)
+#}
 
 if(debug) {
   print("Patient DF")
@@ -484,12 +498,11 @@ if(useNumFunctCopies) {
 
 
 ############################################################
-# MAIN FUNCTION FOR CREATING LM INPUT DATA FRAME
+# CREATE THE REGULATORY PROTEIN/ DRIVER SPECIFIC LM 
+# INPUT DATA FRAME
 ############################################################
 #' @param protein_ids_df DF of the regulatory proteins of interest, found based 
 #' on their DNA-binding regions (columns for swissprot IDs and ENSG IDs)
-#' @param downstream_target_df table of regulatory proteins (columns) with gene 
-#' targets we're testing for each (entries)
 #' @param patient_df table of patient-specific information (sex, age, total number 
 #' of mutations, treated or not)
 #' @param mutation_df_targ table of mutation counts for each patient, for each 
@@ -501,24 +514,15 @@ if(useNumFunctCopies) {
 #' for regulatory protein i in the case of an meQTL and bucketed methylation for t_k)
 #' @param cna_df table of CNA per gene (rows are proteins, columns are patients, 
 #' entries are CNA values)
-#' @param expression_df table of expression (rows are genes, columns are patients, 
-#' entries are expression values)
 #' @param num_funct_copies_df a data frame with the number of functional copies
 #' of a given regulatory protein for each sample of interest 
-#' @param neighboring_cna_df a data frame with information about neighboring
-#' driver genes on the same chromosome that have matching CNA status to a given gene
-#' @param is_rank_or_quant_norm a TRUE/FALSE value indicating whether this is rank-
-#' or quantile-normalized data (i.e. whether we need to include library size as an
-#' offset)
-#' @param log_expression a TRUE/FALSE value indicating whether we need to take the
-#' log2(exp + 1), or whether expression has already been transformed to a normal
-#' distribution in some way
 #' @param analysis_type a string label that reads either "eQTL" or "meQTL" to 
 #' determine what kind of model we should run
 #' @param tumNormMatched a TRUE/FALSE value indicating whether or not the analysis is 
 #' tumor-normal matched
-#' @param randomize a TRUE/FALSE value indicating whether or not we are randomizing 
-#' expression
+#' @param debug a TRUE/FALSE value indicating if we are in debug mode and should 
+#' use additional prints
+#' @param filename_labels a list of labels used for appropriate filename generation
 #' @param cna_bucketing a string indicating if/how we are bucketing CNA values. 
 #' Possible values are "bucket_inclAmp", "bucket_exclAmp", "bucket_justAmp", 
 #' "bucket_justDel" and "rawCNA"
@@ -526,54 +530,29 @@ if(useNumFunctCopies) {
 #' methylation values
 #' @param useNumFunctCopies a TRUE/FALSE value indicating whether or not we are using
 #' the number of functional copies rather than the mutation/CNA status information
+#' @param outpath a string with the local path for writing files
 #' @param num_PEER a value from 0-10 indicating the number of PEER factors we 
 #' are including as covariates in the model
 #' @param num_pcs a value from 0-2 indicating the number of  
 #' principal components we are including as covariates in the model 
-#' @param debug a TRUE/FALSE value indicating if we are in debug mode and should 
-#' use additional prints
-#' @param outpath a string with the local path for debugging/ collinearity files 
-#' we'll be writing from inside the function
 #' @param removeCis a TRUE/FALSE value indicating whether or not we are eliminating 
 #' all cis pairings
 #' @param removeMetastatic a TRUE/FALSE value indicating whether or not metastatic
 #' samples were removed, for file naming
-#' @param all_genes_id_conv an ID conversion file from BioMart, for use in removing 
-#' cis pairings if needed
 #' @param incl_nextMutDriver a TRUE/FALSE value indicating, if we are running just on
 #' TP53 or PIK3CA in BRCA, whether or not we include mutation/ CNA/ mutation interaction
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3', to denote what columns
+#' we are referencing/ specific data types we are using
 #' @param run_query_genes_jointly a TRUE/ FALSE value indicating whether or not we 
 #' want to run all query regulatory proteins jointly in the same model, or separately
 #' (one model per query-target pair)
-#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3', to denote what columns
-#' we are referencing/ specific data types we are using
-#' @param filename_labels a list of labels used for appropriate filename generation
-create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_df, 
-                                  mutation_df_targ, methylation_df, methylation_df_meQTL, 
-                                  cna_df, expression_df, num_funct_copies_df,
-                                  neighboring_cna_df, is_rank_or_quant_norm, log_expression, analysis_type, 
-                                  tumNormMatched, randomize, cna_bucketing, meth_bucketing, 
-                                  useNumFunctCopies, num_PEER, num_pcs, debug, outpath, 
-                                  fixed_lambda_for_rand, removeCis, removeMetastatic, 
-                                  all_genes_id_conv, incl_nextMutDriver, run_query_genes_jointly, 
-                                  dataset, filename_labels) {
+create_regulatory_prot_input_df <- function(protein_ids_df, patient_df, mutation_df_targ, methylation_df, 
+                                methylation_df_meQTL, cna_df, num_funct_copies_df,
+                                analysis_type, tumNormMatched, debug, filename_labels,
+                                cna_bucketing, meth_bucketing, useNumFunctCopies, outpath, 
+                                num_PEER, num_pcs, removeCis, removeMetastatic, 
+                                incl_nextMutDriver, dataset, run_query_genes_jointly) {
   
-  # If we are randomizing expression, do this now per-sample
-  if(randomize) {
-    if(analysis_type == "eQTL") {
-      random_exp_df <- apply(expression_df[,2:ncol(expression_df), with = FALSE], 
-                             MARGIN = 2,  function(x) dqrng::dqsample(x))
-      expression_df <- cbind(expression_df[,'ensg_id'], data.table(random_exp_df))
-    }
-    else if (analysis_type == "meQTL") {
-      random_methyl_df <- apply(methylation_df[,2:(ncol(methylation_df)-1), with = FALSE], 
-                                MARGIN = 2, dqsample)
-      methylation_df <- cbind(methylation_df[,'Gene_Symbol'], cbind(data.table(random_methyl_df), 
-                                                                    methylation_df[,'ensg_ids']))
-    }
-    else {print(paste("Analysis type is invalid:", analysis_type))}
-  }
-
   # If we are running individual models per query gene 
   if(!run_query_genes_jointly) {
     protein_input_dfs <- lapply(1:protein_ids_df[, .N], function(i) {
@@ -592,7 +571,7 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
                                           mutation_targ_df = mutation_df_targ, 
                                           methylation_df = methylation_df, 
                                           cna_df = cna_df,
-                                          num_funct_copies_df = num_funct_copies_DF,
+                                          num_funct_copies_df = num_funct_copies_df,
                                           useNumFunctCopies = useNumFunctCopies,
                                           cna_bucketing = cna_bucketing, 
                                           meth_bucketing = meth_bucketing, 
@@ -602,117 +581,17 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
                                           debug = debug, dataset = dataset)
       starter_df <- cbind(patient_df, regprot_i_df)
       
-      if(debug) {
-        print("Starter DF, with Regprot Inputs")
-        print(head(starter))
-      }
+      starter_df <- check_and_write_starter_df(starter_df, debug, regprot, filename_labels,
+                                               cna_bucketing, meth_bucketing, num_PEER, 
+                                               num_pcs, randomize, removeCis, removeMetastatic,
+                                               run_query_genes_jointly, outpath)
       
-      # If remove cis is TRUE, limit the downstream target DF to only trans pairings
-      if(removeCis) {
-        downstream_target_df <- subset_to_trans_targets(regprot_ensg, downstream_target_df,
-                                                        all_genes_id_conv, debug)
-      }
-      
-      # Use multithreading to run these jobs in parallel
-      num_groups <- 6
-      parallel_cluster <- makeCluster(6, type = "SOCK", methods = FALSE, outfile = "")
-      
-      # Tell R that we want to use these processes to do calculations
-      setDefaultCluster(parallel_cluster)
-      doParallel::registerDoParallel(parallel_cluster)
-      
-      list_of_rows <- split(downstream_target_df, f = seq(nrow(downstream_target_df)))
-      
-      lm_input_tables <- foreach(currentRow = list_of_rows, 
-                                 .export = c("methylation_df", "methylation_df_meQTL", "starter_df", "mutation_targ_df",
-                                             "cna_df", "expression_df", "log_expression", "cna_bucketing", 
-                                             "meth_bucketing", "analysis_type", "tumNormMatched", "debug", 
-                                             "dataset", "randomize", "num_PEER", "num_pcs", "removeCis", "removeMetastatic",
-                                             "model_type", "run_query_genes_jointly", "regprot", "filename_labels"), 
-                                 #.combine = function(x,y) list(x, y),  # don't need a combine function here, since it defaults to returning a list
-                                 .inorder = FALSE) %dopar% {
-                                   
-                                   
-         # Source the necessary files for the worker node
-         source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Sara_LinearModel/"
-         source(paste(source_path, "general_important_functions2.R", sep = "/"))
-         source(paste(source_path, "linear_model_helper_functions2.R", sep = "/"))
-         
-         # Get the target t_k's Swissprot & ENSG IDs
-         targ <- unlist(strsplit(currentRow$swissprot, ";", fixed = TRUE))
-         targ_ensg <- unlist(strsplit(currentRow$ensg, ";", fixed = TRUE))
-         
-         if(debug) {print(targ)}
-         
-         tryCatch({
-           lm_input_table <- fill_targ_inputs(starter_df = starter_df, targ_k = targ, 
-                                              targ_k_ensg = targ_ensg, 
-                                              mutation_targ_df = mutation_targ_df,
-                                              methylation_df = methylation_df, 
-                                              cna_df = cna_df, expression_df = expression_df, 
-                                              log_expression = log_expression,
-                                              cna_bucketing = cna_bucketing,
-                                              meth_bucketing = meth_bucketing, 
-                                              analysis_type = analysis_type,
-                                              tumNormMatched = tumNormMatched, 
-                                              debug = debug, dataset = dataset)
-         }, error = function(cond) {
-           print(cond)
-           lm_input_table <- NA
-         })
-         
-         if((length(lm_input_table) == 0) | (lm_input_table[, .N] == 0)) {
-           print("Something went wrong; LM input table is empty. Returning NA.")
-           lm_input_table <- NA
-         }
-         
-         if(!is.na(lm_input_table)) {
-           # First, remove any columns that are entirely NA (e.g., a given driver did not 
-           # have CNA or methylation data reported)
-           lm_input_table <- lm_input_table[, which(unlist(lapply(lm_input_table, function(x)
-             !all(is.na(x))))), with = FALSE]
-           
-           # Then, if a row has NA, remove that whole row and predict without it
-           #lm_input_table <- na.exclude(lm_input_table)
-           lm_input_table <- na.omit(lm_input_table)
-           
-           # Make sure everything is numeric type
-           #lm_input_table[,2:ncol(lm_input_table)] <- sapply(lm_input_table[,2:ncol(lm_input_table)], as.numeric) 
-           
-           if(debug) {
-             print("LM Input Table")
-             print(head(lm_input_table))
-             print(dim(lm_input_table))
-           }
-           
-           # Write this file to the appropriate outpath with the generated file name
-           tryCatch({
-             lm_input_table_fn <- create_lm_input_table_filename(TRUE, regprot, filename_labels[["run_name"]], 
-                                                                 targ, filename_labels[["expression_df_name"]],
-                                                                 cna_bucketing, meth_bucketing, 
-                                                                 filename_labels[["meth_type"]], 
-                                                                 filename_labels[["patient_df_name"]], num_PEER, 
-                                                                 num_pcs, randomize, filename_labels[["patients_to_incl_label"]], 
-                                                                 removeCis, removeMetastatic)
-             
-             data.table::fwrite(lm_input_table, paste(outpath, paste0(lm_input_table_fn, ".csv"), sep = "/"))
-           }, error = function(cond) {
-             print(cond)
-             print(dim(lm_input_table))
-             print(paste(outpath, paste0(lm_input_table_fn, ".csv"), sep = "/"))
-           })
-         }
-         # Ensure this is what is returned by this iteration of foreach
-         lm_input_table <- lm_input_table
-      }
-      return(lm_input_tables)
+      return(starter_df)
     })
     return(protein_input_dfs)
-  }
-  
+  } 
   # Otherwise, if we are running all our regulatory proteins jointly in one model
   else {
-    
     # Create a starter DF from all the input regulatory proteins
     protein_input_dfs <- lapply(1:protein_ids_df[, .N], function(i) {
       
@@ -742,12 +621,6 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
       setnames(regprot_i_df, "CNAStat_i", paste0(regprot, "_CNAStat_i"))
       setnames(regprot_i_df, "MethStat_i", paste0(regprot, "_MethStat_i"))
       
-      # If remove cis is TRUE, limit the downstream target DF to only trans pairings
-      #if(removeCis) {
-      #  downstream_target_df <- subset_to_trans_targets(regprot_ensg, downstream_target_df,
-      #                                                  all_genes_id_conv, debug)
-      #}
-      
       return(regprot_i_df)
     })
     
@@ -758,113 +631,291 @@ create_lm_input_table <- function(protein_ids_df, downstream_target_df, patient_
     # Add the patient/ sample DF to this 
     starter_df <- cbind(patient_df, regprot_df)
     
+    starter_df <- check_and_write_starter_df(starter_df, debug, regprot, filename_labels,
+                                             cna_bucketing, meth_bucketing, num_PEER, 
+                                             num_pcs, randomize, removeCis, removeMetastatic,
+                                             run_query_genes_jointly, outpath)
+    return(starter_df)
+  }
+}
+
+
+
+#' Helper function to check and write starter DF
+#' @param starter_df a "starter" DF with patient/sample and regulatory protein info
+#' @param debug a TRUE/FALSE value indicating if we are in debug mode and should 
+#' use additional prints
+#' @param regprot the regulatory protein(s) of interest
+#' @param filename_labels a list of labels used for appropriate filename generation
+#' @param cna_bucketing a string indicating if/how we are bucketing CNA values. 
+#' Possible values are "bucket_inclAmp", "bucket_exclAmp", "bucket_justAmp", 
+#' "bucket_justDel" and "rawCNA"
+#' @param meth_bucketing a TRUE/FALSE value indicating whether or not we are bucketing
+#' methylation values
+#' @param num_PEER a value from 0-10 indicating the number of PEER factors we 
+#' are including as covariates in the model
+#' @param num_pcs a value from 0-2 indicating the number of  
+#' principal components we are including as covariates in the model 
+#' @param randomize a TRUE/FALSE value indicating whether or not we are randomizing 
+#' expression
+#' @param removeCis a TRUE/FALSE value indicating whether or not we are eliminating 
+#' all cis pairings
+#' @param removeMetastatic a TRUE/FALSE value indicating whether or not metastatic
+#' samples were removed, for file naming
+#' @param run_query_genes_jointly a TRUE/ FALSE value indicating whether or not we 
+#' want to run all query regulatory proteins jointly in the same model, or separately
+#' (one model per query-target pair)
+#' @param outpath a string with the local path for writing files
+check_and_write_starter_df <- function(starter_df, debug, regprot, filename_labels,
+                                       cna_bucketing, meth_bucketing, num_PEER, 
+                                       num_pcs, randomize, removeCis, removeMetastatic,
+                                       run_query_genes_jointly, outpath) {
+  # Print the data frame, if in debug mode
+  if(debug) {
+    print("Starter DF, with Regprot Inputs")
+    print(head(starter_df))
+  }
+  
+  if((length(starter_df) == 0) | (starter_df[, .N] == 0)) {
+    print("Something went wrong; LM input table is empty. Returning NA.")
+    starter_df <- NA
+  }
+  
+  if(!is.na(starter_df)) {
+    # First, remove any columns that are entirely NA (e.g., a given target did not 
+    # have CNA or methylation data reported)
+    starter_df <- starter_df[, which(unlist(lapply(starter_df, function(x)
+      !all(is.na(x))))), with = FALSE]
+    
+    # Then, if a row has NA, remove that whole row and predict without it
+    #starter_df <- na.exclude(starter_df)
+    starter_df <- na.omit(starter_df)
+    
+    # Make sure everything is numeric type
+    #starter_df[,2:ncol(starter_df)] <- sapply(starter_df[,2:ncol(starter_df)], as.numeric) 
+    
     if(debug) {
-      print("Starter DF, with Regprot Inputs")
+      print("Starter DF, with Regprot Inputs, NA removed")
       print(head(starter_df))
+      print(dim(starter_df))
     }
     
-    # Use multithreading to run these jobs in parallel
-    num_groups <- 6
-    parallel_cluster <- makeCluster(6, type = "SOCK", methods = FALSE, outfile = "")
-    
-    # Tell R that we want to use these processes to do calculations
-    setDefaultCluster(parallel_cluster)
-    doParallel::registerDoParallel(parallel_cluster)
-    
-    list_of_rows <- split(downstream_target_df, f = seq(nrow(downstream_target_df)))
-    if(dataset == "Chinese_TN") {
-      methylation_df <- NA
-      methylation_df_meQTL <- NA
+    # Write this file to the appropriate outpath with the generated file name
+    tryCatch({
+      starter_df_fn <- NA
+      
+      if(!run_query_genes_jointly) {
+        starter_df_fn <- create_regprot_input_table_filename(TRUE, regprot, filename_labels[["run_name"]], 
+                                                        cna_bucketing, meth_bucketing, 
+                                                        filename_labels[["meth_type"]], 
+                                                        filename_labels[["patient_df_name"]], num_PEER, 
+                                                        num_pcs, filename_labels[["patients_to_incl_label"]], 
+                                                        removeCis, removeMetastatic)
+      } else {
+        starter_df_fn <- create_regprot_input_table_filename(FALSE, NA, filename_labels[["run_name"]], 
+                                                             cna_bucketing, meth_bucketing, 
+                                                             filename_labels[["meth_type"]], 
+                                                             filename_labels[["patient_df_name"]], num_PEER, 
+                                                             num_pcs, filename_labels[["patients_to_incl_label"]], 
+                                                             removeCis, removeMetastatic)
+      }
+      if(debug) {print(starter_df_fn)}
+      data.table::fwrite(starter_df, paste(outpath, paste0(starter_df_fn, ".csv"), sep = "/"))
+    }, error = function(cond) {
+      print(cond)
+      print(dim(starter_df))
+      print(paste(outpath, paste0(starter_df_fn, ".csv"), sep = "/"))
+    })
+  }
+  return(starter_df)
+}
+
+############################################################
+# MAIN FUNCTION FOR CREATING TARGET-SPECIFIC LM INPUT DATA FRAME
+############################################################
+#' @param starter_df a "starter" input data frame with patient/ sample and regulatory
+#' protien information
+#' @param downstream_target_df table of regulatory proteins (columns) with gene 
+#' targets we're testing for each (entries)
+#' @param mutation_df_targ table of mutation counts for each patient, for each 
+#' gene in the genome
+#' @param methylation_df table of methylation results (rows are proteins, columns 
+#' are patients, entries are methylation values)
+#' @param methylation_df_meQTL OPTIONAL: table of methylation results (rows are 
+#' proteins, columns are patients, entries are raw methylation values to be used
+#' for regulatory protein i in the case of an meQTL and bucketed methylation for t_k)
+#' @param cna_df table of CNA per gene (rows are proteins, columns are patients, 
+#' entries are CNA values)
+#' @param expression_df table of expression (rows are genes, columns are patients, 
+#' entries are expression values)
+#' @param num_funct_copies_df a data frame with the number of functional copies
+#' of a given regulatory protein for each sample of interest 
+#' @param is_rank_or_quant_norm a TRUE/FALSE value indicating whether this is rank-
+#' or quantile-normalized data (i.e. whether we need to include library size as an
+#' offset)
+#' @param log_expression a TRUE/FALSE value indicating whether we need to take the
+#' log2(exp + 1), or whether expression has already been transformed to a normal
+#' distribution in some way
+#' @param analysis_type a string label that reads either "eQTL" or "meQTL" to 
+#' determine what kind of model we should run
+#' @param tumNormMatched a TRUE/FALSE value indicating whether or not the analysis is 
+#' tumor-normal matched
+#' @param randomize a TRUE/FALSE value indicating whether or not we are randomizing 
+#' expression
+#' @param cna_bucketing a string indicating if/how we are bucketing CNA values. 
+#' Possible values are "bucket_inclAmp", "bucket_exclAmp", "bucket_justAmp", 
+#' "bucket_justDel" and "rawCNA"
+#' @param meth_bucketing a TRUE/FALSE value indicating whether or not we are bucketing
+#' methylation values
+#' @param useNumFunctCopies a TRUE/FALSE value indicating whether or not we are using
+#' the number of functional copies rather than the mutation/CNA status information
+#' @param debug a TRUE/FALSE value indicating if we are in debug mode and should 
+#' use additional prints
+#' @param outpath a string with the local path for writing files
+#' @param removeCis a TRUE/FALSE value indicating whether or not we are eliminating 
+#' all cis pairings
+#' @param removeMetastatic a TRUE/FALSE value indicating whether or not metastatic
+#' samples were removed, for file naming
+#' @param all_genes_id_conv an ID conversion file from BioMart, for use in removing 
+#' cis pairings if needed
+#' @param dataset either 'TCGA', 'METABRIC', 'ICGC', or 'CPTAC3', to denote what columns
+#' we are referencing/ specific data types we are using
+#' @param filename_labels a list of labels used for appropriate filename generation
+create_lm_input_table <- function(starter_df, downstream_target_df, mutation_df_targ, methylation_df, 
+                                  methylation_df_meQTL, cna_df, expression_df, num_funct_copies_df,
+                                  is_rank_or_quant_norm, log_expression, analysis_type, 
+                                  tumNormMatched, randomize, cna_bucketing, meth_bucketing, 
+                                  useNumFunctCopies, debug, outpath, 
+                                  fixed_lambda_for_rand, removeCis, removeMetastatic, 
+                                  all_genes_id_conv, dataset, filename_labels) {
+  
+  # If we are randomizing expression, do this now per-sample
+  if(randomize) {
+    if(analysis_type == "eQTL") {
+      random_exp_df <- apply(expression_df[,2:ncol(expression_df), with = FALSE], 
+                             MARGIN = 2,  function(x) dqrng::dqsample(x))
+      expression_df <- cbind(expression_df[,'ensg_id'], data.table(random_exp_df))
     }
-    
-    lm_input_tables <- foreach(currentRow = list_of_rows, 
-                              .export = c("methylation_df", "methylation_df_meQTL", "starter_df", "mutation_targ_df",
-                                          "cna_df", "expression_df", "log_expression", "cna_bucketing", 
-                                          "meth_bucketing", "analysis_type", "tumNormMatched", "debug", 
-                                          "dataset", "randomize", "num_PEER", "num_pcs", "removeCis",  
-                                          "removeMetastatic", "run_query_genes_jointly", "filename_labels"), 
-                              #.combine = function(x,y) list(x, y),  # don't need a combine function here, since it defaults to returning a list
-                              .inorder = FALSE) %dopar% {
-                                
-                                
-        # Source the necessary files for the worker node
-        source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Sara_LinearModel/"
-        source(paste(source_path, "general_important_functions2.R", sep = "/"))
-        source(paste(source_path, "linear_model_helper_functions2.R", sep = "/"))
-        
-        # Get the target t_k's Swissprot & ENSG IDs
-        targ <- unlist(strsplit(currentRow$swissprot, ";", fixed = TRUE))
-        targ_ensg <- unlist(strsplit(currentRow$ensg, ";", fixed = TRUE))
-        
-        if(debug) {print(targ)}
-        
-        lm_input_table <- fill_targ_inputs(starter_df = starter_df, targ_k = targ, 
+    else if (analysis_type == "meQTL") {
+      random_methyl_df <- apply(methylation_df[,2:(ncol(methylation_df)-1), with = FALSE], 
+                                MARGIN = 2, dqsample)
+      methylation_df <- cbind(methylation_df[,'Gene_Symbol'], cbind(data.table(random_methyl_df), 
+                                                                    methylation_df[,'ensg_ids']))
+    }
+    else {print(paste("Analysis type is invalid:", analysis_type))}
+  }
+  if(dataset == "Chinese_TN") {
+    methylation_df <- NA
+    methylation_df_meQTL <- NA
+  }
+
+  # If remove cis is TRUE, limit the downstream target DF to only trans pairings
+  if(removeCis) {
+    downstream_target_df <- subset_to_trans_targets(regprot_ensg, downstream_target_df,
+                                                    all_genes_id_conv, debug)
+  }
+  
+  # Use multithreading to run these jobs in parallel
+  num_groups <- 6
+  parallel_cluster <- makeCluster(6, type = "SOCK", methods = FALSE, outfile = "")
+  
+  # Tell R that we want to use these processes to do calculations
+  setDefaultCluster(parallel_cluster)
+  doParallel::registerDoParallel(parallel_cluster)
+  
+  list_of_rows <- split(downstream_target_df, f = seq(nrow(downstream_target_df)))
+
+  lm_input_tables <- foreach(currentRow = list_of_rows, 
+                             .export = c("methylation_df", "methylation_df_meQTL", "starter_df", "mutation_targ_df",
+                                         "cna_df", "expression_df", "log_expression", "cna_bucketing", 
+                                         "meth_bucketing", "analysis_type", "tumNormMatched", "debug", 
+                                         "dataset", "randomize", "removeCis", "removeMetastatic", 
+                                         "filename_labels"), 
+                             #.combine = function(x,y) list(x, y),  # don't need a combine function here, since it defaults to returning a list
+                             .inorder = FALSE) %dopar% {
+                                   
+      # Source the necessary files for the worker node
+      source_path <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Sara_LinearModel/"
+      source(paste(source_path, "general_important_functions2.R", sep = "/"))
+      source(paste(source_path, "linear_model_helper_functions2.R", sep = "/"))
+     
+      # Get the target t_k's Swissprot & ENSG IDs
+      targ <- unlist(strsplit(currentRow$swissprot, ";", fixed = TRUE))
+      targ_ensg <- unlist(strsplit(currentRow$ensg, ";", fixed = TRUE))
+     
+      if(debug) {print(targ)}
+      
+      tryCatch({
+        lm_input_table <- fill_targ_inputs(starter_df = starter_df, targ_k = targ,
                                            targ_k_ensg = targ_ensg, 
                                            mutation_targ_df = mutation_targ_df,
-                                           methylation_df = methylation_df, 
-                                           cna_df = cna_df, expression_df = expression_df, 
+                                           methylation_df = methylation_df,
+                                           cna_df = cna_df, expression_df = expression_df,
                                            log_expression = log_expression,
                                            cna_bucketing = cna_bucketing,
-                                           meth_bucketing = meth_bucketing, 
+                                           meth_bucketing = meth_bucketing,
                                            analysis_type = analysis_type,
-                                           tumNormMatched = tumNormMatched, 
+                                           tumNormMatched = tumNormMatched,
                                            debug = debug, dataset = dataset)
         
-        if((length(lm_input_table) == 0) | (lm_input_table[, .N] == 0)) {
-          print("Something went wrong; LM input table is empty. Returning NA.")
-          lm_input_table <- NA
-        }
-        
-        if(!is.na(lm_input_table)) {
-
-          tryCatch({
-            # First, remove any columns that are entirely NA or 0 (e.g., a given driver did not 
-            # have CNA or methylation data reported)
-            lm_input_table <- lm_input_table[, which(unlist(lapply(lm_input_table, function(x)
-              !all(is.na(x))))), with = FALSE]
-            lm_input_table <- lm_input_table[, colSums(lm_input_table != 0, na.rm = T) > 0, with = FALSE]
-            
-            # Then, if a row has NA, remove that whole row and predict without it
-            #lm_input_table <- na.exclude(lm_input_table)
-            lm_input_table <- na.omit(lm_input_table)
-            
-            # Make sure everything is numeric type
-            #lm_input_table[,2:ncol(lm_input_table)] <- sapply(lm_input_table[,2:ncol(lm_input_table)], as.numeric) 
-            
-            if(debug) {
-              print("LM Input Table")
-              print(head(lm_input_table))
-              print(dim(lm_input_table))
+         }, error = function(cond) {
+           print(cond)
+           lm_input_table <- NA
+         })
+         
+         if((length(lm_input_table) == 0) | (lm_input_table[, .N] == 0)) {
+           print("Something went wrong; LM input table is empty. Returning NA.")
+           lm_input_table <- NA
+         }
+         
+         if(!is.na(lm_input_table)) {
+           # First, remove any columns that are entirely NA (e.g., a given target did not 
+           # have CNA or methylation data reported)
+           lm_input_table <- lm_input_table[, which(unlist(lapply(lm_input_table, function(x)
+             !all(is.na(x))))), with = FALSE]
+           lm_input_table <- lm_input_table[, colSums(lm_input_table != 0, na.rm = T) > 0, 
+                                            with = FALSE]
+           
+           # Then, if a row has NA, remove that whole row and predict without it
+           #lm_input_table <- na.exclude(lm_input_table)
+           lm_input_table <- na.omit(lm_input_table)
+           
+           # Make sure everything is numeric type
+           #lm_input_table[,2:ncol(lm_input_table)] <- sapply(lm_input_table[,2:ncol(lm_input_table)], as.numeric) 
+           
+           if(debug) {
+             print("LM Input Table")
+             print(head(lm_input_table))
+             print(dim(lm_input_table))
             }
-            
-            print("LM Input Table")
-            print(head(lm_input_table))
-            
-            # Create an output file name for this LM input table
-            lm_input_table_fn <- create_lm_input_table_filename(filename_labels[["test"]], filename_labels[["tester"]], 
-                                                                filename_labels[["run_name"]], targ, filename_labels[["expression_df_name"]],
-                                                                cna_bucketing, meth_bucketing, filename_labels[["meth_type"]], 
-                                                                filename_labels[["patient_df_name"]], num_PEER, 
-                                                                num_pcs, randomize, filename_labels[["patients_to_incl_label"]], 
-                                                                removeCis, removeMetastatic)
-            
-            # Write this file to the appropriate outpath with the generated file name
-            data.table::fwrite(lm_input_table, file = paste(outpath, paste0(lm_input_table_fn, ".csv"), sep = "/"))
-          
-          }, error = function(cond) {
-            print(cond)
-            print(length(lm_input_table_fn))
-            print(paste(outpath, paste0(lm_input_table_fn, ".csv"), sep = "/"))
-          })
-        }
-        
-        lm_input_table <- lm_input_table
+           
+           # Write this file to the appropriate outpath with the generated file name
+           tryCatch({
+             # Create an output file name for this LM input table
+             lm_input_table_fn <- create_lm_input_table_filename(targ, filename_labels[["expression_df_name"]],
+                                                                 cna_bucketing, meth_bucketing, filename_labels[["meth_type"]], 
+                                                                 filename_labels[["patient_df_name"]], randomize, 
+                                                                 filename_labels[["patients_to_incl_label"]], 
+                                                                 removeCis, removeMetastatic)
+             
+             # Write this file to the appropriate outpath with the generated file name
+             data.table::fwrite(lm_input_table, file = paste(outpath, paste0(lm_input_table_fn, ".csv"), 
+                                                             sep = "/"))
+             gc()
+             
+           }, error = function(cond) {
+             print(cond)
+             print(length(lm_input_table_fn))
+             print(paste(outpath, paste0(lm_input_table_fn, ".csv"), sep = "/"))
+           })
+         }
+         # Ensure this is what is returned by this iteration of foreach
+         lm_input_table <- lm_input_table
     }
     # tell R that we don't need the processes anymore
     stopCluster(parallel_cluster)
     
     return(lm_input_tables)
-  }
 }
 
 
@@ -951,9 +1002,9 @@ fill_regprot_inputs <- function(patient_df, regprot_i_uniprot, regprot_i_ensg, m
     else {mut_stat <- 1}
     
     # Does this regulatory protein have a CNA in cancer?
-    cna_stat <- get_cna_stat(cna_df_sub, sample, cna_bucketing, dataset, FALSE, NA)
-    #cna_vect_sample <- unlist(cna_df[,colnames(cna_df) == sample, with = F])
-    #cna_stat <- get_cna_stat(cna_df_sub, sample, cna_bucketing, dataset, TRUE, cna_vect_sample)
+    #cna_stat <- get_cna_stat(cna_df_sub, sample, cna_bucketing, dataset, FALSE, NA)
+    cna_vect_sample <- unlist(cna_df[,colnames(cna_df) == sample, with = F])
+    cna_stat <- get_cna_stat(cna_df_sub, sample, cna_bucketing, dataset, TRUE, cna_vect_sample)
     if(grepl("incl", cna_bucketing)) {cna_stat <- as.integer(cna_stat[[1]])}     
     
     # Does this regulatory protein have a methylation marker in cancer, or differential 
@@ -1299,16 +1350,37 @@ if(is.na(patient_cancer_mapping)) {
     if(useNumFunctCopies) {num_funct_copies_DF <- remove_metastatic_samples(num_funct_copies_DF, FALSE)}
   }
   
+  # Create regulatory protein starter DF
+  starter_df <- create_regulatory_prot_input_df(protein_ids_df = protein_ids_df, 
+                                                patient_df = patient_df, 
+                                                mutation_df_targ = mutation_targ_df, 
+                                                methylation_df = methylation_df, 
+                                                methylation_df_meQTL = methylation_df_meQTL, 
+                                                cna_df = cna_df, 
+                                                num_funct_copies_df = num_funct_copies_DF,
+                                                analysis_type = args$QTLtype, 
+                                                tumNormMatched = tumNormMatched, 
+                                                debug = debug, filename_labels = filename_labels,
+                                                cna_bucketing = args$cna_bucketing, 
+                                                meth_bucketing = meth_bucketing, 
+                                                useNumFunctCopies = useNumFunctCopies, 
+                                                outpath = outpath, num_PEER = args$num_PEER, 
+                                                num_pcs = args$num_pcs, removeCis = removeCis, 
+                                                removeMetastatic = removeMetastatic, 
+                                                incl_nextMutDriver = incl_nextMutDriver, 
+                                                dataset = args$dataset, 
+                                                run_query_genes_jointly = runRegprotsJointly)
   
-  lm_input_tables <- create_lm_input_table(protein_ids_df = protein_ids_df, 
+  
+  lm_input_tables <- create_lm_input_table(starter_df = starter_df, 
                                           downstream_target_df = targets_DF, 
-                                          patient_df = patient_df,
-                                          mutation_df_targ =  mutation_targ_df,
-                                          #mutation_df_regprot = mutation_regprot_df, 
+                                          #patient_df = patient_df,
+                                          mutation_df_targ = mutation_targ_df,
                                           methylation_df = methylation_df, 
                                           methylation_df_meQTL = methylation_df_meQTL,
                                           cna_df = cna_df,
                                           expression_df = expression_df, 
+                                          num_funct_copies_df = num_funct_copies_DF,
                                           is_rank_or_quant_norm = is_rank_or_quant_norm,
                                           log_expression = log_expression,
                                           analysis_type = args$QTLtype,
@@ -1316,17 +1388,13 @@ if(is.na(patient_cancer_mapping)) {
                                           randomize = randomize,
                                           cna_bucketing = args$cna_bucketing,
                                           meth_bucketing = meth_bucketing,
-                                          num_PEER = args$num_PEER,
-                                          num_pcs = args$num_pcs,
+                                          useNumFunctCopies = useNumFunctCopies,
                                           debug = debug,
                                           outpath = outpath, 
+                                          fixed_lambda_for_rand = NA,
                                           removeCis = removeCis,
                                           removeMetastatic = removeMetastatic,
                                           all_genes_id_conv = all_genes_id_conv,
-                                          useNumFunctCopies = useNumFunctCopies,
-                                          num_funct_copies_df = num_funct_copies_DF,
-                                          incl_nextMutDriver = incl_nextMutDriver,
-                                          run_query_genes_jointly = runRegprotsJointly,
                                           dataset = args$dataset,
                                           filename_labels = filename_labels)
   
@@ -1347,8 +1415,12 @@ if(is.na(patient_cancer_mapping)) {
     # Get the outpath for this cancer type
     outpath_i <- outpath[[i]]
     
+    ct <- names(patient_cancer_mapping[i])
+    patient_df_ct <- patient_df[[which(names(patient_df) == ct)]]
+    print(head(patient_df_ct))
+    
     # Subset files using patient_ids (using helper function)
-    patient_df_sub <- subset_by_intersecting_ids(patient_ids, patient_df, FALSE, tumNormMatched, args$dataset)
+    patient_df_sub <- subset_by_intersecting_ids(patient_ids, patient_df_ct, FALSE, tumNormMatched, args$dataset)
     mutation_targ_df_sub <- subset_by_intersecting_ids(patient_ids, mutation_targ_df, TRUE, tumNormMatched, args$dataset)
     #mutation_regprot_df_sub <- subset_regprot_df_by_intersecting_ids(patient_ids, mutation_regprot_df, tumNormMatched, args$dataset)
     if(args$dataset != "Chinese_TN") {
@@ -1366,53 +1438,71 @@ if(is.na(patient_cancer_mapping)) {
     
     # If needed, exclude metastatic samples
     if(removeMetastatic == TRUE) {
-      patient_df <- remove_metastatic_samples(patient_df, FALSE)
-      mutation_targ_df <- remove_metastatic_samples(mutation_targ_df, TRUE)
-      #mutation_regprot_df <- remove_metastatic_samples_regprot(mutation_regprot_df)
+      patient_df_sub <- remove_metastatic_samples(patient_df_sub, FALSE)
+      mutation_targ_df_sub <- remove_metastatic_samples(mutation_targ_df_sub, TRUE)
+      #mutation_regprot_df <- remove_metastatic_samples_regprot(mutation_regprot_df_sub)
       if(args$dataset != "Chinese_TN") {
-        methylation_df <- remove_metastatic_samples(methylation_df, TRUE)
+        methylation_df_sub <- remove_metastatic_samples(methylation_df_sub, TRUE)
         if(!is.na(methylation_df_meQTL)) {
-          methylation_df_meQTL <- remove_metastatic_samples(methylation_df_meQTL, TRUE)
-        } else {methylation_df_meQTL <- NA} 
+          methylation_df_meQTL_sub <- remove_metastatic_samples(methylation_df_meQTL_sub, TRUE)
+        } else {methylation_df_meQTL_sub <- NA} 
       } 
-      cna_df <- remove_metastatic_samples(cna_df, TRUE)
-      expression_df <- remove_metastatic_samples(expression_df, TRUE)
-      if(useNumFunctCopies) {num_funct_copies_DF <- remove_metastatic_samples(num_funct_copies_DF, FALSE)}
+      cna_df_sub <- remove_metastatic_samples(cna_df_sub, TRUE)
+      expression_df_sub <- remove_metastatic_samples(expression_df_sub, TRUE)
+      if(useNumFunctCopies) {num_funct_copies_DF_sub <- remove_metastatic_samples(num_funct_copies_DF_sub, FALSE)}
     }
     
     name <- names(patient_cancer_mapping)[i]
     protein_ids_df_spec <- protein_ids_df[[name]]
     
     # Run the model with these subsetted files
-    lm_input_tables <- create_lm_input_table(protein_ids_df = protein_ids_df_spec, 
-                                            downstream_target_df = targets_DF, 
-                                            patient_df = patient_df_sub,
-                                            mutation_df_targ =  mutation_targ_df_sub,
-                                            #mutation_df_regprot = mutation_regprot_df_sub, 
-                                            methylation_df = methylation_df_sub, 
-                                            methylation_df_meQTL = methylation_df_meQTL_sub,
-                                            cna_df = cna_df_sub,
-                                            expression_df = expression_df_sub, 
-                                            is_rank_or_quant_norm = is_rank_or_quant_norm,
-                                            log_expression = log_expression,
-                                            analysis_type = args$QTLtype,
-                                            tumNormMatched = tumNormMatched,
-                                            randomize = randomize,
-                                            cna_bucketing = args$cna_bucketing,
-                                            meth_bucketing = meth_bucketing,
-                                            num_PEER = args$num_PEER,
-                                            num_pcs = args$num_pcs,
-                                            debug = debug,
-                                            outpath = outpath_i, 
-                                            removeCis = removeCis,
-                                            removeMetastatic = removeMetastatic,
-                                            all_genes_id_conv = all_genes_id_conv,
-                                            useNumFunctCopies = useNumFunctCopies,
-                                            num_funct_copies_df = num_funct_copies_DF,
-                                            incl_nextMutDriver = incl_nextMutDriver,
-                                            run_query_genes_jointly = runRegprotsJointly,
-                                            dataset = args$dataset,
-                                            filename_labels = filename_labels)
+    # Create regulatory protein starter DF
+    starter_df <- create_regulatory_prot_input_df(protein_ids_df = protein_ids_df_spec, 
+                                                  patient_df = patient_df_sub, 
+                                                  mutation_df_targ = mutation_targ_df_sub, 
+                                                  methylation_df = methylation_df_sub, 
+                                                  methylation_df_meQTL = methylation_df_meQTL_sub, 
+                                                  cna_df = cna_df_sub, 
+                                                  num_funct_copies_df = num_funct_copies_DF,
+                                                  analysis_type = args$QTLtype, 
+                                                  tumNormMatched = tumNormMatched, 
+                                                  debug = debug, filename_labels = filename_labels,
+                                                  cna_bucketing = args$cna_bucketing, 
+                                                  meth_bucketing = meth_bucketing, 
+                                                  useNumFunctCopies = useNumFunctCopies, 
+                                                  outpath = outpath_i, num_PEER = args$num_PEER, 
+                                                  num_pcs = args$num_pcs, removeCis = removeCis, 
+                                                  removeMetastatic = removeMetastatic, 
+                                                  incl_nextMutDriver = incl_nextMutDriver, 
+                                                  dataset = args$dataset, 
+                                                  run_query_genes_jointly = runRegprotsJointly)
+    
+    
+    lm_input_tables <- create_lm_input_table(starter_df = starter_df, 
+                                             downstream_target_df = targets_DF, 
+                                             #patient_df = patient_df_sub,
+                                             mutation_df_targ = mutation_targ_df_sub,
+                                             methylation_df = methylation_df_sub, 
+                                             methylation_df_meQTL = methylation_df_meQTL_sub,
+                                             cna_df = cna_df_sub,
+                                             expression_df = expression_df_sub, 
+                                             num_funct_copies_df = num_funct_copies_DF,
+                                             is_rank_or_quant_norm = is_rank_or_quant_norm,
+                                             log_expression = log_expression,
+                                             analysis_type = args$QTLtype,
+                                             tumNormMatched = tumNormMatched,
+                                             randomize = randomize,
+                                             cna_bucketing = args$cna_bucketing,
+                                             meth_bucketing = meth_bucketing,
+                                             useNumFunctCopies = useNumFunctCopies,
+                                             debug = debug,
+                                             outpath = outpath_i, 
+                                             fixed_lambda_for_rand = NA,
+                                             removeCis = removeCis,
+                                             removeMetastatic = removeMetastatic,
+                                             all_genes_id_conv = all_genes_id_conv,
+                                             dataset = args$dataset,
+                                             filename_labels = filename_labels)
     
     return(lm_input_tables)
   })

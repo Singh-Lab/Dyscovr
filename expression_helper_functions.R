@@ -1,6 +1,6 @@
 ############################################################
 ### Expression Helper Functions
-### Written By: Sara Camilli, April 2021
+### Written By: Sara Geraghty, April 2021
 ############################################################
 
 # This file contains helper functions for the visualization of expression profiles of 
@@ -37,6 +37,9 @@ ttn_ensg <- "ENSG00000155657"
 kras <- "P01116"
 kras_ensg <- "ENSG00000133703"
 
+idh1 <- "O75874"
+idh1_ensg <- "ENSG00000138413"
+
 ############################################################
 ### IMPORT FILES NECESSARY TO CREATE A STARTER DF FOR THIS
 ### PROTEIN OF INTEREST
@@ -48,6 +51,8 @@ mutation_targ_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/GeneTarg_
                              header = TRUE, row.names = 1, check.names = FALSE)
 mutation_regprot_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Regprot_Mutation/iprotein_results_nonsynonymous_IntersectPatients.csv", sep = ""), 
                                 header = TRUE, row.names = 1, check.names = FALSE)
+mutation_count_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/GeneTarg_Mutation/mut_count_matrix_nonsynonymous_uniformHypermutRm_IntersectPatientsWashU.csv", sep = ""), 
+                              header = TRUE, row.names = 1, check.names = FALSE)
 cna_df <- read.csv(paste(main_path, "Linear Model/Tumor_Only/CNV/CNA_AllGenes_CancerOnly_IntersectPatients.csv", sep = ""), 
                    header = TRUE, row.names = 1, check.names = FALSE)
 rownames(cna_df) <- unlist(lapply(rownames(cna_df), function(x) unlist(strsplit(x, ".", fixed = TRUE))[1]))
@@ -79,8 +84,11 @@ ensg <- "ENSG00000073584"
 ############################################################
 expression_df_fpkm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_fpkm_CancerOnly_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
 expression_df_tmm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_tmmSDGr1filtByExpr_CancerOnly_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
-expression_df_quantile_norm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_quantile_norm_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
+expression_df_quantile_norm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_quantile_norm_uniformHypermutRm_IntersectPatientsWashU.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
 expression_df_rank_norm <- read.csv(paste(main_path, "Linear Model/Tumor_Only/Expression/expression_rank_norm_IntersectPatients.csv", sep = ""), header = TRUE, row.names = 1, check.names = FALSE)
+
+expression_df_tmm_tumAndNorm <- read.csv(paste0(main_path, "Expression/ALL_CT_tmm_normalized_expression_counts.csv"), 
+                                         header = T, check.names = F, row.names = 1)
 
 ############################################################
 ### CREATE OUTLIER FILTERED FPKM AND TMM DATAFRAMES
@@ -151,7 +159,7 @@ visualize_tg_expression_cvn <- function(expression_df, ensg) {
   boxplot(dataList, ylab = "Expression")
   
   #simple t-test
-  ttest_res <- t.test(expression_normal, expression_cancer)
+  ttest_res <- t.test(expression_normal, expression_cancer, alternative = "less")
   print(ttest_res$p.value)
 }
 
@@ -170,11 +178,20 @@ get_mutant_patients <- function(mutation_regprot_df, regprot_name) {
   return(mutant_patients)
 }
 
+get_mutant_patients2 <- function(mutation_count_matrix, regprot_name) {
+  regprot_row <- mutation_count_matrix[mutation_count_matrix$Gene_Symbol == regprot_name, ]
+  ind <- which(as.integer(regprot_row) > 0)
+  return(colnames(regprot_row)[ind])
+}
+
+
 mutation_regprot_df <- as.data.frame(mutation_regprot_df)
 foxa1_mutant_patients <- get_mutant_patients(mutation_regprot_df, "FOXA1")
 tp53_mutant_patients <- get_mutant_patients(mutation_regprot_df, "P53")
 pik3ca_mutant_patients <- get_mutant_patients(mutation_regprot_df, "PK3CA")
 kras_mutant_patients <- get_mutant_patients(mutation_regprot_df, "KRAS")
+idh1_mutant_patients <- get_mutant_patients(mutation_regprot_df, "IDH1")
+slc1a5_mutant_patients <- get_mutant_patients(mutation_regprot_df, "SLC1A5")
 
 #' Get a vector of patients that have a deletion in this given regulatory protein 
 #' @param cna_df a data frame with information about CNAs in given genes
@@ -201,6 +218,41 @@ pik3ca_amplified_patients <- get_amplified_patients(cna_df, pik3ca_ensg)
 
 pik3ca_disrupted_patients <- unique(c(pik3ca_amplified_patients, pik3ca_mutant_patients))
 
+get_methylated_patients <- function(methylation_df, regprot) {
+  methylation_df_regprot <- methylation_df[methylation_df$Gene_Symbol == regprot, 3:ncol(methylation_df), with = F]
+  samps <- unlist(lapply(3:ncol(methylation_df_regprot), function(i) {
+    x <- as.numeric(unlist(methylation_df_regprot[, i, with = F]))
+    print(x)
+    if(x > 0) {return(colnames(methylation_df)[i])}  # should be 0 -- see paper: https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-11-587
+    else {return(NA)}
+  }))
+  samps <- samps[!is.na(samps)]
+  return(samps)
+}
+
+slc1a5_methylated_patients <- get_methylated_patients(methylation_df_M, "SLC1A5")
+kras_methylated_patients <- get_methylated_patients(methylation_df_M, "KRAS")
+cic_methylated_patients <- get_methylated_patients(methylation_df_M, "CIC")
+
+# Additional methylation-based visualizations
+methylation_df_slc1a5 <- methylation_df_M[methylation_df_M$Gene_Symbol == "SLC1A5", 3:ncol(methylation_df_M), with = F]
+methylation_df_slc1a5 <- as.data.frame(t(methylation_df_slc1a5))
+colnames(methylation_df_slc1a5)[1] <- "M.value"
+methylation_df_slc1a5[,'IDH1'] <- unlist(lapply(rownames(methylation_df_slc1a5), function(id) ifelse(id %in% idh1_mutant_pats, 1, 0)))
+methylation_df_slc1a5$IDH1 <- as.factor(methylation_df_slc1a5$IDH1)
+methylation_df_slc1a5$Sample <- rownames(methylation_df_slc1a5)
+ggplot(methylation_df_slc1a5, aes(x = reorder(Sample, -M.value), y = M.value, fill = IDH1)) + geom_bar(stat="identity") + 
+  scale_fill_manual(values = c("red", "blue")) + xlab("TCGA Sample") + ylab("M.value")
+ggplot(methylation_df_slc1a5, aes(x = IDH1, y = M.value, fill = IDH1)) + geom_boxplot() + scale_fill_manual(values = c("red", "blue")) 
+expression_df_quantile_norm_slc1a5 <- expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", ]
+methylation_df_slc1a5[,'Expr'] <- unlist(lapply(rownames(methylation_df_slc1a5), function(id) {
+  if(id %in% colnames(expression_df_quantile_norm_slc1a5)) {
+    return(as.numeric(expression_df_quantile_norm_slc1a5[,colnames(expression_df_quantile_norm_slc1a5) == id]))}
+  else{return(NA)}
+}))
+ggplot(methylation_df_slc1a5, aes(x = M.value, y = Expr)) + geom_point(colour="white", shape=21, size = 2, aes(fill = IDH1)) + 
+  scale_fill_manual(values = c("red", "blue")) 
+
 
 # Limit the expression data frame to just cancer samples
 express_df_cancer_counts <- expression_df_counts[,!(grepl("-11", colnames(expression_df_counts)))]
@@ -222,8 +274,8 @@ express_df_cancer_tmm_filt_foxa1 <- expression_df_tmm_filt_foxa1[,!(grepl("-11",
 #' @param ensg the ENSG ID of the target gene of interest
 get_expression_by_mut_group <- function(express_df_cancer, mutant_patients, ensg) {
   #colnames(express_df_cancer) <- unlist(lapply(colnames(express_df_cancer), function(x) unlist(strsplit(x, "-", fixed = TRUE))[1]))
-  expression_mutants <- as.numeric(express_df_cancer[rownames(express_df_cancer) == ensg, colnames(express_df_cancer) %in% mutant_patients])
-  expression_normal <- as.numeric(express_df_cancer[rownames(express_df_cancer) == ensg, !(colnames(express_df_cancer) %in% mutant_patients)])
+  expression_mutants <- as.numeric(express_df_cancer[rownames(express_df_cancer) == ensg, colnames(express_df_cancer) %fin% mutant_patients])
+  expression_normal <- as.numeric(express_df_cancer[rownames(express_df_cancer) == ensg, !(colnames(express_df_cancer) %fin% mutant_patients)])
   return(list("mutants" = expression_mutants, "normal" = expression_normal))
 }
 
@@ -331,6 +383,8 @@ make_expression_by_mut_group_vis <- function(mutant_patients, ensg, tg_name, reg
   expression_tmm_filt_normal <- expression_tmm_filt[[2]]
   dataList_tmm_filt <- list("No Mutation" = expression_tmm_filt_normal, "Mutation" = expression_tmm_filt_mutants)
   boxplot(dataList_tmm_filt, ylab = "Expression (TMM, Outliers Filtered)", main = paste(tg_name, paste("Expression By", paste(regprot_name, "Mutation Status"))))
+  # ggplot2 option:
+  ggplot(melt(dataList_tmm_filt), aes(x = L1, y = value)) + geom_boxplot()
   
   # Quantile-Normalized
   expression_quantile_norm <- get_expression_by_mut_group(express_df_cancer_quant_norm, mutant_patients, ensg)
@@ -338,6 +392,25 @@ make_expression_by_mut_group_vis <- function(mutant_patients, ensg, tg_name, reg
   expression_quantile_norm_normal <- expression_quantile_norm[[2]]
   dataList_quantile_norm <- list("No Mutation" = expression_quantile_norm_normal, "Mutation" = expression_quantile_norm_mutants)
   boxplot(dataList_quantile_norm, ylab = "Expression (Quantile-Normalized)", main = paste(tg_name, paste("Expression By", paste(regprot_name, "Mutation Status"))))
+  
+  # Option to add additional factors
+  expression_mutants_SLC1A5Amp <- as.numeric(expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", colnames(expression_df_quantile_norm) %in% intersect(idh1_mutant_pats, slc1a5_amplified_patients)])
+  expression_mutants_SLC1A5Del <- as.numeric(expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", colnames(expression_df_quantile_norm) %in% intersect(idh1_mutant_pats, slc1a5_deleted_patients)])
+  expression_normal_SLC1A5Amp <- as.numeric(expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", !(colnames(expression_df_quantile_norm) %in% idh1_mutant_pats) & (colnames(expression_df_quantile_norm) %in% slc1a5_amplified_patients)])
+  expression_normal_SLC1A5Del <- as.numeric(expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", !(colnames(expression_df_quantile_norm) %in% idh1_mutant_pats) & (colnames(expression_df_quantile_norm) %in% slc1a5_deleted_patients)])
+  dataList_quantile_norm <- list("No Mutation, SLC1A5 Amplified" = expression_normal_SLC1A5Amp, "No Mutation, SLC1A5 Deleted" = expression_normal_SLC1A5Del, "Mutation, SLC1A5 Amplified" = expression_mutants_SLC1A5Amp, "Mutation, SLC1A5 Deleted" = expression_mutants_SLC1A5Del)
+  boxplot(dataList_quantile_norm, ylab = "Expression (Quantile-Normalized)", main = paste("SLC1A5", paste("Expression By", paste("IDH1", "Mutation Status"))))
+  
+  expression_mutants_krasmeth <- as.numeric(expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", colnames(expression_df_quantile_norm) %in% intersect(idh1_mutant_pats_lgg, kras_methylated_patients)])
+  expression_mutants_notkrasmeth <- as.numeric(expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", colnames(expression_df_quantile_norm) %in% setdiff(idh1_mutant_pats_lgg, kras_methylated_patients)])
+  expression_normal_krasmeth <- as.numeric(expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", !((colnames(expression_df_quantile_norm) %in% idh1_mutant_pats_lgg) | (colnames(expression_df_quantile_norm) %in% kras_methylated_patients))])
+  expression_normal_notkrasmeth <- as.numeric(expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", !(colnames(expression_df_quantile_norm) %in% idh1_mutant_pats_lgg) & (colnames(expression_df_quantile_norm) %in% kras_methylated_patients)])  
+  
+  expression_mutants_slc1a5meth <- as.numeric(expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", colnames(expression_df_quantile_norm) %in% intersect(idh1_mutant_pats_lgg, slc1a5_methylated_patients)])
+  expression_mutants_notslc1a5meth <- as.numeric(expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", colnames(expression_df_quantile_norm) %in% setdiff(idh1_mutant_pats_lgg, slc1a5_methylated_patients)])
+  expression_normal_notslc1a5meth <- as.numeric(expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", !((colnames(expression_df_quantile_norm) %in% idh1_mutant_pats_lgg) | (colnames(expression_df_quantile_norm) %in% slc1a5_methylated_patients))])
+  expression_normal_slc1a5meth <- as.numeric(expression_df_quantile_norm[rownames(expression_df_quantile_norm) == "ENSG00000105281", !(colnames(expression_df_quantile_norm) %in% idh1_mutant_pats_lgg) & (colnames(expression_df_quantile_norm) %in% slc1a5_methylated_patients)])  
+  boxplot(list("No Mutation, SLC1A5 Methylated" = expression_normal_notslc1a5meth, "No Mutation, SLC1A5 Not Methylated" = expression_normal_slc1a5meth, "Mutation, SLC1A5 Methylated" = expression_mutants_slc1a5meth, "Mutation, SLC1A5 Not Methylated" = expression_mutants_notslc1a5meth), ylab = "Expression (Rank-Normalized)", main = paste("SLC1A5", paste("Expression By", paste("IDH1", "Mutation Status"))))
   
   # Rank-Normalized
   expression_rank_norm <- get_expression_by_mut_group(express_df_cancer_rank_norm, mutant_patients, ensg)

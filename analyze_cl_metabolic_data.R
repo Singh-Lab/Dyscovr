@@ -98,6 +98,7 @@ get_mutation_metabol_corr_for_goi <- function(mutation_corr, goi, t_thres, outpa
 tp53_mut_df <- get_mutation_metabol_corr_for_goi(mut_metabol_corr, "TP53", 2.0, path)
 pik3ca_mut_df <- get_mutation_metabol_corr_for_goi(mut_metabol_corr, "PIK3CA", 2.0, path)
 kras_mut_df <- get_mutation_metabol_corr_for_goi(mut_metabol_corr, "KRAS", 2.0, path)
+idh1_mut_df <- get_mutation_metabol_corr_for_goi(mut_metabol_corr, "IDH1", 2.0, path)
 
 
 ################################################################
@@ -163,7 +164,8 @@ gene_to_metabol_mapping$metabolite_list_names <- unlist(lapply(gene_to_metabol_m
 #' metabolites produced from Recon3D and Antonio's code
 #' @param metabolite the name of a metabolite of interest
 get_prots_assoc_w_metabol <- function(gene_to_metabol_mapping, metabolite) {
-  return(paste(unlist(gene_to_metabol_mapping[grepl(metabolite, gene_to_metabol_mapping$metabolite_list_names, ignore.case = TRUE), 'ensembl_gene_id']),
+  return(paste(unlist(gene_to_metabol_mapping[grepl(metabolite, gene_to_metabol_mapping$metabolite_list_names, 
+                                                    ignore.case = TRUE), 'ensembl_gene_id']),
                collapse = ","))
 }
 
@@ -174,6 +176,8 @@ tp53_mut_df$Assoc.Genes <- lapply(tp53_mut_df$Metabolite, function(metabol)
 pik3ca_mut_df$Assoc.Genes <- lapply(pik3ca_mut_df$Metabolite, function(metabol) 
   return(get_prots_assoc_w_metabol(gene_to_metabol_mapping, metabol)))
 kras_mut_df$Assoc.Genes <- lapply(kras_mut_df$Metabolite, function(metabol) 
+  return(get_prots_assoc_w_metabol(gene_to_metabol_mapping, metabol)))
+idh1_mut_df$Assoc.Genes <- lapply(idh1_mut_df$Metabolite, function(metabol) 
   return(get_prots_assoc_w_metabol(gene_to_metabol_mapping, metabol)))
 
 # Add another column with associated gene names
@@ -204,6 +208,15 @@ kras_mut_df$Assoc.Gene.Names <- unlist(lapply(kras_mut_df$Assoc.Genes, function(
   names_char <- paste(names, collapse = ",")
   return(names_char)
 }))
+idh1_mut_df$Assoc.Gene.Names <- unlist(lapply(idh1_mut_df$Assoc.Genes, function(x) {
+  ids <- unlist(strsplit(x, ",", fixed = TRUE))
+  names <- lapply(ids, function(id) {
+    return(paste(unique(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == id, 
+                                          'external_gene_name']), collapse = ";"))
+  })
+  names_char <- paste(names, collapse = ",")
+  return(names_char)
+}))
 
 # Add a column that, for each protein name, annotates whether it's a significant hit
 # from the model
@@ -225,11 +238,17 @@ kras_mut_df$Signif.Hit <- unlist(lapply(kras_mut_df$Assoc.Gene.Names, function(x
   in_signif_hits <- unlist(lapply(names, function(n) ifelse(n %in% kras_signif_hits, TRUE, FALSE)))
   return(paste(in_signif_hits, collapse = ","))
 }))
+idh1_signif_hits <- unlist(master_df[master_df$q.value < 0.2, 'T_k.name'])
+idh1_mut_df$Signif.Hit <- unlist(lapply(idh1_mut_df$Assoc.Gene.Names, function(x) {
+  names <- unlist(strsplit(x, ",", fixed = TRUE))
+  in_signif_hits <- unlist(lapply(names, function(n) ifelse(n %in% idh1_signif_hits, TRUE, FALSE)))
+  return(paste(in_signif_hits, collapse = ","))
+}))
 
 print(intersect(tp53_signif_hits, unlist(strsplit(as.character(unlist(tp53_mut_df$Assoc.Gene.Names)), ",", fixed = TRUE))))
 print(intersect(pik3ca_signif_hits, unlist(strsplit(as.character(unlist(pik3ca_mut_df$Assoc.Gene.Names)), ",", fixed = TRUE))))
 print(intersect(kras_signif_hits, unlist(strsplit(as.character(unlist(kras_mut_df$Assoc.Gene.Names)), ",", fixed = TRUE))))
-
+print(intersect(idh1_signif_hits, unlist(strsplit(as.character(unlist(idh1_mut_df$Assoc.Gene.Names)), ",", fixed = TRUE))))
 
 #' Identify the significant correlations and print them
 #' @param mut_df a metabolism DF for a particular protein of interest 
@@ -255,6 +274,8 @@ print_signif_corr <- function(mut_df) {
 
 print_signif_corr(tp53_mut_df)
 print_signif_corr(pik3ca_mut_df)
+print_signif_corr(kras_mut_df)
+print_signif_corr(idh1_mut_df)
 
 
 # Check length of overlap between metabolic gene list inputs and genes from the paper
@@ -307,3 +328,19 @@ tp53_mut_df_genes_overlap_names <- unique(unlist(lapply(tp53_mut_df_genes_overla
 plot_target_assoc_w_metabol_enrichment(master_df_mut, tp53_mut_df_genes_overlap_names, 0.2)
 
 
+# Another option to analyze metabolic predictions from Antonio's model (June 2023)
+antonio_cl_predictions <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/Validation_Files/Metabolite-Gene Pair Candidates for KO Experiments - Candidate List.csv",
+                                   header = T, check.names = F, fill = T)
+antonio_interesting_genes <- unique(antonio_cl_predictions$Gene)
+
+# Is there overlap with my pan-cancer significant hits? 
+intersecting_genes <- intersect(antonio_interesting_genes, pc_allGenes[pc_allGenes$q.value < 0.05, 'T_k.name'])
+
+onec_gene_lists <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/1C_gene_lists.csv", 
+                            header = T, check.names = F)[,3:ncol(onec_gene_lists)]
+onec_genes <- unlist(onec_gene_lists)
+onec_genes <- onec_genes[onec_genes != ""]
+intersecting_genes <- intersect(onec_genes, pc_allGenes[pc_allGenes$q.value < 0.05, 'T_k.name'])  #21 at 0.01, 14 at 0.001, 10 at 0.0001, 6 at 0.00001
+intersecting_genes <- intersecting_genes[!(intersecting_genes %in% c(onec_gene_lists$Glycolysis, onec_gene_lists$TCA))]
+
+# MTHFD1L, MTHFD2, ALDH1L1, MAT2B, CHDH, ALDH7A1, SARDH, CHKA

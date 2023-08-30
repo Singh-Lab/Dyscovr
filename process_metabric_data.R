@@ -28,17 +28,11 @@ all_genes_id_conv <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Proje
 # Import mutation data file
 metabric_mutation_df <- read.table(paste0(main_path, "data_mutations.txt"), header = TRUE, 
                                    sep = "\t", check.names = FALSE)
-#metabric_MN_mutation_df <- metabric_mutation_df[(metabric_mutation_df$Variant_Classification == "Missense_Mutation") |
-                                                  #(metabric_mutation_df$Variant_Classification == "Nonsense_Mutation"),]
-# Use this file in the "process_mutation_data.R" pipeline to get the iprotein-level DF
 
 # Generate the mutation count matrices, using helper functions from maf_helper_functions.R
 clin_filename <- paste(main_path, "data_clinical_sample_sub.txt", sep = "")
 clinical_df <- read.table(clin_filename, header = TRUE, sep = ",")
 metabric_mutation_df <- metabric_mutation_df[metabric_mutation_df$Tumor_Sample_Barcode %fin% clinical_df$SAMPLE_ID,]
-metabric_mutation_df_missense <- metabric_mutation_df[metabric_mutation_df$Variant_Classification == "Missense_Mutation",]
-metabric_mutation_df_misAndNon <- metabric_mutation_df[(metabric_mutation_df$Variant_Classification == "Missense_Mutation") | 
-                                       (metabric_mutation_df$Variant_Classification == "Nonsense_Mutation"),]
 metabric_mutation_df_nonsynonymous <- metabric_mutation_df[(metabric_mutation_df$Variant_Classification == "Missense_Mutation") | 
                                            (metabric_mutation_df$Variant_Classification == "Nonsense_Mutation") |
                                            (metabric_mutation_df$Variant_Classification == "Splice_Site") |
@@ -46,13 +40,9 @@ metabric_mutation_df_nonsynonymous <- metabric_mutation_df[(metabric_mutation_df
 metabric_mutation_df_silent <- metabric_mutation_df[metabric_mutation_df$Variant_Classification == "Silent",]
 
 
-maf_missense <- read.maf(metabric_mutation_df_missense)
-maf_misAndNon <- read.maf(metabric_mutation_df_misAndNon)
 maf_nonsynon <- read.maf(metabric_mutation_df_nonsynonymous)
 maf_silent <- read.maf(metabric_mutation_df_silent, vc_nonSyn = "Silent")
   
-mut_count_matrix_missense <- get_mut_count_matrix(maf_missense)
-mut_count_matrix_misAndNon <- get_mut_count_matrix(maf_misAndNon)
 mut_count_matrix_nonsyn <- get_mut_count_matrix(maf_nonsynon)
 mut_count_matrix_silent <- get_mut_count_matrix(maf_silent)
 
@@ -72,19 +62,36 @@ get_unincluded_gene_df <- function(all_gene_names, mut_count_matrix) {
   return(unincluded_gene_df)
 }
 
-mut_count_matrix_missense_full <- rbind(mut_count_matrix_missense, 
-                                   get_unincluded_gene_df(all_gene_names, mut_count_matrix_missense))
-mut_count_matrix_misAndNon_full <- rbind(mut_count_matrix_misAndNon, 
-                                    get_unincluded_gene_df(all_gene_names, mut_count_matrix_misAndNon))
 mut_count_matrix_nonsyn_full <- rbind(mut_count_matrix_nonsyn, 
                                  get_unincluded_gene_df(all_gene_names, mut_count_matrix_nonsyn))
 mut_count_matrix_silent_full <- rbind(mut_count_matrix_silent, 
                                  get_unincluded_gene_df(all_gene_names, mut_count_matrix_silent))
 
-write.csv(mut_count_matrix_missense_full, paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense.csv"))
-write.csv(mut_count_matrix_misAndNon_full, paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense_nonsense.csv"))
 write.csv(mut_count_matrix_nonsyn_full, paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous.csv"))
 write.csv(mut_count_matrix_silent_full, paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_silent.csv"))
+
+# Read back if needed
+mut_count_matrix_nonsyn_full <- read.csv(paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous.csv"),
+                                         header = T, check.names = F, row.names = 1)
+mut_count_matrix_silent_full <- read.csv(paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_silent.csv"),
+                                         header = T, check.names = F, row.names = 1)
+
+############################################################
+### FILTER PATIENTS THAT EXCEED A FIXED HYPERMUTATOR THRESHOLD, IF NEEDED
+############################################################
+# Using uniform threshold of 368, as from paper (see TCGA analysis)
+thres <- 368
+
+# Limit to those samples below this threshold
+mut_count_matrix_nonsyn_colsums <- unlist(lapply(1:ncol(mut_count_matrix_nonsyn_full), function(i) {
+  vals <- as.integer(unlist(mut_count_matrix_nonsyn_full[,i]))
+  return(length(vals[vals > 0]))
+}))
+
+# Visualize this 
+hist(mut_count_matrix_nonsyn_colsums, main = "Total Mutation Counts per Patient, METABRIC", xlab = "Total # of Mutations")
+
+#mut_count_matrix_nonsyn_sub <- mut_count_matrix_nonsyn_full[, which(mut_count_matrix_nonsyn_colsums < thres)]
 
 ############################################################
 ### IMPORT CNA DATA
@@ -266,35 +273,21 @@ write.csv(combined_pat_samp_df, paste0(output_path, "Patient and Sample DFs/comb
 ############################################################
 
 ## MUTATION REGPROT DF ##
-metabric_mutation_df_missense <- read.csv(paste0(output_path, "Mutation/iprotein_results_missense.csv"), 
-                                          header = TRUE, check.names = FALSE)
-metabric_mutation_df_misAndNon <- read.csv(paste0(output_path, "Mutation/iprotein_results_missense_nonsense.csv"), 
-                                          header = TRUE, check.names = FALSE)
 metabric_mutation_df_nonsynonymous <- read.csv(paste0(output_path, "Mutation/iprotein_results_nonsynonymous.csv"), 
                                            header = TRUE, check.names = FALSE)
 metabric_mutation_df_silent <- read.csv(paste0(output_path, "Mutation/iprotein_results_silent.csv"), 
                                         header = TRUE, check.names = FALSE)
 
-metabric_mutation_df_missense$Swissprot <- unlist(lapply(metabric_mutation_df_missense$Query, function(x) 
-  unlist(strsplit(x, "|", fixed = TRUE))[2]))
-metabric_mutation_df_misAndNon$Swissprot <- unlist(lapply(metabric_mutation_df_misAndNon$Query, function(x) 
-  unlist(strsplit(x, "|", fixed = TRUE))[2]))
 metabric_mutation_df_nonsynonymous$Swissprot <- unlist(lapply(metabric_mutation_df_nonsynonymous$Query, function(x) 
   unlist(strsplit(x, "|", fixed = TRUE))[2]))
 metabric_mutation_df_silent$Swissprot <- unlist(lapply(metabric_mutation_df_silent$Query, function(x) 
   unlist(strsplit(x, "|", fixed = TRUE))[2]))
 
 ## MUTATION GENE TARG DF ##
-metabric_mutation_count_df_missense <- read.csv(paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense.csv"), 
-                                       header = TRUE, check.names = FALSE)
-metabric_mutation_count_df_misAndNon <- read.csv(paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_missense_nonsense.csv"), 
-                                                header = TRUE, check.names = FALSE)
 metabric_mutation_count_df_nonsynonymous <- read.csv(paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_nonsynonymous.csv"), 
                                                 header = TRUE, check.names = FALSE)
 metabric_mutation_count_df_silent <- read.csv(paste0(output_path, "Mutation/Mutation Count Matrices/mut_count_matrix_silent.csv"), 
                                                  header = TRUE, check.names = FALSE)
-colnames(metabric_mutation_count_df_missense)[1] <- 'Gene_Symbol'
-colnames(metabric_mutation_count_df_misAndNon)[1] <- 'Gene_Symbol'
 colnames(metabric_mutation_count_df_nonsynonymous)[1] <- 'Gene_Symbol'
 colnames(metabric_mutation_count_df_silent)[1] <- 'Gene_Symbol'
 
@@ -312,21 +305,10 @@ add_missing_patients_to_mut_count_mat <- function(mut_count_matrix, intersecting
   return(new_mut_count_mat)
 }
 
-metabric_mutation_count_df_missense <- add_missing_patients_to_mut_count_mat(metabric_mutation_count_df_missense, intersecting_patient_ids)
-metabric_mutation_count_df_misAndNon <- add_missing_patients_to_mut_count_mat(metabric_mutation_count_df_misAndNon, intersecting_patient_ids)
 metabric_mutation_count_df_nonsynonymous <- add_missing_patients_to_mut_count_mat(metabric_mutation_count_df_nonsynonymous, intersecting_patient_ids)
 metabric_mutation_count_df_silent <- add_missing_patients_to_mut_count_mat(metabric_mutation_count_df_silent, intersecting_patient_ids)
 
 # If the gene symbols are currently rownames and not the first column
-#metabric_mutation_count_df_missense <- cbind(data.frame("Gene_Symbol" = rownames(metabric_mutation_count_df_missense)), metabric_mutation_count_df_missense)
-#rownames(metabric_mutation_count_df_missense) <- 1:nrow(metabric_mutation_count_df_missense)
-#metabric_mutation_count_df_misAndNon <- cbind(data.frame("Gene_Symbol" = rownames(metabric_mutation_count_df_misAndNon)), metabric_mutation_count_df_misAndNon)
-#rownames(metabric_mutation_count_df_misAndNon) <- 1:nrow(metabric_mutation_count_df_misAndNon)
-
-metabric_mutation_count_df_missense$Swissprot <- unlist(lapply(metabric_mutation_count_df_missense$Gene_Symbol, function(x) 
-  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x,'uniprot_gn_id'])), collapse = ";")))
-metabric_mutation_count_df_misAndNon$Swissprot <- unlist(lapply(metabric_mutation_count_df_misAndNon$Gene_Symbol, function(x) 
-  paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x,'uniprot_gn_id'])), collapse = ";")))
 metabric_mutation_count_df_nonsynonymous$Swissprot <- unlist(lapply(metabric_mutation_count_df_nonsynonymous$Gene_Symbol, function(x) 
   paste(unique(unlist(all_genes_id_conv[all_genes_id_conv$external_gene_name == x,'uniprot_gn_id'])), collapse = ";")))
 metabric_mutation_count_df_silent$Swissprot <- unlist(lapply(metabric_mutation_count_df_silent$Gene_Symbol, function(x) 
@@ -364,17 +346,11 @@ colnames(metabric_patient_sample_df)[1] <- "sample_id"
 ############################################################
 ### ENSURE ALL IDS STILL OVERLAP
 ############################################################
-mutation_ids_missense <- unique(unlist(lapply(metabric_mutation_df_missense$Patient, function(x) 
-  unlist(strsplit(x, ";", fixed = TRUE)))))  #826
-mutation_ids_misAndNon <- unique(unlist(lapply(metabric_mutation_df_misAndNon$Patient, function(x) 
-  unlist(strsplit(x, ";", fixed = TRUE)))))  #834
 mutation_ids_nonsyn <- unique(unlist(lapply(metabric_mutation_df_nonsynonymous$Patient, function(x) 
   unlist(strsplit(x, ";", fixed = TRUE)))))  #819
 mutation_ids_silent <- unique(unlist(lapply(metabric_mutation_df_silent$Patient, function(x) 
   unlist(strsplit(x, ";", fixed = TRUE)))))  #512
 
-mutation_count_mat_ids_missense <- colnames(metabric_mutation_count_df_missense)[2:ncol(metabric_mutation_count_df_missense)]
-mutation_count_mat_ids_misAndNon <- colnames(metabric_mutation_count_df_misAndNon)[2:ncol(metabric_mutation_count_df_misAndNon)]
 mutation_count_mat_ids_nonsyn <- colnames(metabric_mutation_count_df_nonsynonymous)[2:ncol(metabric_mutation_count_df_nonsynonymous)]
 mutation_count_mat_ids_silent <- colnames(metabric_mutation_count_df_silent)[2:ncol(metabric_mutation_count_df_silent)]
 
@@ -399,15 +375,13 @@ write.table(intersecting_patients, "C:/Users/sarae/Documents/Mona Lab Work/Main 
 
 # Read back
 intersecting_patients <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/BRCA/cBioPortal/METABRIC/intersecting_ids.txt", 
-                                    header = FALSE)[,1]
+                                    header = T, check.names = F)[,1]
+
+
 
 ############################################################
 ### IF NECESSARY, SUBSET FINALIZED DATASETS BY INTERSECTING IDs
 ############################################################
-metabric_mutation_count_df_missense_sub <- metabric_mutation_count_df_missense[, c(1, which(colnames(metabric_mutation_count_df_missense) %in% 
-                                                                                         intersecting_patients))]
-metabric_mutation_count_df_misAndNon_sub <- metabric_mutation_count_df_misAndNon[, c(1, which(colnames(metabric_mutation_count_df_misAndNon) %in% 
-                                                                                           intersecting_patients))]
 metabric_mutation_count_df_nonsynonymous_sub <- metabric_mutation_count_df_nonsynonymous[, c(1, which(colnames(metabric_mutation_count_df_nonsynonymous) %in% 
                                                                                               intersecting_patients))]
 metabric_mutation_count_df_silent_sub <- metabric_mutation_count_df_silent[, c(1, which(colnames(metabric_mutation_count_df_silent) %in% 
@@ -448,32 +422,18 @@ get_mutation_df_new_patient_labels <- function(metabric_mutation_df, intersectin
   return(mutation_df_new_patient_labels)
 }
 
-metabric_mutation_df_missense_labels <- get_mutation_df_new_patient_labels(metabric_mutation_df_missense, 
-                                                                                 intersecting_patients)
-metabric_mutation_df_misAndNon_labels <- get_mutation_df_new_patient_labels(metabric_mutation_df_misAndNon, 
-                                                                                 intersecting_patients)
 metabric_mutation_df_nonsynonymous_labels <- get_mutation_df_new_patient_labels(metabric_mutation_df_nonsynonymous, 
                                                                                  intersecting_patients)
 metabric_mutation_df_silent_labels <- get_mutation_df_new_patient_labels(metabric_mutation_df_silent, 
                                                                                  intersecting_patients)
 
 # Remove NA
-metabric_mutation_df_missense_sub <- metabric_mutation_df_missense[unlist(lapply(metabric_mutation_df_missense_labels, function(x) 
-  ifelse(is.na(x), FALSE, TRUE))),]
-metabric_mutation_df_misAndNon_sub <- metabric_mutation_df_misAndNon[unlist(lapply(metabric_mutation_df_misAndNon_labels, function(x) 
-  ifelse(is.na(x), FALSE, TRUE))),]
 metabric_mutation_df_nonsynonymous_sub <- metabric_mutation_df_nonsynonymous[unlist(lapply(metabric_mutation_df_nonsynonymous_labels, function(x) 
   ifelse(is.na(x), FALSE, TRUE))),]
 metabric_mutation_df_silent_sub <- metabric_mutation_df_missense[unlist(lapply(metabric_mutation_df_silent_labels, function(x) 
   ifelse(is.na(x), FALSE, TRUE))),]
 
 # Update the DF with the new intersecting patient labels
-metabric_mutation_df_missense_sub$Patient <- metabric_mutation_df_missense_labels[!is.na(metabric_mutation_df_missense_labels)]
-metabric_mutation_df_missense_sub$Patient <- unlist(lapply(metabric_mutation_df_missense_sub$Patient, function(x) return(unlist(x))))
-
-metabric_mutation_df_misAndNon_sub$Patient <- metabric_mutation_df_misAndNon_labels[!is.na(metabric_mutation_df_misAndNon_labels)]
-metabric_mutation_df_misAndNon_sub$Patient <- unlist(lapply(metabric_mutation_df_misAndNon_sub$Patient, function(x) return(unlist(x))))
-
 metabric_mutation_df_nonsynonymous_sub$Patient <- metabric_mutation_df_nonsynonymous_labels[!is.na(metabric_mutation_df_nonsynonymous_labels)]
 metabric_mutation_df_nonsynonymous_sub$Patient <- unlist(lapply(metabric_mutation_df_nonsynonymous_sub$Patient, function(x) return(unlist(x))))
 
@@ -483,8 +443,6 @@ metabric_mutation_df_silent_sub$Patient <- unlist(lapply(metabric_mutation_df_si
 ############################################################
 ### WRITE THESE NEWLY SUBSETTED FILES BACK
 ############################################################
-write.csv(metabric_mutation_count_df_missense_sub, paste0(output_path, "Linear Model/mutation_count_df_missense_IntersectPatients.csv"))
-write.csv(metabric_mutation_count_df_misAndNon_sub, paste0(output_path, "Linear Model/mutation_count_df_missense_nonsense_IntersectPatients.csv"))
 write.csv(metabric_mutation_count_df_nonsynonymous_sub, paste0(output_path, "Linear Model/mutation_count_df_nonsynonymous_IntersectPatients.csv"))
 write.csv(metabric_mutation_count_df_silent_sub, paste0(output_path, "Linear Model/mutation_count_df_silent_IntersectPatients.csv"))
 
@@ -503,6 +461,10 @@ write.csv(metabric_mutation_df_nonsynonymous_sub, paste0(output_path, "Linear Mo
 write.csv(metabric_mutation_df_silent_sub, paste0(output_path, "Linear Model/iprotein_mutation_df_silent.csv"))
 
 
+# Read back
+metabric_mutation_df_nonsynonymous_sub <- read.csv(paste0(output_path, "Linear Model/mutation_count_df_nonsynonymous_IntersectPatients.csv"),
+                                                   header = T, check.names = F)
+
 #############################################################
 ### GENERATE PROTEIN INPUT TABLES (DRIVERS)
 #############################################################
@@ -510,39 +472,30 @@ write.csv(metabric_mutation_df_silent_sub, paste0(output_path, "Linear Model/ipr
 driver_gene_df <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/GRCh38_driver_gene_list.tsv", 
                            sep = "\t", header = TRUE, comment.char = "#", skip = 10)
 
-iprotein_prots_missense <- unique(metabric_mutation_df_missense_sub$Swissprot)  # 122 unique mutated proteins
-iprotein_prots_misAndNon <- unique(metabric_mutation_df_misAndNon_sub$Swissprot)  # 122 unique mutated proteins
 iprotein_prots_nonsyn <- unique(metabric_mutation_df_nonsynonymous_sub$Swissprot)  # 122 unique mutated proteins
 iprotein_prots_silent <- unique(metabric_mutation_df_silent_sub$Swissprot)  # 122 unique mutated proteins
 
 # Proceed with nonsynonymous mutations; use functions from 'generate_protein_input_tables.R'
-iprotein_prots_ensg <- convert_to_ensembl(iprotein_prots_nonsyn)
-
+#iprotein_prots_ensg <- convert_to_ensembl(iprotein_prots_nonsyn)
 # Create initial DF with all proteins
-recombine_into_df_and_write(iprotein_prots, iprotein_prots_ensg, "iprotein", prot_path)
+#recombine_into_df_and_write(iprotein_prots, iprotein_prots_ensg, "iprotein", prot_path)
 
-# Call filter to include only proteins mutated in at least 5 patients, and at least 2.5% or 5% of patients
-
+# Call filter to include only proteins mutated in at least 5 patients, and at least 5% of patients
 # Nonsynonymous
-regprot_input_df_all_5perc <- create_regulatory_prot_input_df(metabric_mutation_df_nonsynonymous, 
-                                                              0.05, 5, "i-protein", intersecting_patients, 
+regprot_input_df_all_5perc <- create_regulatory_prot_input_df(as.data.table(metabric_mutation_df_nonsynonymous_sub), 
+                                                              0.05, 5, NA, intersecting_patients, "i-protein", intersecting_patients, 
                                                               NA, all_genes_id_conv, NA, NA, "METABRIC")
-regprot_input_df_driver_5perc <- create_regulatory_prot_input_df(metabric_mutation_df_nonsynonymous, 
-                                                                 0.05, 5, "i-protein", intersecting_patients, 
+regprot_input_df_driver_5perc <- create_regulatory_prot_input_df(as.data.table(metabric_mutation_df_nonsynonymous_sub), 
+                                                                 0.05, 5, NA, intersecting_patients, "i-protein", intersecting_patients, 
                                                                  driver_gene_df, all_genes_id_conv, NA, NA, "METABRIC")
 
-regprot_input_df_all_2.5perc <- create_regulatory_prot_input_df(metabric_mutation_df_nonsynonymous, 
-                                                              0.025, 5, "i-protein", intersecting_patients, 
-                                                              NA, all_genes_id_conv, NA, NA, "METABRIC")
-regprot_input_df_driver_2.5perc <- create_regulatory_prot_input_df(metabric_mutation_df_nonsynonymous, 
-                                                                 0.025, 5, "i-protein", intersecting_patients, 
-                                                                 driver_gene_df, all_genes_id_conv, NA, NA, "METABRIC")
+# Print out the names of the drivers that were written to a given file
+print(paste(unique(unlist(lapply(regprot_input_df_driver_5perc$swissprot_ids, function(id) 
+  all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == id, 'external_gene_name']))), collapse = ", "))
 
 
 write.csv(regprot_input_df_all_5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_all_nonsynonymous.csv"))
 write.csv(regprot_input_df_driver_5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_drivers_nonsynonymous.csv"))
-write.csv(regprot_input_df_all_2.5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.025Freq_all_nonsynonymous.csv"))
-write.csv(regprot_input_df_driver_2.5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.025Freq_drivers_nonsynonymous.csv"))
 
 
 # Repeat this for individual subtypes
@@ -586,15 +539,5 @@ regprot_input_df_driver_5perc_lumA <- create_regulatory_prot_input_df(metabric_m
                                                                  0.05, 5, "i-protein", patient_set_lumA, 
                                                                  driver_gene_df, all_genes_id_conv, NA, NA, "METABRIC")
 
-regprot_input_df_all_2.5perc_lumA <- create_regulatory_prot_input_df(metabric_mutation_df_nonsynonymous_lumA, 
-                                                                0.025, 5, "i-protein", patient_set_lumA, 
-                                                                NA, all_genes_id_conv, NA, NA, "METABRIC")
-regprot_input_df_driver_2.5perc_lumA <- create_regulatory_prot_input_df(metabric_mutation_df_nonsynonymous_lumA, 
-                                                                   0.025, 5, "i-protein", patient_set_lumA, 
-                                                                   driver_gene_df, all_genes_id_conv, NA, NA, "METABRIC")
-
-
 write.csv(regprot_input_df_all_5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_all_nonsynonymous.csv"))
 write.csv(regprot_input_df_driver_5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.05Freq_drivers_nonsynonymous.csv"))
-write.csv(regprot_input_df_all_2.5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.025Freq_all_nonsynonymous.csv"))
-write.csv(regprot_input_df_driver_2.5perc, paste0(output_path, "Mutation/Files for Linear Model/iprotein_protein_ids_df_gr0.025Freq_drivers_nonsynonymous.csv"))

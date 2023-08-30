@@ -3,12 +3,11 @@
 ### Written By: Sara Geraghty, July 2020
 ############################################################
 
-# This file uses a clinical data frame, and a variable declaring whether the data of interest
-# is or is not breast cancer, to create an output "patient data frame" that will be used in the linear
+# This file uses a clinical data frame to create an output "patient data frame" that will be used in the linear
 # model. This data frame has the following format:
-  # Columns: Linear model input variables (Gender, Age (buckets 1-10), Race (buckets 1-5), 
+  # Columns: Linear model input variables (Gender, Age (buckets 1-10, or normalized), Race (buckets 1-5), 
     # Prior malignancies, Treatment-radiation, Treatment-pharmacological, Cancer Type or Subtype,
-    # and first 2 PCs generated from genotype matrices)
+    # and first 3 PCs generated from genotype matrices, and proximal SNP terms)
   # Rows: Patients that have all necessary data types 1...j...L (Unique ID)
   # Entries: 0 or 1 values
 
@@ -131,8 +130,6 @@ cna_neighbor_df <- fread(paste0(main_path, "CNV/cna_neighbor_df_full.csv"))
 ### TCGA ###
 brca_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, brca_subtype, 
                                                  is_pc, NA, NA, FALSE, 'tcga')
-pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, pc_subtype, 
-                                               is_pc, NA, NA, FALSE, 'tcga')
 
 # Alternatively, get BRCA subtypes in a pan-cancer DF
 pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
@@ -157,9 +154,43 @@ additional_subtype_info_list <- list("COAD.READ" = coad_subtype)
 pc_patient_df_ntnm <- create_patient_dataframe(clinical_df_ntnm, is_brca, 
                                                pc_subtype, is_pc, additional_subtype_info_list, 
                                                NA, FALSE, 'tcga')
-pc_patient_df_ntnm_new <- create_patient_dataframe(clinical_df, is_brca, 
+pc_patient_df_ntnm <- create_patient_dataframe(clinical_df, is_brca, 
                                                    NA, is_pc, pc_subtype, 
                                                    NA, FALSE, 'tcga')
+
+# Add patients without subtype info to the pan-cancer DF
+last_ct <- colnames(pc_patient_df_ntnm)[ncol(pc_patient_df_ntnm)]  #143
+curr_b <- 143+1
+new_rows <- list(pc_patient_df_ntnm)
+new_rows_index <- 2
+
+for(i in 1:length(pan_cancer_patient_dfs_pt2)) {
+  df <- pan_cancer_patient_dfs_pt2[[i]]
+  # Add in the missing cancer type info
+  df_blank <- data.frame(matrix(nrow = nrow(df), ncol = ncol(pc_patient_df_ntnm[,grepl("Cancer_type", colnames(pc_patient_df_ntnm))]) + 
+                                  length(pan_cancer_patient_dfs_pt2)))
+  df_blank[is.na(df_blank)] <- 0
+  df_full <- cbind(df, df_blank)
+  colnames(df_full) <- c(colnames(df), paste0("Cancer_type_b", 1:(ncol(pc_patient_df_ntnm[,grepl("Cancer_type", colnames(pc_patient_df_ntnm))]) + 
+                                                                    length(pan_cancer_patient_dfs_pt2))))
+  print(head(df_full))
+  
+  # Add in a new cancer type
+  df_full[, curr_b] <- rep(1, times = nrow(df_full))
+
+  new_rows[[new_rows_index]] <- as.data.frame(df_full)
+  curr_b <- curr_b + 1
+  new_rows_index <- new_rows_index + 1
+}
+
+df_blank <- data.frame(matrix(nrow = nrow(pc_patient_df_ntnm), ncol = length(pan_cancer_patient_dfs_pt2)))
+df_blank[is.na(df_blank)] <- 0
+# Reset curr_b
+curr_b <- 143+1
+colnames(df_blank) <- paste0("Cancer_type_b", (curr_b):(curr_b+(length(pan_cancer_patient_dfs_pt2)-1)))
+pc_patient_df_ntnm <- cbind(pc_patient_df_ntnm, df_blank)
+
+pc_patient_df_ntnm_new <- do.call(rbind, new_rows)
 
 # Write this to a CSV
 write.csv(brca_patient_df_tnm, paste(main_path, "Linear Model/Patient and Sample DFs/patient_dataframe_tnm.csv", sep = ""))
@@ -197,9 +228,9 @@ names(pan_cancer_patient_dfs_pt2) <- cancer_types_no_subtype_info
 pan_cancer_patient_dfs_full <- c(pan_cancer_patient_dfs, pan_cancer_patient_dfs_pt2)
 
 # Write to files
-lapply(1:length(pan_cancer_patient_dfs), function(i) {
-  fn <- paste0("patient_dataframe_ntnm_normAge_", paste0(names(pan_cancer_patient_dfs)[i], "_inclSubtypes.csv"))
-  write.csv(pan_cancer_patient_dfs[[i]], paste0(main_path, paste0("Linear Model/Patient and Sample DFs/", fn)))
+lapply(1:length(pan_cancer_patient_dfs_full), function(i) {
+  fn <- paste0("patient_dataframe_ntnm_normAge_", paste0(names(pan_cancer_patient_dfs_full)[i], "_inclSubtypes.csv"))
+  write.csv(pan_cancer_patient_dfs_full[[i]], paste0(main_path, paste0("Linear Model/Patient and Sample DFs/", fn)))
 })
 
 
@@ -257,9 +288,16 @@ create_patient_dataframe <- function(clinical_df, is_brca, subtype_file, is_pc,
                                  "Prior_malig", "Treatment_rad", "Treatment_pharm",
                                  "Tot_Mut_b1", "Tot_Mut_b2", "Tot_Mut_b3", "PC1", "PC2", "PC3")
   }
-  if(length(subtype_file) > 1) {
-    patient_characteristics <- add_cancer_type(patient_characteristics, is_pc, subtype_file,
-                                               additional_subtype_info, clinical_df, dataset)
+  if(length(additional_subtype_info) >= 1) {
+    if(length(additional_subtype_info) == 1) {
+      if(!is.na(additional_subtype_info)) {
+        patient_characteristics <- add_cancer_type(patient_characteristics, is_pc, subtype_file,
+                                                   additional_subtype_info, clinical_df, dataset)
+      }
+    } else {
+      patient_characteristics <- add_cancer_type(patient_characteristics, is_pc, subtype_file,
+                                                 additional_subtype_info, clinical_df, dataset)
+    }
   }
   print(patient_characteristics)
   
@@ -414,10 +452,20 @@ input_patient_specific_info <- function(input_df, clinical_df, is_brca, subtype_
   
   # CANCER TYPE OR SUBTYPE
   if(length(subtype_file) >= 1) {
-    cancer_type_bin_df <- convert_ct_to_bins(subtype_file, clinical_df, input_dataframe_updated, 
-                                             is_pc, additional_subtype_info, dataset)
-    input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated,
-                                                           cancer_type_bin_df)
+    if(length(subtype_file) == 1) {
+      if(!is.na(subtype_file)) {
+        cancer_type_bin_df <- convert_ct_to_bins(subtype_file, clinical_df, input_dataframe_updated, 
+                                                 is_pc, additional_subtype_info, dataset)
+        input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated,
+                                                               cancer_type_bin_df)
+      }
+    } else {
+      cancer_type_bin_df <- convert_ct_to_bins(subtype_file, clinical_df, input_dataframe_updated, 
+                                               is_pc, additional_subtype_info, dataset)
+      input_dataframe_updated <- merge_dataframes_by_colname(input_dataframe_updated,
+                                                             cancer_type_bin_df)
+    }
+    
   }
   return(input_dataframe_updated)
 }
@@ -684,7 +732,6 @@ add_cancer_type <- function(patient_characteristics, is_pc, subtype_file,
       })))
       unique_cts <- c(unique_cts, unique_subtypes)
       #unique_cts <- unique(unique_subtypes)
-      print(unique_cts)
     }
     length_cts <- length(unique_cts)
   }

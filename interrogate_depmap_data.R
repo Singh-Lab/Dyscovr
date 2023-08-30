@@ -10,6 +10,7 @@ library(rstatix)
 library(broom)
 library(ggrepel)
 library(rstatix)
+library(ggpubr)
 
 # Functions to investigate drug sensitivity, knockout (dependency) information, and other phenotypes 
 # in the DepMap cell lines based on cell line mutation/ copy number status
@@ -19,28 +20,84 @@ library(rstatix)
 ###################################################################################
 # DRUG SENSITIVITY ANALYSIS (DEPMAP)
 ###################################################################################
+# OTHER DRUGS TO CHECK OUT: Opdivo/nivolumab (non-small cell lung cancer, renal cell carcinoma, etc. - BTK inhibitor);
+# Keytruda/pembrolizumab (melanoma, non-small cell lung cancer, head & neck - PD-1/PD-L1 inhibitor),
+# Tecentriq/atezolizumab (bladder, lung -- PD-1/PD-L1 inhibitor); Perjeta/pertuzumab/Herceptin (HER2-positive breast cancer -- HER2);
+# Xtandi/enzalutamide (prostate); Avastin/bevacizumab (colorectal, lung, ovarian, cervical, renal cell, glioblastoma -- VEGF-targeting, for EGFR+ cancers)
+# Alecensa/Alectinib (lung -- targets ALK/ CD246); Ibrance/palbociclib (ER+/HER2- breast cancer -- targets CDK4 and CDK6)
+
 # Import the drug sensitivity and CCLE mutation files
-metformin_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/depmap_metformin.csv", 
+metformin_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA/DepMap/depmap_metformin.csv", 
                                   header = TRUE, check.names = FALSE)
 metformin_sensitivity_brca <- metformin_sensitivity[grepl("Breast", metformin_sensitivity$Lineage),]
 
-methotrexate_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/methotrexate_sensitivity_primaryPRISM.csv", 
+methotrexate_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA/DepMap/methotrexate_sensitivity_primaryPRISM.csv", 
                                      header = TRUE, check.names = FALSE)
-methotrexate_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/methotrexate_sensitivity_secondaryPRISM.csv", 
+methotrexate_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA/DepMap/methotrexate_sensitivity_secondaryPRISM.csv", 
                                      header = TRUE, check.names = FALSE)
-methotrexate_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/methotrexate_sensitivity_auc.csv", 
+methotrexate_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA/DepMap/methotrexate_sensitivity_auc.csv", 
                                      header = TRUE, check.names = FALSE)
 methotrexate_sensitivity_brca <- methotrexate_sensitivity[grepl("Breast", methotrexate_sensitivity$Lineage),]
 
-fu_sensitivity_brca <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/5-fluorouracil_sensitivity_brca_primaryPRISM.csv", 
+fu_sensitivity_brca <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA/DepMap/5-fluorouracil_sensitivity_brca_primaryPRISM.csv", 
                              header = TRUE, check.names = FALSE)
+
+pemetrexed_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Drug_sensitivity_(PRISM_Repurposing_Primary_Screen)_Pemetrexed.csv", 
+                             header = TRUE, check.names = FALSE)
+colnames(pemetrexed_sensitivity)[1] <- 'Depmap_ID'
+
+enasidenib_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Drug_sensitivity_(PRISM_Repurposing_Primary_Screen)_Enasidenib.csv", 
+                                   header = TRUE, check.names = FALSE)
+colnames(enasidenib_sensitivity)[1] <- 'Depmap_ID'
+
+pentoxifylline_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Drug_sensitivity_(PRISM_Repurposing_Primary_Screen)_Pentoxifylline.csv",
+                                       header = T, check.names = F)
+colnames(pentoxifylline_sensitivity)[1] <- 'Depmap_ID'
+
+gemcitabine_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Drug_sensitivity_(PRISM_Repurposing_Primary_Screen)_Gemcitabine.csv",
+                                    header = T, check.names = F)
+colnames(gemcitabine_sensitivity)[1] <- 'Depmap_ID'
+
+etoposide_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Drug_sensitivity_(PRISM_Repurposing_Primary_Screen)_Etoposide.csv",
+                                  header = T, check.names = F)
+colnames(etoposide_sensitivity)[1] <- 'Depmap_ID'
+
+irinotecan_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Drug_sensitivity_(PRISM_Repurposing_Primary_Screen)_Irinotecan.csv",
+                                   header = T, check.names = F)
+colnames(irinotecan_sensitivity)[1] <- 'Depmap_ID'
+
+fluorouracil_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Drug_sensitivity_(PRISM_Repurposing_Primary_Screen)_5FU.csv",
+                                    header = T, check.names = F)
+colnames(fluorouracil_sensitivity)[1] <- 'Depmap_ID'
+
+
+
+# TUBB- targeting drugs
+tubb_targeting_drug_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Drug_sensitivity_(PRISM_Repurposing_Primary_Screen)_TUBBtargeting_NAsdropped.csv",
+                                            header = T, check.names = F)
+colnames(tubb_targeting_drug_sensitivity)[1] <- 'Depmap_ID'
+
 
 ccle_drug_sensitivity <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/drug_sensitivity_screen.csv", 
                                   header = TRUE, check.names = FALSE)
 
 ccle_mutations <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/CCLE_mutations.csv", 
                            header = TRUE, check.names = FALSE)
-ccle_missense_mutations <- ccle_mutations[ccle_mutations$Variant_Classification == "Missense_Mutation",]
+ccle_nonsyn_mutations <- ccle_mutations[ccle_mutations$Variant_Classification %in% c("Missense_Mutation", "Nonsense_Mutation", "Splice_Site", "Nonstop_Mutation"),]
+
+
+rownames(ccle_drug_sensitivity) <- ccle_drug_sensitivity[,1]
+ccle_drug_sensitivity <- ccle_drug_sensitivity[,2:ncol(ccle_drug_sensitivity)]
+colnames(ccle_drug_sensitivity) <- unlist(lapply(colnames(ccle_drug_sensitivity), function(x) 
+  unlist(strsplit(x, "::", fixed = T))[1]))
+
+
+# Vinblastine: BRD:BRD-K06519765-001-01-1
+# Vincristine: BRD:BRD-K12251893-065-04-7
+# Vinorelbine: BRD:BRD-K69280563-001-01-8
+
+tubb_targeting_drugs <- c("BRD-K06519765-001-01-1", "BRD-K12251893-065-04-7", "BRD-K69280563-001-01-8")
+ccle_drug_sensitivity_tubb <- ccle_drug_sensitivity[, colnames(ccle_drug_sensitivity) %in% tubb_targeting_drugs]
 
 
 #' Analyze differential sensitivity between mutated/ nonmutated cell lines (of a particular given gene)
@@ -48,24 +105,40 @@ ccle_missense_mutations <- ccle_mutations[ccle_mutations$Variant_Classification 
 #' @param sensitivity_file a DepMap sensitivity file for a drug of interest, subsetted to the cell lines of interest
 #' @param mutation_file a DepMap mutation file
 #' @param gene the gene whose mutation status is of interest (Hugo Symbol)
-analyze_differential_sensitivity <- function(sensitivity_file, mutation_file, gene) {
+#' @param drug name of drug we are testing 
+#' @param cancer_type the name of the cancer type
+analyze_differential_sensitivity <- function(sensitivity_file, mutation_file, gene, drug, cancer_type) {
   # Subset the mutation file to the gene of interest
-  mutation_file_sub <- mutation_file[mutation_file$Hugo_Symbol == gene,]
+  mutation_file_sub <- mutation_file[mutation_file$Hugo_Symbol %fin% gene,]
   
   # Get the cell lines with a mutation in this gene
   cell_lines_mut <- unique(mutation_file_sub$DepMap_ID)
-  
+
   # Add this information to the drug sensitivity file
-  sensitivity_file$Mut <- unlist(lapply(sensitivity_file$`Depmap ID`, function(id) {
+  sensitivity_file$Mut <- unlist(lapply(sensitivity_file$Depmap_ID, function(id) {
     if(id %in% cell_lines_mut) {return(1)}
     else {return(0)}
   }))
+  #sensitivity_file$Mean <- unlist(lapply(1:nrow(sensitivity_file), function(i) 
+    #mean(as.numeric(unlist(sensitivity_file[i, 2:4])), na.rm = T)))
+  print(head(sensitivity_file))
   
   # Plot as a boxplot
   sensitivity_mutants <- unlist(sensitivity_file[sensitivity_file$Mut == 1, 2])
   sensitivity_normal <- unlist(sensitivity_file[sensitivity_file$Mut == 0, 2])
-  boxplot(list("Mutation" = sensitivity_mutants, "No Mutation" = sensitivity_normal), 
-          ylab = "Drug sensitivity", main = paste("Sensitivity by", paste(gene, "Missense Mutation Status")))
+  data <- melt(list("Mutation" = sensitivity_mutants, "No.Mutation" = sensitivity_normal))
+  colnames(data) <- c("Sensitivity", "Mutation.Status")
+  print(head(data))
+  #boxplot(list("Mutation" = sensitivity_mutants, "No Mutation" = sensitivity_normal), 
+          #ylab = "Drug sensitivity", main = paste("Sensitivity by", paste(gene, "Mutation Status")))
+  p <- ggplot(data, aes(x = Mutation.Status, y = Sensitivity, fill = Mutation.Status)) + 
+    geom_boxplot() + scale_fill_nejm() + #geom_jitter(color="black", size=0.6, alpha=0.9) +
+    theme_minimal() + theme(legend.position="none", axis.title = element_text(face = "bold", size = 14), 
+                            axis.text = element_text(face = "bold", size = 12)) + 
+    #ggtitle(paste(cancer_type, "Sensitivity by Driver Mutation Status")) +
+    xlab(paste0("\n", paste(gene, "Mutation Status"))) + ylab(paste(drug, "Sensitivity")) +
+    stat_compare_means(method = "wilcox.test")
+  print(p)
   
   # Wilcoxon
   print(wilcox.test(sensitivity_mutants, y = sensitivity_normal))
@@ -80,6 +153,23 @@ analyze_differential_sensitivity(methotrexate_sensitivity_brca, ccle_missense_mu
 
 analyze_differential_sensitivity(fu_sensitivity_brca, ccle_missense_mutations, "TP53")
 analyze_differential_sensitivity(fu_sensitivity_brca, ccle_missense_mutations, "PIK3CA")
+
+analyze_differential_sensitivity(tubb_targeting_drug_sensitivity, ccle_nonsyn_mutations, "TP53")
+
+
+luad_cls <- unlist(colnames(fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/LUAD.txt", sep = ",")))
+analyze_differential_sensitivity(pemetrexed_sensitivity[pemetrexed_sensitivity$Depmap_ID %fin% luad_cls,], ccle_nonsyn_mutations, "KRAS", "Pemetrexed")
+paad_cls <- unlist(colnames(fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/PAAD.txt", sep = ",")))
+ucec_cls <- unlist(colnames(fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/UCEC.txt", sep = ",")))
+coad_cls <- unlist(colnames(fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/COAD.txt", sep = ",")))
+analyze_differential_sensitivity(pemetrexed_sensitivity[pemetrexed_sensitivity$Depmap_ID %fin% ucec_cls,], ccle_nonsyn_mutations, "KRAS", "Pemetrexed")
+
+
+# Limit to a particular type of cell line (e.g. gliomas)
+lgg_gbm_cls <- unlist(colnames(fread("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/LGG.txt", sep = ",")))
+analyze_differential_sensitivity(enasidenib_sensitivity[enasidenib_sensitivity$Depmap_ID %fin% lgg_gbm_cls,], 
+                                 ccle_nonsyn_mutations, "IDH1", "Rnasidenib")  # Not enough IDH1-mutant glioma cell lines
+
 
 
 #' Analyze differential sensitivity across two genes, considering cases where cell lines have mutations
@@ -169,7 +259,6 @@ fu_stats_sub <- fu_stats[fu_stats$`Cell Line` %in% ccle_mutations$cell_line_disp
 
 print(length(intersect(methotrexate_stats$`Cell Line`, ccle_mutations$cell_line_display_name)))  #20
 methotrexate_stats_sub <- methotrexate_stats[methotrexate_stats$`Cell Line` %in% ccle_mutations$cell_line_display_name,]
-
 
 
 #' Analyze differential sensitivity across two genes, considering cases where cell lines have mutations
@@ -286,9 +375,10 @@ signif_hits_crispr_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main P
 signif_hits_rnai_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/RNAi_(Achilles+DRIVE+Marcotte,_DEMETER2)_allGenes_BRCA.csv",
                                   header = TRUE, check.names = FALSE)
 
-signif_hits_expression_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Expression_22Q1_Public.csv", header = TRUE, check.names = FALSE)
+signif_hits_expression_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Expression_22Q1_Public.csv", 
+                                        header = TRUE, check.names = FALSE)
 
-# Get the mutations for TP53 & PIK3CA among these cell lines
+# Get the mutations for drivers among these cell lines
 tp53_pik3ca_mutations <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/BRCA Data/DepMap/Mutation_21Q4_Public_P53_PIK3CA.csv",
                                   header = TRUE, check.names = FALSE)
 
@@ -316,19 +406,19 @@ signif_hits_expression_data_coad <- read.csv("/Users/sarae/Documents/Mona Lab Wo
 colnames(signif_hits_expression_data_coad)[1] <- "depmap_id"
 
 # Subset to our GOIs (breast has already done this)
-signif_hits_crispr_data_coad_sub <- signif_hits_crispr_data_coad[, c(1:6, which(colnames(signif_hits_crispr_data_coad) %in% c("SHMT2", "ARG2")))]
-signif_hits_rnai_data_coad_sub <- signif_hits_rnai_data_coad[, c(1:6, which(colnames(signif_hits_rnai_data_coad) %in% c("SHMT2", "ARG2")))]
-signif_hits_expression_data_coad_sub <- signif_hits_expression_data_coad[, c(1, which(colnames(signif_hits_expression_data_coad) %in% c("SHMT2", "ARG2", "TP53")))]
+signif_hits_crispr_data_coad_sub <- signif_hits_crispr_data_coad[, c(1:6, which(colnames(signif_hits_crispr_data_coad) %in% c("SPTLC2", "DPYSL2", "ADK", "CHST11")))]
+signif_hits_rnai_data_coad_sub <- signif_hits_rnai_data_coad[, c(1:6, which(colnames(signif_hits_rnai_data_coad) %in% c("SPTLC2", "DPYSL2", "ADK", "CHST11")))]
+signif_hits_expression_data_coad_sub <- signif_hits_expression_data_coad[, c(1, which(colnames(signif_hits_expression_data_coad) %in% c("SPTLC2", "DPYSL2", "ADK", "CHST11")))]
 
 # Get the mutations for TP53 among these cell lines
 mutations_coad <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Damaging_Mutations_COAD.csv",
                                   header = TRUE, check.names = FALSE)
-tp53_mutations_coad <- mutations_coad[, c(1, which(colnames(mutations_coad) == "TP53"))]
-colnames(tp53_mutations_coad)[1] <- "depmap_id"
+tp53_kras_pik3ca_mutations_coad <- mutations_coad[, c(1, which(colnames(mutations_coad) %in% c("TP53", "KRAS", "PIK3CA")))]
+colnames(tp53_kras_pik3ca_mutations_coad)[1] <- "depmap_id"
 
 # Get the relative copy number changes for TP53 among these cell lines
 cnas_coad <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Copy_Number_(Absolute)_COAD.csv",
-                             header = TRUE, check.names = FALSE)   # ABSOLUTE
+                      header = TRUE, check.names = FALSE)   # ABSOLUTE
 cnas_coad <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Copy_Number_Public_22Q4_COAD.csv",
                       header = TRUE, check.names = FALSE)   # RELATIVE
 # for relative:
@@ -339,6 +429,23 @@ tp53_cnas_coad <- cnas_coad[, c("depmap_id", "cell_line_display_name", "TP53")]
 # Adjust column names
 colnames(tp53_cnas_coad)[ncol(tp53_cnas_coad)] <- "TP53.CNA"
 
+
+
+### ALL CLS ###
+signif_hits_crispr_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/CRISPR_(DepMap_Public_23Q2+Score,_Chronos).csv", 
+                                    header = TRUE, check.names = FALSE)
+signif_hits_rnai_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/RNAi_(Achilles+DRIVE+Marcotte,_DEMETER2).csv", 
+                                  header = TRUE, check.names = FALSE)
+signif_hits_expression_data <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Expression_Public_23Q2.csv", 
+                                  header = TRUE, check.names = FALSE)
+
+# Get mutations for all genes (and subset)
+mutations <- read.csv("/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/OmicsSomaticMutations.csv",
+                      header = TRUE, check.names = FALSE)
+mutations_idh1 <- mutations[(mutations$HugoSymbol == "IDH1") & (mutations$VariantInfo %in% c("MISSENSE", "NONSENSE", "SPLICE_SITE", "NONSTOP")),]
+mutations_kras <- mutations[(mutations$HugoSymbol == "KRAS") & (mutations$VariantInfo %in% c("MISSENSE", "NONSENSE", "SPLICE_SITE", "NONSTOP")),]
+mutations_tp53 <- mutations[(mutations$HugoSymbol == "TP53") & (mutations$VariantInfo %in% c("MISSENSE", "NONSENSE", "SPLICE_SITE", "NONSTOP")),]
+mutations_pik3ca <- mutations[(mutations$HugoSymbol == "PIK3CA") & (mutations$VariantInfo %in% c("MISSENSE", "NONSENSE", "SPLICE_SITE", "NONSTOP")),]
 
 # Import BAGEL2 essentiality data
 bagel_data <- read.table("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/Table_DepMap2018Q4_BAGEL2_CRISPRcleanR_MultitargetingCorrected.txt", 
@@ -390,28 +497,50 @@ adjust_depmap_df <- function(signif_hits_df, mutation_df, cna_df, genes_of_inter
   signif_hits_df_melt$gene <- as.character(unlist(signif_hits_df_melt$gene))
   
   # Add mutation and CNA status of genes of interest to the data frame
-  signif_hits_df_melt <- merge(signif_hits_df_melt, mutation_df[,c("depmap_id", genes_of_interest)], 
-                               by = "depmap_id")  
-  genes_of_interest_cna <- unlist(lapply(genes_of_interest, function(x) paste0(x, ".CNA")))
-  signif_hits_df_melt <- merge(signif_hits_df_melt, cna_df[,c("depmap_id", genes_of_interest_cna)], 
-                               by = "depmap_id")
+  #signif_hits_df_melt <- merge(signif_hits_df_melt, mutation_df[,c("depmap_id", genes_of_interest)], 
+                               #by = "depmap_id")  
+  unique_cls <- unique(intersect(mutation_df$ModelID, signif_hits_df_melt$depmap_id))
+  print(length(unique_cls))
+  # Get the cell lines that have a mutation
+  unique_drivers <- unique(mutation_df$HugoSymbol)
+  mutation_df_driver_cols <- as.data.frame(lapply(unique_drivers, function(driver) {
+    cls <- mutation_df[mutation_df$HugoSymbol == driver, 'ModelID']
+    return(as.factor(unlist(lapply(unique_cls, function(cl) ifelse(cl %fin% cls, 1, 0)))))
+  }))
+  colnames(mutation_df_driver_cols) <- unique_drivers
+  mutation_df_new <- cbind(data.frame("depmap_id" = unique_cls), mutation_df_driver_cols)
+  print(head(mutation_df_new))
+  
+  signif_hits_df_melt <- merge(signif_hits_df_melt, mutation_df_new, by = "depmap_id")
+
+  #signif_hits_df_melt <- merge(signif_hits_df_melt, mutation_df[,c("ModelID", "HugoSymbol")], 
+  #                             by.x = "depmap_id", by.y = "ModelID", all = T)  
+  #if(!length(cna_df) <= 1) {
+  #  genes_of_interest_cna <- unlist(lapply(genes_of_interest, function(x) paste0(x, ".CNA")))
+  #  signif_hits_df_melt <- merge(signif_hits_df_melt, cna_df[,c("depmap_id", genes_of_interest_cna)], 
+  #                               by = "depmap_id")
+  #}
+  print(head(signif_hits_df_melt))
   
   # Make the mutation columns factors
   #mutation_cols <- which(colnames(signif_hits_df_melt) %in% genes_of_interest)
   #signif_hits_df_melt[, mutation_cols] <- lapply(signif_hits_df_melt[, mutation_cols], as.factor)
-  factorized_mut_status <- as.factor(unlist(lapply(signif_hits_df_melt[, which(colnames(signif_hits_df_melt) == genes_of_interest)], function(val) 
-    ifelse(val > 1, 1, val))))
-  signif_hits_df_melt[, which(colnames(signif_hits_df_melt) == genes_of_interest)] <- factorized_mut_status
+  #factorized_mut_status <- as.factor(unlist(lapply(signif_hits_df_melt[, which(colnames(signif_hits_df_melt) == genes_of_interest)], function(val) 
+    #ifelse(val > 1, 1, val))))
+  #signif_hits_df_melt[, which(colnames(signif_hits_df_melt) == genes_of_interest)] <- factorized_mut_status
   
-  
+  signif_hits_df_melt[is.na(signif_hits_df_melt)] <- 0
+
   # Bucket the CNA columns and also make them factors
-  cna_cols <- which(colnames(signif_hits_df_melt) %in% genes_of_interest_cna)
-  signif_hits_df_melt[, cna_cols] <- lapply(1:length(cna_cols), function(i) {
-    col <- signif_hits_df_melt[, cna_cols[i]]
-    bucketed_col <- bucket_cna(col, del_or_amp_vect[i])
-    bucketed_col <- as.factor(bucketed_col)
-    return(bucketed_col)
-  })
+  if(!length(cna_df) <= 1) {
+    cna_cols <- which(colnames(signif_hits_df_melt) %in% genes_of_interest_cna)
+    signif_hits_df_melt[, cna_cols] <- lapply(1:length(cna_cols), function(i) {
+      col <- signif_hits_df_melt[, cna_cols[i]]
+      bucketed_col <- bucket_cna(col, del_or_amp_vect[i])
+      bucketed_col <- as.factor(bucketed_col)
+      return(bucketed_col)
+    })
+  }
   
   return(signif_hits_df_melt)
 }
@@ -469,6 +598,10 @@ signif_hits_rnai_data_coad_sub <- na.omit(signif_hits_rnai_data_coad_sub[, !(col
 signif_hits_expression_data_coad_sub <- adjust_depmap_df(signif_hits_expression_data_coad_sub, tp53_mutations_coad, tp53_cnas_coad,
                                                 c("TP53"), c("deletion"))
 
+signif_hits_crispr_data2 <- adjust_depmap_df(signif_hits_crispr_data, do.call(rbind, list(mutations_idh1, mutations_kras, mutations_pik3ca, mutations_tp53)), 
+                                             NA, c("TP53", "PIK3CA", "KRAS", "IDH1"), NA)
+signif_hits_expression_data2 <- adjust_depmap_df(signif_hits_expression_data, do.call(rbind, list(mutations_idh1, mutations_kras, mutations_pik3ca, mutations_tp53)), 
+                                                 NA, c("TP53", "PIK3CA", "KRAS", "IDH1"), NA)
 
 # For colorectal drivers
 drivers_cnas_coad_relative <- cnas_coad_relative[, c("depmap_id", "TP53", "KRAS", "APC", "PIK3CA", "BRAF")]
@@ -511,6 +644,12 @@ signif_hits_crispr_data_pik3ca <- subset_to_gene_tophits(signif_hits_crispr_data
 signif_hits_rnai_data_pik3ca <- subset_to_gene_tophits(signif_hits_rnai_data, pik3ca_top_hits_specific)
 signif_hits_expression_data_pik3ca <- subset_to_gene_tophits(signif_hits_expression_data, pik3ca_top_hits_specific)
 
+signif_hits_crispr_data2 <- subset_to_gene_tophits(signif_hits_crispr_data2, 
+                                                   c(tp53_metabolic_pc_hits, pik3ca_metabolic_pc_hits, 
+                                                     idh1_metabolic_pc_hits, kras_metabolic_pc_hits))
+signif_hits_expression_data2 <- subset_to_gene_tophits(signif_hits_expression_data2, 
+                                                   c(tp53_metabolic_pc_hits, pik3ca_metabolic_pc_hits, 
+                                                     idh1_metabolic_pc_hits, kras_metabolic_pc_hits))
 
 #' Run a significance test for each combo, given an input DF and either
 #' "mut" or "cna
@@ -565,15 +704,16 @@ ttest_expression_pik3ca_cna <- run_ttest(signif_hits_expression_data_pik3ca, "PI
 #' @param mut_or_cna either "mut", to signify we want to plot dependency by mutation status, or "cna" to
 #' indicate we want to plot dependency by CNA status
 #' @param ttest_res optional: can include the results of a t-test with the significance values on plot
-make_dependency_boxplot <- function(signif_hits_df, gene_of_interest, mut_or_cna, ttest_res) {
+#' @param yaxis_lab y-axis label; either expression, CRISPRi, or RNAi
+make_dependency_boxplot <- function(signif_hits_df, gene_of_interest, mut_or_cna, ttest_res, yaxis_lab) {
   if(mut_or_cna == "mut") {
     bxp <- ggplot(signif_hits_df, aes_string(x = "gene", y = "value", fill = gene_of_interest)) + geom_boxplot() +
-      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ylab(yaxis_lab)
     
   } else if (mut_or_cna == "cna") {
     gene_of_interest_cna <- paste0(gene_of_interest, ".CNA")
     bxp <- ggplot(signif_hits_df, aes_string(x = "gene", y = "value", fill = gene_of_interest_cna)) + geom_boxplot() +
-      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ylab(yaxis_lab)
     
   } else {
     print(paste(mut_or_cna, "is not defined. Please try again with either 'mut' or 'cna'."))
@@ -685,15 +825,12 @@ coad_cl_info <- cell_line_sample_info[grepl("Colorectal", cell_line_sample_info$
 brca_cls_with_dat <- unique(c(signif_hits_crispr_data$depmap_id, signif_hits_rnai_data$depmap_id))
 coad_cls_with_dat <- unique(c(signif_hits_crispr_data_coad_sub$depmap_id, signif_hits_rnai_data_coad_sub$depmap_id))
 
-
 # Subset the sample info DF to only the cell lines of interest
 brca_cl_info_sub <- brca_cl_info[brca_cl_info$DepMap_ID %fin% brca_cls_with_dat,]
 coad_cl_info_sub <- coad_cl_info[coad_cl_info$DepMap_ID %fin% coad_cls_with_dat,]
 
-
 # Subset BAGEL2 data
 bagel_data_brca <- bagel_data[,colnames(bagel_data) %in% brca_cl_info$DepMap_ID]
-
 
 # Add a "primary" or "metastatic" label to the signif_hits data frames
 
@@ -717,6 +854,8 @@ signif_hits_crispr_data_pik3ca <- add_site(brca_cl_info_sub, signif_hits_crispr_
 signif_hits_rnai_data_tp53 <- add_site(brca_cl_info_sub, signif_hits_rnai_data_tp53)
 signif_hits_rnai_data_pik3ca <- add_site(brca_cl_info_sub, signif_hits_rnai_data_pik3ca)
 
+signif_hits_crispr_data2 <- add_site(cell_line_sample_info, signif_hits_crispr_data2)
+signif_hits_expression_data2 <- add_site(cell_line_sample_info, signif_hits_expression_data2)
 
 # Segregate them into separate primary and metastatic files, leaving out the NA CLs
 signif_hits_expression_data_primary_tp53 <- signif_hits_expression_data_tp53[signif_hits_expression_data_tp53$site == "Primary",]
@@ -780,6 +919,7 @@ wilcox_of_targs <- function(expression_df, goi) {
   targs <- unique(expression_df$gene)
   print(targs)
   pvals <- c()
+  dir <- c()
   
   for (t in targs) {
     print(paste("Target:", t))
@@ -796,19 +936,43 @@ wilcox_of_targs <- function(expression_df, goi) {
     pvals <- c(pvals, pval)
     
     if((length(exp_mut) != 0) & (length(exp_noMut) != 0)) {
-      if(mean(exp_mut, na.rm = TRUE) > mean(exp_noMut, na.rm = TRUE)) {print("Upregulation")}
-      else {print("Downregulation")}
+      if(mean(exp_mut, na.rm = TRUE) > mean(exp_noMut, na.rm = TRUE)) {
+        print("Upregulation")
+        dir <- c(dir, "up")
+      }
+      else {
+        print("Downregulation")
+        dir <- c(dir, "down")
+      }
     }
   }
-  return(list("Targets" = targs, "P.value" = pvals))
+  return(data.frame("Targets" = targs, "P.value" = pvals, "Dir" = dir))
 }
 
 pvalues_depmap <- wilcox_of_targs(signif_hits_expression_data_primary_tp53, "TP53")
 
-pvalues$Signif <- unlist(lapply(pvalues$P.value, function(x) ifelse(x < 0.05, 1, 0)))
+pvalues_depmap$Signif <- unlist(lapply(pvalues_depmap$P.value, function(x) ifelse(x < 0.05, 1, 0)))
 pvalues$ChipEat <- unlist(lapply(pvalues$Targets, function(x) ifelse(x %in% tp53_chipeat_targs, 1, 0)))
 
 jac_res <- clujaccard(pvalues$ChipEat, pvalues$Signif, zerobyzero = NA)
+
+
+brain_cls <- cell_line_sample_info[cell_line_sample_info$primary_disease == "Brain Cancer", 'DepMap_ID']
+pvalues_depmap_idh1 <- wilcox_of_targs(signif_hits_crispr_data2[signif_hits_crispr_data2$depmap_id %fin% brain_cls,], "IDH1")
+pvalues_depmap_idh1$Signif <- unlist(lapply(pvalues_depmap_idh1$P.value, function(x) ifelse(x < 0.05, 1, 0)))
+
+colon_cls <- cell_line_sample_info[cell_line_sample_info$primary_disease == "Colon/Colorectal Cancer", 'DepMap_ID']
+luad_cls <- cell_line_sample_info[cell_line_sample_info$primary_disease == "Lung Cancer", 'DepMap_ID']
+ucec_cls <- cell_line_sample_info[cell_line_sample_info$primary_disease == "Endometrial/Uterine Cancer", 'DepMap_ID']
+
+pvalues_depmap_kras <- wilcox_of_targs(signif_hits_crispr_data2[signif_hits_crispr_data2$depmap_id %fin% colon_cls,], "KRAS")
+pvalues_depmap_kras$Signif <- unlist(lapply(pvalues_depmap_kras$P.value, function(x) ifelse(x < 0.05, 1, 0)))
+
+brca_cls <- cell_line_sample_info[cell_line_sample_info$primary_disease == "Breast Cancer", 'DepMap_ID']
+cesc_cls <- cell_line_sample_info[cell_line_sample_info$primary_disease == "Cervical Cancer", 'DepMap_ID']
+pvalues_depmap_pik3ca <- wilcox_of_targs(signif_hits_crispr_data2[signif_hits_crispr_data2$depmap_id %fin% brca_cls,], "PIK3CA")
+pvalues_depmap_pik3ca$Signif <- unlist(lapply(pvalues_depmap_pik3ca$P.value, function(x) ifelse(x < 0.05, 1, 0)))
+
 
 ###################################################################################
 # INVESTIGATE SLOPES USING A SIMPLE LM OF DEPMAP VAL ~ MUT/ AMP STATUS
@@ -902,4 +1066,15 @@ depmap_lm(signif_hits_crispr_data, "mut", "TP53")
 depmap_lm(signif_hits_crispr_data, "cna", "TP53")
 depmap_lm(signif_hits_crispr_data, "mut", "PIK3CA")
 depmap_lm(signif_hits_crispr_data, "cna", "PIK3CA")
+
+
+crispr <- read.csv("C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Input Data Files/Pan-Cancer/DepMap CCLE/CRISPR_(DepMap_Public_23Q2+Score,_Chronos).csv", 
+                   header = T, check.names = F)
+crispr_sarc <- crispr[crispr[,1] %in% sarc_cls,]
+df <- crispr_sarc[,c(1,which(colnames(crispr_sarc) == "SLC1A5"))]
+colnames(df)[1] <- 'depmap_id'
+df$col <- unlist(lapply(df$depmap_id, function(id) ifelse(id == "ACH-000054", 1, 0)))
+ggplot(df, aes(x = reorder(depmap_id, -SLC1A5), y = SLC1A5, fill = col)) + 
+  geom_bar(show.legend = F, stat = "identity") + ylab("SLC1A5 CRISPR KO Dependency") + xlab("Sarcoma Cell Lines") +
+  +     theme(axis.text.x = element_text(angle = 90))
 
