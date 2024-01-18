@@ -1,9 +1,0 @@
-#!/bin/bash
-#SBATCH --mem=20384
-#SBATCH --qos=1wk
-#SBATCH --nodes=8
-#SBATCH --job-name=aggreg_maf_files
-#SBATCH --mail-user=scamilli@princeton.edu
-#SBATCH --mail-type=fail,time_limit
-
-python aggregate_maf_files.py 
