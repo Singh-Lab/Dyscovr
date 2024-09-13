@@ -3,7 +3,7 @@
 ### PUBLICATION INFORMATION 
 ############################################################
 
-# This script requires 1 node and 6 CPUs for multithreading.
+# This script requires 1 node and 8 CPUs for multithreading.
 #!/usr/bin/env Rscript
 
 # Set the library path
@@ -17,13 +17,15 @@ library(doParallel, lib.loc = library.path)
 library(dqrng, lib.loc = library.path)
 library(foreach, lib.loc = library.path)
 library(parallel, lib.loc = library.path)
+library(fastmatch, lib.loc = library.path)
+library(stringr, lib.loc = library.path, quietly = T)
 
 # Creates an input table for Dyscovr linear regression in dyscovr.R for each 
 # gene target provided in input tables. Writes all input tables to a directory, 
 # where they can be fetched when LM runs.
 
 # Source other files needed
-SOURCE_PATH <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Dyscovr/"
+SOURCE_PATH <- "/Genomics/argo/users/scamilli/Dyscovr_Personal"
 source(paste(SOURCE_PATH, "general_important_functions.R", sep = "/"))
 source(paste(SOURCE_PATH, "dyscovr_helper_functions.R", sep = "/"))
 
@@ -45,7 +47,7 @@ parser$add_argument("--cancerType", default = "PanCancer", type = "character",
                     help = "Type of cancer we're looking at, or PanCancer. 
                     Default is PanCancer.")
 parser$add_argument("--specificTypes", default = "ALL", type = "character",
-                    help = "If amd only if the cancer type is PanCancer, 
+                    help = "If and only if the cancer type is PanCancer, 
                     denotes which specific cancer types we're including (running 
                     per each specified cancer type individually). If ALL, 
                     run pan-cancer. Default is ALL.")
@@ -146,7 +148,7 @@ parser$add_argument("--num_pcs", default = 3, type = "integer",
 
 # Add a flag for keeping only trans pairings
 parser$add_argument("--removeCis", default = "T", type = "character",
-                    help = "A T/ F value to indicate whether                                                                                                    or not we 
+                    help = "A T/ F value to indicate whether or not we 
                     want to remove cis pairings and look only at trans pairings. 
                     Defaults to T, but can be set to F.")
 
@@ -168,7 +170,6 @@ tryCatch({
 ############################################################
 ### CONVERT STRING LOGICALS TO REAL LOGICALS
 ############################################################
-tumNormMatched <- str2bool(args$tumNormMatched)
 randomize <- str2bool(args$randomize)
 test <- str2bool(args$test)
 meth_bucketing <- str2bool(args$meth_bucketing)
@@ -182,7 +183,7 @@ runQueriesJointly <- str2bool(args$run_query_genes_jointly)
 # SET MAIN PATH AND IMPORT GENERALLY NEEDED FILES
 ############################################################
 # Set the paths
-INPUT_FILE_PATH <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/input_files/"
+INPUT_FILE_PATH <- "/Genomics/argo/users/scamilli/Dyscovr_Personal/input_files/"
 
 if(args$cancerType == "BRCA") {
   TARG_PATH <- paste0(INPUT_FILE_PATH, "BRCA/target_lists/")
@@ -275,7 +276,7 @@ if(grepl("transform", args$expression_df) | grepl("zscore", args$expression_df) 
 # IMPORT METHYLATION FILES
 ############################################################
 methylation_df <- fread(paste0(MAIN_PATH, 
-                               paste("Methylation/", args$methylation_df)),
+                               paste0("Methylation/", args$methylation_df)),
                         header = T)
 colnames(methylation_df)[
   which(colnames(methylation_df) == "Gene_Symbol")] <- "gene_name"
@@ -321,8 +322,9 @@ if(debug) {
 ############################################################
 # If we are looking per-cancer, read in each individual patient DF
 if((args$cancerType == "PanCancer") & (args$specificTypes != "ALL")) {
-  patient_path <- paste0(MAIN_PATH, "Sample/per_cancer_type/")
-  per_cancer_fns <- list.files(patient_path, pattern = args$patient_df)
+  patient_path <- paste0(MAIN_PATH, "Sample/")
+  per_cancer_fns <- intersect(list.files(patient_path, pattern = args$patient_df),
+			      list.files(patient_path, pattern = "cibersort_total_frac"))  #TODO: change to find a less hacky way to exclude the pan-cancer file
   patient_df <- lapply(per_cancer_fns, function(x) {
     df <- fread(paste0(patient_path, x), header = T)
     colnames(df)[1] <- "sample_id"
@@ -555,6 +557,11 @@ fill_prot_inputs <- function(patient_df, prot_uniprot, prot_ensg, mutation_df,
   methylation_df_sub <- filter_meth_by_ensg(methylation_df, prot_ensg) 
   
   # Loop through all tumor samples to get the info on this protein for each
+  if(debug) {
+    print("Num patients in patient DF:")
+    print(nrow(patient_df))
+  }
+
   prot_rows <- mclapply(1:patient_df[, .N], function(i) {
     sample <- patient_df$sample_id[i]
     if (debug) {print(paste("Sample:", sample))}
@@ -693,13 +700,13 @@ check_and_write_starter_df <- function(starter_df, prot, filename_labels,
       starter_df_fn <- NA
       
       if(!run_query_genes_jointly) {
-        starter_df_fn <- create_prot_input_table_filename(
+        starter_df_fn <- create_driver_input_table_filename(
           T, prot, filename_labels[["run_name"]], cna_bucketing, meth_bucketing, 
           filename_labels[["meth_type"]], filename_labels[["patient_df_name"]],  
           num_pcs, filename_labels[["patients_to_incl_label"]], removeCis, 
           removeMetastatic)
       } else {
-        starter_df_fn <- create_prot_input_table_filename(
+        starter_df_fn <- create_driver_input_table_filename(
           F, NA, filename_labels[["run_name"]], cna_bucketing, meth_bucketing,
           filename_labels[["meth_type"]], filename_labels[["patient_df_name"]], 
           num_pcs, filename_labels[["patients_to_incl_label"]], removeCis, 
@@ -787,8 +794,8 @@ create_lm_input_table <- function(starter_df, downstream_target_df, mutation_df,
   }
   
   # Use multithreading to run these jobs in parallel
-  num_groups <- 6
-  parallel_cluster <- makeCluster(6, type = "SOCK", methods = F, outfile = "")
+  num_groups <- 8
+  parallel_cluster <- makeCluster(num_groups, type = "SOCK", methods = F, outfile = "")
   
   # Tell R that we want to use these processes to do calculations
   setDefaultCluster(parallel_cluster)
@@ -798,27 +805,32 @@ create_lm_input_table <- function(starter_df, downstream_target_df, mutation_df,
   
   lm_input_tables <- foreach(
     currentRow = list_of_rows, 
+    # Export needed data and functions
     .export = c("methylation_df", "starter_df", "mutation_df", "cna_df", 
                 "expression_df", "log_expression", "cna_bucketing", 
                 "meth_bucketing", "debug", "dataset", "randomize", "removeCis", 
-                "removeMetastatic", "filename_labels"), 
+                "removeMetastatic", "filename_labels",
+		"%fin%", "fill_targ_inputs", "create_lm_input_table_filename", 
+		"filter_mut_by_uniprot", "filter_cna_by_ensg", "filter_meth_by_ensg",
+		"get_mut_stat_targ", "get_cna_stat", "get_meth_stat", "get_exp_stat"), 
+    .packages = c("dplyr", "data.table", "dqrng", "parallel", "fastmatch", "stringr"),
     .inorder = F) %dopar% {
-      
+
       # Source the necessary files for the worker node
-      SOURCE_PATH <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Dyscovr/"
-      source(paste(SOURCE_PATH, "general_important_functions.R", sep = "/"))
-      source(paste(SOURCE_PATH, "dyscovr_helper_functions.R", sep = "/"))
+      #SOURCE_PATH <- "/Genomics/grid/users/scamilli/thesis_work/run-model-R/Dyscovr/"
+      #source(paste(SOURCE_PATH, "general_important_functions.R", sep = "/"), local = T)
+      #source(paste(SOURCE_PATH, "dyscovr_helper_functions.R", sep = "/"), local = T)
       
       # Get the target t_k's Swissprot & ENSG IDs
-      targ <- unlist(strsplit(currentRow$swissprot, ";", fixed = T))
+      targ <- unlist(strsplit(currentRow$swissprot, ";", fixed = T))[1]
       targ_ensg <- unlist(strsplit(currentRow$ensg, ";", fixed = T))
       
-      if(debug) {print(targ)} 
+      if(debug) {print(targ)}
       
       tryCatch({
         lm_input_table <- fill_targ_inputs(starter_df = starter_df, 
                                            targ = targ, targ_ensg = targ_ensg, 
-                                           mutation_df = mutation_df,
+                                           mutation_targ_df = mutation_df,
                                            methylation_df = methylation_df,
                                            cna_df = cna_df, 
                                            expression_df = expression_df,
@@ -875,7 +887,7 @@ create_lm_input_table <- function(starter_df, downstream_target_df, mutation_df,
         })
       }
       # Ensure this is what is returned by this iteration of foreach
-      lm_input_table <- lm_input_table
+      lm_input_table <- distinct(lm_input_table)
   }
   # tell R that we don't need the processes anymore
   stopCluster(parallel_cluster)
@@ -936,15 +948,15 @@ fill_targ_inputs <- function(starter_df, targ, targ_ensg, mutation_targ_df,
       print(paste("Dim mutation targ df:", dim(mutation_targ_df)))
       print(paste("Dim cna df:", dim(cna_df)))
       print(paste("Dim expression df:", dim(expression_df)))
-      print(paste("dim methylation df:", dim(methylation_df)))
-      print(!(expression_df[, .N] == 0 | cna_df[, .N] == 0 | 
-                methylation_df[, .N] == 0 | mutation_targ_df[, .N] == 0))
+      print(paste("Dim methylation df:", dim(methylation_df)))
+      print(!(expression_df[, .N] > 0) & (cna_df[, .N] > 0) & 
+                (methylation_df[, .N] > 0) & (mutation_targ_df[, .N] > 0))
     }
     
     # Continue only if all of these data frames contain information about this 
     # target gene
-    if(!(expression_df[, .N] == 0 | cna_df[, .N] == 0  | 
-         mutation_targ_df[, .N] == 0) | methylation_df[, .N] == 0) {
+    if(!(expression_df[, .N] > 0) & (cna_df[, .N] > 0) & 
+                (methylation_df[, .N] > 0) & (mutation_targ_df[, .N] > 0)) {
       
       print(paste("Target not found in all DFs:", targ))
       return(NA)
@@ -1046,7 +1058,7 @@ if(args$cancerType == "PanCancer") {
                                           tester_name = args$tester_name, 
                                           run_name = args$run_name,
                                           dataset = args$dataset,
-                                          outpath = MAIN_PATH))
+                                          outpath = SOURCE_PATH))
     })
     names(outpath) <- cancer_types
     
@@ -1056,7 +1068,7 @@ if(args$cancerType == "PanCancer") {
                                             tester_name = args$tester_name, 
                                             run_name = args$run_name,
                                             dataset = args$dataset, 
-                                            outpath = MAIN_PATH)
+                                            outpath = SOURCE_PATH)
   }
 } else {
   outpath <- create_lm_input_file_outpath(cancerType = args$cancerType, 
@@ -1064,7 +1076,7 @@ if(args$cancerType == "PanCancer") {
                                           tester_name = args$tester_name, 
                                           run_name = args$run_name,
                                           dataset = args$dataset, 
-                                          outpath = MAIN_PATH)
+                                          outpath = SOURCE_PATH)
 }
 
 
@@ -1128,8 +1140,8 @@ if(args$patientsOfInterest != "") {
                                     args$patientOfInterestLabel))
 }
 
-targets_DF <- limit_to_targets_wo_existing_files(outpath, targets_DF, 
-                                                 gene_name_index)
+#targets_DF <- limit_to_targets_wo_existing_files(outpath, targets_DF, 
+                                                 #gene_name_index)
 
 
 ############################################################
@@ -1145,7 +1157,7 @@ targets_DF <- limit_to_targets_wo_existing_files(outpath, targets_DF,
 #' patient IDs to their respective cancer types
 get_patient_cancer_mapping <- function(specificTypes, clinical_df) {
   specific_types <- unlist(strsplit(specificTypes, ";", fixed = T))
-  clinical_df <- fread(paste0(MAIN_PATH, paste0("clinical/", clinical_df)), 
+  clinical_df <- fread(paste0(MAIN_PATH, paste0("Clinical/", clinical_df)), 
                        header = T)
   patient_cancer_mapping <- lapply(specific_types, function(ct) {
     pats <- clinical_df[grepl(ct, clinical_df$project_id),'case_submitter_id']
@@ -1190,7 +1202,6 @@ if(is.na(patient_cancer_mapping)) {
   # If needed, subset these data tables by the given patient IDs of interest 
   # using helper functions from dyscovr_helper_functions.R
   if(patients_of_interest != "") {
-    
     patient_df <- subset_by_intersecting_ids(patients_of_interest, patient_df, 
                                              F, args$dataset)
     mutation_df <- subset_by_intersecting_ids(patients_of_interest, mutation_df, 
@@ -1269,7 +1280,10 @@ if(is.na(patient_cancer_mapping)) {
     # Get the outpath for this cancer type
     outpath_i <- outpath[[i]]
     
-    ct <- names(patient_cancer_mapping[i])
+    ct <- names(patient_cancer_mapping)[i]
+    print(ct)
+    print(names(patient_df))
+    print(head(patient_df[[1]]))
     patient_df_ct <- patient_df[[which(names(patient_df) == ct)]]
 
     # Subset files using patient_ids (using helper functions from 

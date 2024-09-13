@@ -44,7 +44,7 @@ library(mnormt, lib.loc = library.path)
 library(truncnorm, lib.loc = library.path)
 
 # Source other files needed
-SOURCE_PATH <- "/Genomics/argo/users/scamilli/Dyscovr"
+SOURCE_PATH <- "/Genomics/argo/users/scamilli/Dyscovr_Personal"
 source(paste(SOURCE_PATH, "general_important_functions.R", sep = "/"))
 source(paste(SOURCE_PATH, "dyscovr_helper_functions.R", sep = "/"))
 source(paste(SOURCE_PATH, "perform_collinearity_correction.R", sep = "/"))
@@ -395,7 +395,7 @@ run_linear_model <- function(list_of_input_dfs, expression_df, cna_bucketing,
     .combine = function(x,y) combine_res_obj(x, y)) %dopar% {
       
       # Source the necessary files for the worker node
-      #SOURCE_PATH <- "/Genomics/argo/users/scamilli/Dyscovr"
+      #SOURCE_PATH <- "/Genomics/argo/users/scamilli/Dyscovr_Personal"
       #source(paste(SOURCE_PATH, "general_important_functions.R", sep = "/"))
       #source(paste(SOURCE_PATH, "dyscovr_helper_functions.R", sep = "/"))
       #source(paste(SOURCE_PATH, "perform_collinearity_correction.R", sep = "/"))
@@ -721,7 +721,7 @@ tryCatch({
 # SET PATHS AND IMPORT TARGET GENE DF
 ############################################################
 # If needed, subset this list based on the given targets in the target DF
-INPUT_PATH <- "/Genomics/argo/users/scamilli/Dyscovr/input_files/"
+INPUT_PATH <- "/Genomics/argo/users/scamilli/Dyscovr_Personal/input_files/"
 MAIN_PATH <- NA
 TARG_PATH <- NA
 
@@ -849,9 +849,11 @@ if((args$cancerType == "PanCancer") & (args$specificTypes != "ALL")) {
 } else {   
   lm_input_fns <- unique(list.files(input_lm_filepath, pattern = "lm_input_", 
                                     recursive = F))
+  print(input_lm_filepath)
   driver_input_fn <- list.files(input_lm_filepath, pattern = "driver_input_", 
                                 recursive = F)
-  
+  print(driver_input_fn)
+
   if(!(args$patientsOfInterestLabel %fin% c("", "male", "female"))) {
     gene_name_index <- gene_name_index + 1
     lm_input_fns <- intersect(lm_input_fns, 
