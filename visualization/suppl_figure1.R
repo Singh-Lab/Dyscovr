@@ -290,7 +290,7 @@ driver_freq_df_5perc <- driver_freq_df
 driver_freq_df_5perc <- driver_freq_df_5perc[driver_freq_df_5perc$Frequency > 0.05,] 
 
 # Create cowplot visualization
-ggplot(driver_freq_df, aes(x=Cancer.Type, y = reorder(Driver, Num.CTs), 
+ggplot(driver_freq_df_5perc, aes(x=Cancer.Type, y = reorder(Driver, Num.CTs), 
                            color = Frequency, size = Frequency)) + 
   geom_point() + cowplot::theme_cowplot() +
   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1),
@@ -303,15 +303,14 @@ ggplot(driver_freq_df, aes(x=Cancer.Type, y = reorder(Driver, Num.CTs),
                        name = 'Nonsynonymous\nMutation Frequency') +
   background_grid() #,oob = scales::squish)
 
-# Separate into cancer types with > 50 samples and those with less
-cancer_types_lt50 <- c("CHOL", "DLBC", "GBM", "LAML", "OV", "READ", "TCGT", 
-                       "THYM", "UCS", "UVM")
-cancer_types_gr50 <- c("ACC", "BLCA", "BRCA", "CESC", "COAD", "ESCA", "HNSC",
-                       "KICH", "KIRC", "KIRP", "LGG", "LIHC", "LUAD", "LUSC",
-                       "MESO", "PAAD", "PRAD", "SARC", "PCPG", "STAD", "THCA", 
-                       "UCEC")
+# Separate into cancer types with > 75 samples and those with less
+cancer_types_lt75 <- c("CHOL", "DLBC", "GBM", "KICH", "LAML", "OV", "READ", 
+                       "SARC", "STAD", "TCGT", "THYM", "UCS", "UVM")
+cancer_types_gr75 <- c("ACC", "BLCA", "BRCA", "CESC", "COAD", "ESCA", "HNSC",
+                       "KIRC", "KIRP", "LGG", "LIHC", "LUAD", "LUSC",
+                       "MESO", "PAAD", "PRAD", "PCPG", "THCA", "UCEC")
 
-ggplot(driver_freq_df, aes(x=Cancer.Type, y = reorder(Driver, Total.Freq), 
+ggplot(driver_freq_df_5perc, aes(x=Cancer.Type, y = reorder(Driver, Total.Freq), 
                            color = Frequency, size = Frequency)) + 
   geom_point() + cowplot::theme_cowplot() +
   theme(axis.text.x = element_text(angle = 45, vjust = 0.9, hjust=1),
@@ -322,7 +321,7 @@ ggplot(driver_freq_df, aes(x=Cancer.Type, y = reorder(Driver, Total.Freq),
   ylab('Driver Gene') + xlab("\nCancer Type") + 
   scale_color_gradient(low = "#20854EFF", high = "#FFDC91FF", 
                        name = 'Nonsynonymous\nMutation Frequency') + #, 
-  scale_x_discrete(limits = c(cancer_types_gr50, cancer_types_lt50)) +
+  scale_x_discrete(limits = c(cancer_types_gr75, cancer_types_lt75)) +
   background_grid() #,oob = scales::squish)
 
 

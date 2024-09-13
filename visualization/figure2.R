@@ -11,6 +11,8 @@ library(Hmisc)
 library(reshape2)
 library(wCorr)
 library(broom)
+library(dplyr)
+library(tidyverse)
 
 # Local PATH to directory containing Dyscovr output files
 PATH <-  paste0(getwd(), "Output/")
@@ -145,6 +147,16 @@ create_driver_bar <- function(list_of_master_dfs, tophit_thres,
     ranks[names(ranks) == ct]))
   
   # Create plot
+  distinct_colors = c("TP53" = "#0072B5FF", "PIK3CA" = "#BC3C29FF", "KRAS" = "#20854EFF", "IDH1" = "#FFDC91FF", 
+             "CTNNB1" = "#E18727FF", "BRAF" = "#7876B1FF", "NSD1" = "#EE4C9799", "SPOP" = "cyan3",
+             "NRAS" = "mediumaquamarine", "NFE2L2" = "beige", "NOTCH1" = "slategray1", 
+             "FBXW7" = "palevioletred3", "FGFR3" = "darkolivegreen3", "STK11" = "orange4", 
+             "CASP8" = "#6F99AD99", "TSC1" = "cornflowerblue", "RB1" = "yellow3", "SMARCA4" = "thistle2",
+             "HRAS" = "honeydew2", "SETD2" = "tan", "CIC" = "coral3", "PTEN" = "plum3",
+             "FGFR2" = "palegreen2", "ZNF521" = "lightsalmon", "MET" = "seagreen3",
+             "SMAD4" = "slateblue3", "NF1" = "orchid4", "CREBBP" = "paleturquoise2", "PBRM1" = "lightcoral",
+             "EGFR" = "navy", "ATM" = "white", "STAG2" = "greenyellow", "GNAS" = "gainsboro", 
+             "EP300" = "darkseagreen", "PPP2R1A" = "deepskyblue", "Other" = "gray")
   g <- ggplot(freq.table, aes(x = fct_reorder(Cancer_Type, rank_from_driver), 
                          y = Percentage, 
                          fill = fct_reorder(Driver, Rank, .desc = T), 
@@ -691,22 +703,22 @@ create_spearman_barplot <- function(source1_master_list, source2_master_list,
       return(ifelse(beta < 0, (-1)*pval, pval))
     }))
     
-    #spearman <- tidy(cor.test(neglogpvals_wdir_df1, neglogpvals_wdir_df2, 
-    #                          method = "spearman", use = "pairwise"))
+    spearman <- tidy(cor.test(neglogpvals_wdir_df1, neglogpvals_wdir_df2, 
+                              method = "spearman", use = "pairwise"))
     # Try a weighted Spearman
-    w <- df_merged$p.value.x * df_merged$p.value.y
+    #w <- df_merged$p.value.x * df_merged$p.value.y
     #w <- pmin(df_merged$p.value.x, df_merged$p.value.y, na.rm=T)
-    w <- unlist(lapply(w, function(l) 1-l))
+    #w <- unlist(lapply(w, function(l) 1-l))
     
     # Use the WCorr package
-    spearman <- weightedCorr(betas_df1, betas_df2, method = "Spearman", 
-                             weights = w)
+    #spearman <- weightedCorr(betas_df1, betas_df2, method = "Spearman", 
+    #                         weights = w)
     
     return(spearman)
   })
-  spearman_cor_vals <- as.numeric(unlist(spearman_correlations))
-  #spearman_cor_vals <- as.numeric(unlist(lapply(spearman_correlations, function(x) 
-    #x$estimate)))
+  #spearman_cor_vals <- as.numeric(unlist(spearman_correlations))
+  spearman_cor_vals <- as.numeric(unlist(lapply(spearman_correlations, function(x) 
+    x$estimate)))
   spearman_correlations_df <- data.frame("Gene" = names(source1_master_list), 
                                          "Spearman" = spearman_cor_vals)
   #print("P-Values")
@@ -720,7 +732,7 @@ create_spearman_barplot <- function(source1_master_list, source2_master_list,
   if(!is.na(qval_thres)) {
     ylab <- paste(ylab, paste0("(q <", paste0(qval_thres, ")")))
   }
-  
+  print(spearman_correlations_df)
   p <- ggplot(spearman_correlations_df, aes(x = reorder(Gene, -Spearman, mean), 
                                             y = Spearman, fill = Gene)) + 
     geom_bar(stat = "identity", show.legend = FALSE) + scale_fill_nejm() + 

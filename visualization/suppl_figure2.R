@@ -7,10 +7,11 @@
 library(data.table)
 library(ggplot2)
 library(ReactomePA)
-library("clusterProfiler")
 library("DOSE")
 library(GOSemSim)
 library("enrichplot")
+library("clusterProfiler")
+library(org.Hs.eg.db)
 
 # Local PATH to directory containing Dyscovr output files
 PATH <-  paste0(getwd(), "Output/")
@@ -52,7 +53,8 @@ unregister_dopar <- function() {
 #' @param goi a driver gene name of interest
 #' @param sort_by either "estimate" or "p.value" to indicate whether we want to 
 #' sort our top hits by Beta estimate or p-value when performing GSEA
-perform_gsea <- function(results_table, goi, sort_by) {
+#' @param mingssize minimum gene set size
+perform_gsea <- function(results_table, goi, sort_by, mingssize = 50) {
 
   # Get all of this driver protein's targets and their associated mutation 
   # coefficients, sorted descending order
@@ -111,7 +113,8 @@ perform_gsea <- function(results_table, goi, sort_by) {
   gse.ncg <- setReadable(gse.ncg, org.Hs.eg.db)
   
   gse.go <- gseGO(driverBetaScores, OrgDb = org.Hs.eg.db, pvalueCutoff = 1, 
-                  pAdjustMethod = "BH", keyType = "ENTREZID", ont = "BP")  # BP = biological process
+                  pAdjustMethod = "BH", keyType = "ENTREZID", ont = "BP",
+                  minGSSize = mingssize)  # BP = biological process
   gse.go <- setReadable(gse.go, org.Hs.eg.db)
   
   gse.kegg <- gseKEGG(driverBetaScores_kegg, pvalueCutoff = 1, 
@@ -257,24 +260,25 @@ create_gsea_barchart_multGenes <- function(list_of_results_gsea, n, qval_thres,
       
       # If desired, uncomment to sort pathways within each q-value bucket by 
       # leading edge signal
-      #buckets <- lapply(unique(results_gsea$qvalue), function(q) {
-      #  sub <- results_gsea[results_gsea$qvalue == q,]
-      #  sub$leading_edge_signal <- unlist(lapply(sub$leading_edge, function(x) {
-      #    spl <- unlist(strsplit(x, ", ", fixed = T))[3]
-      #    spl <- unlist(strsplit(unlist(strsplit(x, "=", fixed = T))[2], 
-      #                           "%", fixed = T))[1]
-      #    return(as.numeric(spl))
-      #  }))
-      #  return(sub[order(-sub$leading_edge_signal),])
-      #})
-      #results_gsea <- do.call(rbind, buckets)
+      buckets <- lapply(unique(results_gsea$qvalue), function(q) {
+        sub <- results_gsea[results_gsea$qvalue == q,]
+        sub$leading_edge_signal <- unlist(lapply(sub$leading_edge, function(x) {
+          spl <- unlist(strsplit(x, ", ", fixed = T))[3]
+          spl <- unlist(strsplit(unlist(strsplit(x, "=", fixed = T))[2], 
+                                 "%", fixed = T))[1]
+          return(as.numeric(spl))
+        }))
+        return(sub[order(-sub$leading_edge_signal),])
+      })
+      results_gsea <- do.call(rbind, buckets)
       #print(head(results_gsea))
     }
     
     results_gsea_sub <- results_gsea[1:min(n, nrow(results_gsea)), ]
 
     # Convert the p-values to -log10(pvalue)
-    negLog10_pvalues <- -log10(results_gsea_sub$qvalue)
+    negLog10_pvalues <- -log10(results_gsea_sub$pvalue + 1E10^(-10))
+    print(head(negLog10_pvalues))
     
     # Create an input data frame for ggplot
     input_df <- data.frame("Enriched.Pathway" = results_gsea_sub$Description,
@@ -289,16 +293,33 @@ create_gsea_barchart_multGenes <- function(list_of_results_gsea, n, qval_thres,
   input_df$Enriched.Pathway.Driver <- unlist(lapply(1:nrow(input_df), function(i) 
     paste(input_df[i, 'Driver'], input_df[i,'Enriched.Pathway'], sep = "_")))
   
-  p <- ggplot(input_df, aes(x =  Enriched.Pathway.Driver, #reorder(Enriched.Pathway.Driver, abs(ES)), 
-                            y = ES, fill = Driver)) +
+  # Split up pathways longer than N characters with a newline
+  input_df$Enriched.Pathway.Driver <- unlist(lapply(input_df$Enriched.Pathway.Driver, function(pw) {
+    nchar_pw <- nchar(pw)
+    if(nchar_pw > 50) {
+      pw_spl <- unlist(strsplit(pw, " ", fixed = T))
+      half <- ceiling(length(pw_spl) / 2)
+      pw_spl[half] <- paste0(pw_spl[half], "\n")
+      return(paste(pw_spl, collapse = " "))
+    }
+    else{return(pw)}
+  }))
+  
+  p <- ggplot(input_df, aes(x = reorder(Enriched.Pathway.Driver, abs(ES)), # Enriched.Pathway.Driver,
+  #p <- ggplot(input_df, aes(x = reorder(Enriched.Pathway.Driver, Neg.Log10.Pval),
+                              y = ES, fill = Driver)) +
+                             #y = Neg.Log10.Pval, fill = Driver)) +
     geom_col(width = 0.7, color = "black") + coord_flip() + theme_minimal() + 
     theme(legend.position = "none", 
           axis.title = element_text(face = "bold", size = 14), 
           axis.text = element_text(face = "bold", size = 10), 
           strip.text.x = element_text(face="bold", size=14, 
                                       margin = margin(.2, 0, .2, 0, "cm"))) + 
-    xlab(paste("Enriched", paste(db, "Pathways"))) + ylab("Enrichment Score") + 
-    scale_fill_manual(values = c("#FFDC91FF","#20854EFF","#BC3C29FF","#0072B5FF")) + 
+    xlab(paste("Enriched", paste(db, "Pathways"))) + 
+    #ylab("Enrichment Score") + 
+    ylab("-log10(pval)") + 
+    #geom_hline(yintercept=-log10(qval_thres), linetype="dashed", color = "black") +
+    scale_fill_manual(values = c("#20854EFF","#BC3C29FF","#0072B5FF", "#FFDC91FF")) + 
     scale_x_discrete(labels=roles) +
     facet_wrap(~factor(Driver, levels = c("TP53", "PIK3CA", "KRAS", "IDH1")), 
                ncol = 1, scales = "free_y") 
@@ -311,7 +332,21 @@ list_of_results_gsea <- list("TP53" = results_gsea_tp53[["go"]],
                              "KRAS" = results_gsea_kras[["go"]], 
                              "IDH1" = results_gsea_idh1[["go"]])
 
-create_gsea_barchart_multGenes(list_of_results_gsea, 8, 0.01, "q.value", "GO")
+create_gsea_barchart_multGenes(list_of_results_gsea, 8, 0.05, "q.value", "GO")
+
+# Import synthetic lethal GSEA results
+PATH_OUT <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
+results_gsea_synleth_tp53 <- fread(paste0(PATH_OUT, "DepMap/TP53/gsea_go_pancancer_qn_panq0.2_perq0.2_fishersp_dirsubB.csv"),
+                                   header = T)
+results_gsea_synleth_pik3ca <- fread(paste0(PATH_OUT, "DepMap/PIK3CA/gsea_go_pancancer_qn_panq0.2_perq0.2_fishersp_dirsubB.csv"),
+                                   header = T)
+results_gsea_synleth_kras <- fread(paste0(PATH_OUT, "DepMap/KRAS/gsea_go_pancancer_qn_panq0.2_perq0.2_fishersp_dirsubB.csv"),
+                                   header = T)
+list_of_results_gsea <- list("TP53" = results_gsea_synleth_tp53, 
+                             "PIK3CA" = results_gsea_synleth_pik3ca, 
+                             "KRAS" = results_gsea_synleth_kras)
+create_gsea_barchart_multGenes(list_of_results_gsea, 3, 0.2, "q.value", "GO")
+
 
 
 ############################################################
