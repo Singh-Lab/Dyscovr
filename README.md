@@ -2,14 +2,14 @@
 #### Sara Geraghty, Mona Singh Lab
 #### Lewis-Sigler Institute for Integrative Genomics, Princeton University
 
-Uncover links between mutated driver genes and dysregulation of putative target genes across the genome, within and across 22 cancer types.
+Uncover links between mutated driver genes and dysregulation of putative target genes across the genome, within and across 19 cancer types.
 
 # Publication Information
 LINK TO PUBLICATION
 Please cite as: 
 
 # Source Files
-* Input data files for the TCGA were downloaded from the GDC Data Portal Repository: https://portal.gdc.cancer.gov/repository. See Suppl. Table 2 (?) for information about file downloads.
+* Input data files for the TCGA were downloaded from the GDC Data Portal Repository: https://portal.gdc.cancer.gov/repository. See Suppl. Table 6 for information about file downloads.
 * Input data files for METABRIC (https://doi.org/10.1038/nature10983) were downloaded from cBioPortal (https://www.cbioportal.org/study/summary?id=brca_metabric).
 * After files are downloaded, they are run through the various preprocessing pipelines found in the data_processing folder. These steps vary by data type, but generally include filtering and normalization procedures.
 
@@ -41,7 +41,7 @@ Within ```output_files```, create a matching directory with cancer type name, e.
 Dyscovr defaults to create histograms of the p-value distribution and coefficient distribution for a given run. Within ```output_visualizations```, create a matching directory with cancer type name, e.g. ```PanCancer```, containing a directory with your run name, e.g. ```nonsynonymous```.
 
 ## Create Dyscovr Input Tables
-Create input tables for the Dyscovr framework. This is performed in a separate step in order to shorten runtime when multiple variations of Dyscovr (e.g. with varying arguments) are run on the same input data. This step relies on helper functions found in dyscovr_helper functions.R and creates two types of input files, stored separately to conserve memory: A. Features independent of the target gene: a table with features that are independent of the given target gene (including clinical features and driver-specific features). Only one of these files is created per cancer type. B. Features dependent on the target gene: specifically, target gene expression, mutation status, CNA status, and methylation status. One of these files is created per target gene in consideration. 
+Create input tables for the Dyscovr framework. This is performed in a separate step in order to shorten runtime when multiple variations of Dyscovr (e.g. with varying arguments) are run on the same input data. This step relies on helper functions found in dyscovr_helper_functions.R and creates two types of input files, stored separately to conserve memory: A. Features independent of the target gene: a table with features that are independent of the given target gene (including clinical features and driver-specific features). Only one of these files is created per cancer type. B. Features dependent on the target gene: specifically, target gene expression, mutation status, CNA status, and methylation status. One of these files is created per target gene in consideration. 
 ### Adjust Arguments
 Dyscovr is run using SLURM job allocation software on a HPC. View the ```create_dyscovr_input_tables.sh``` file to adjust arguments as desired. Detailed descriptions of each argument with defaults are found at the top of ```create_dyscovr_input_tables.R```. Default memory allocation is 64GB, and allocating less may cause an out-of-memory error. CPUs-per-task is set to 8 for purposes of multithreading and speed improvements.
 ### Run via the Command Line
@@ -54,4 +54,4 @@ Dyscovr is run using SLURM job allocation software on a HPC. View the ```run_dys
 ### Run via the Command Line
 Once the batch file is adjusted appropriately, ```cd``` to the main Dyscovr directory and call ```sbatch run_dyscovr.sh``` from the command line. Outfiles will be found in the directories you created in 'Create Directory Hierarchies...' and specified in the arguments of ```run_dyscovr.sh```.
 
-NOTE: When running on all genes in the human genome as targets, run on multiple, smaller input files for memory purposes (allgene_targets_pt1.csv, allgene_targets_pt2.csv, etc.). Post-processing is required to bind these results files back together and perform multiple hypothesis testing correction on the full set of tests.
+NOTE: When running on all genes in the human genome as targets, run on multiple, smaller input files for memory purposes (allgene_targets_pt1.csv, allgene_targets_pt2.csv, etc.). Post-processing is required to bind these results files back together and perform multiple hypothesis testing correction on the full set of tests; see ```recombine_multipart_output.R```.
