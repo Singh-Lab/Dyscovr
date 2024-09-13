@@ -6,13 +6,19 @@
 
 library(data.table)
 library(ggplot2)
-library(UpSetR)
-library(Hmisc)
-library(reshape2)
-library(wCorr)
-library(broom)
-library(dplyr)
+library(KSgeneral)
+library(dorothea)
+library(STRINGdb)
+library(igraph)
+library(GOSemSim)
+library(ggrepel)
+library(ggsci)
 library(tidyverse)
+library(ggraph)
+library(tidygraph)
+library(org.Hs.eg.db)
+
+keytypes(org.Hs.eg.db)
 
 # Local PATH to directory containing Dyscovr output files
 PATH <-  paste0(getwd(), "Output/")
@@ -25,734 +31,849 @@ source(general_important_functions.R)
 
 
 ############################################################
-### IMPORT PER-CANCER OUTPUT FILE(S)
+### IMPORT PAN-CANCER OUTPUT FILE(S)
 ############################################################
-perCancer_fns <- intersect(list.files(path = PATH, recursive = T,
-                                         pattern = "_corrected_MUT"), 
-                              intersect(list.files(path = PATH, recursive = T,
-                                                   pattern = "allGenes_"),
-                                        list.files(path = PATH, recursive = T,
-                                                   pattern = "Nonsyn.Drivers.Vogel.elim.vif.5")))
-perCancer <- lapply(perCancer_fns, function(f) 
-  fread(paste0(PATH, f), header = T))
-names(perCancer) <- unlist(lapply(pc_perCancer, function(x)
-  unlist(strsplit(x, "/", fixed = T))[1]))
+outfn <- "res_top_0.05_allGenes_quantile_rawCNA_methMRaw_3PCs_Nonsyn.Drivers.Vogel.elim.vif5.sp0.7_corrected_MUT.csv"
+pc_allGenes <- read.csv(paste0(PATH, outfn))
+
+outfn_wttn <- "res_top_0.05_allGenes_quantile_rawCNA_methMRaw_3PCs_Nonsyn.All.Vogel.elim.vif5.sp0.7_corrected_MUT.csv"
+pc_allGenes_wttn <- read.csv(paste0(PATH, outfn_wttn))
 
 
 ############################################################
-### PART A: PERCENTAGE BARPLOT OF DRIVER HITS PER-CANCER
+### PART A: BARPLOT OF HITS AT Q < 0.01
 ############################################################
-#' Create driver bar with the percentage of hits for each driver gene in each
-#' cancer type, with number of hits at the particular significance threshold 
-#' labeled
-#' @param list_of_master_dfs list of output master DFs with target gene names 
-#' and q-values, names are cancer types or subtypes
-#' @param tophit_thres a percentage or q-value threshold (e.g. 0.05) within 
-#' which to consider a hit "significant"
-#' @param perc_or_qval_or_ss whether the threshold is a percentage, a q-value or 
-#' a stability score
-#' @param all_genes_id_conv a conversion table to convert R_i Uniprot IDs to 
-#' intelligible gene names
-create_driver_bar <- function(list_of_master_dfs, tophit_thres, 
-                              perc_or_qval_or_ss, all_genes_id_conv) {
+qval_thres <- 0.01
+pc_allGenes_sig <- pc_allGenes_wttn[pc_allGenes_wttn$q.value < qval_thres,]
+pc_allGenes_sig_freq <- melt(table(pc_allGenes_sig$R_i.name))
+colnames(pc_allGenes_sig_freq) <- c("Driver", "Num.Hits")
+pc_allGenes_sig_freq <- pc_allGenes_sig_freq[order(pc_allGenes_sig_freq$Num.Hits),]
+ggplot(pc_allGenes_sig_freq, aes(y = Num.Hits, fill = Driver, 
+                             x = reorder(Driver, -Num.Hits, mean))) + 
+  geom_bar(position = "dodge", width = 0.95, stat = "identity", 
+           show.legend = F, color = "black") + 
+  scale_fill_manual(values = c("#FFDC91FF", "#20854EFF", "#BC3C29FF", 
+                               "#0072B5FF", "gray")) + 
+  xlab("Driver") + 
+  ylab(paste0("\n", paste0("Number of hits (q < ", paste0(qval_thres, ")")))) +
+  theme(axis.text = element_text(face="bold", size = 16), 
+        axis.title=element_text(size=18, face="bold"), 
+        panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'white'))
+
   
-  freq.tables <- lapply(1:length(list_of_master_dfs), function(i) {
-    master_df <- list_of_master_dfs[[i]]
-    cancer_type <- names(list_of_master_dfs)[[i]]
+############################################################
+### PART B-C: BARPLOT OF ENRICHMENT IN CGC AND TF TARGETS
+############################################################  
+#' Use a one-sided Fisher's Exact Test/ Hypergeometric (HG) test or a 
+#' Kolmogorov-Smirnov (K-S) test to test for statistical enrichment
+#' @param master_df a master DF produced from Dyscovr that has q-values
+#' @param known_targs a vector of known targets for a gene of interest (master
+#' DF should already be subsetted to just this gene); ex. ChIP-eat targets, STRING
+#' @param type the type of test, either "fisher's exact", "k-s", or "both"
+#' @param qval_thres q-value threshold for HG enrichment
+#' @param top_n option to specify a top n hits, rather than a q-value threshold
+compute_statistical_enrichment <- function(master_df, known_targs, type, 
+                                           qval_thres, top_n) {
+  final_res <- NA
+  
+  if ((type == "fisher's exact") | (type == "both")) {
+    sig_targets <- c()
+    nonsig_targets <- c()
     
-    # Create the frequency table
-    freq.table <- generate_frequency_input_table(master_df, tophit_thres, 
-                                                 perc_or_qval_or_ss, 
-                                                 all_genes_id_conv)
-    if(length(freq.table) < 2) {return(NA)}
-    
-    # Add a column of percentages
-    sum <- sum(freq.table$Frequency)
-    if(sum < 10) {return(NA)}
-    freq.table$Percentage <- unlist(lapply(freq.table$Frequency, function(x) 
-      (x/sum)*100))
-    
-    # Add the cancer type
-    freq.table$Cancer_Type <- cancer_type
-  
-    return(freq.table)
-  })
-  freq.tables <- freq.tables[!is.na(freq.tables)]
-  freq.table <- do.call(rbind, freq.tables)
-  freq.table[is.na(freq.table)] <- 0
-
-  # Make the drivers that make up less than 5% of the results across all cancer 
-  # types "other"
-  unique_drivers <- unique(as.character(freq.table$Driver))
-  drivers_to_rm <- unlist(lapply(unique_drivers, function(d) {
-    # Get the total % across all cancer types
-    total_perc <- sum(freq.table[freq.table$Driver == d, 'Percentage'])
-    total_frac <- sum(freq.table[freq.table$Driver == d, 'Frequency'])
-    if((total_perc < 10) & (total_frac < 100)) {return(d)}
-    else {return(NA)}
-  }))
-  drivers_to_rm <- drivers_to_rm[!is.na(drivers_to_rm)]
-  freq.table$Driver <- unlist(lapply(freq.table$Driver, as.character))
-  freq.table[which(freq.table$Driver %fin% drivers_to_rm), 'Driver'] <- "Other"
-  freq.table$Driver <- as.factor(freq.table$Driver)
-
-  # Adjust the order of the drivers based on total frequency + # of cancer types
-  freq.per.driver <- lapply(unique(freq.table$Driver), function(d) 
-    sum(freq.table[freq.table$Driver == d, 'Frequency']))
-  names(freq.per.driver) <- unique(freq.table$Driver)
-  freq.per.driver.df <- melt(as.data.frame(freq.per.driver))
-  colnames(freq.per.driver.df) <- c("Driver", "Total.Frequency")
-  
-  # Add the number of cancer types as well
-  freq.per.driver.df$Num.CTs <- unlist(lapply(freq.per.driver.df$Driver, function(d)
-    length(unique(freq.table[freq.table$Driver == d, 'Cancer_Type']))))
-  
-  freq.per.driver.df <- freq.per.driver.df[with(freq.per.driver.df, 
-                                                order(Num.CTs, Total.Frequency, 
-                                                      decreasing = T)),]
-  freq.per.driver.df$Rank <- 1:nrow(freq.per.driver.df)
-  freq.per.driver.df[freq.per.driver.df$Driver == 'Other', 'Rank'] <- max(
-    freq.per.driver.df$Rank) + 1
-  freq.per.driver.df <-  freq.per.driver.df[order(freq.per.driver.df$Rank),]
-
-  freq.table <- merge(freq.table, freq.per.driver.df, by = "Driver", all = T)
-  freq.table <- freq.table[order(freq.table$Rank),]
-  
-  freq.table$Frequency.Label <- unlist(lapply(1:nrow(freq.table), function(i) {
-    perc <- freq.table[i, "Percentage"]
-    freq <- freq.table[i, "Frequency"]
-    return(ifelse(perc > 2.5, freq, ""))
-  }))
-  freq.table$Driver <- as.factor(freq.table$Driver)
-  freq.table$Cancer_Type <- as.factor(freq.table$Cancer_Type)
-  
-  # Add the rank of each cancer type based on the total frequency of the top drivers
-  drivers <- unique(as.character(freq.table$Driver))
-  remaining_cancer_types <- unique(as.character(freq.table$Cancer_Type))
-  ranks <- list()
-  for(d in drivers) {
-    print(remaining_cancer_types)
-    if(length(remaining_cancer_types) == 0) {break}
-    sub <- freq.table[(freq.table$Driver == d) & 
-                        (freq.table$Cancer_Type %fin% remaining_cancer_types),]
-    new_ranks <- c()
-    if(length(ranks) > 0) {
-      new_ranks <- rank(desc(sub$Percentage)) + max(as.numeric(ranks))
-    } else {new_ranks <- rank(desc(sub$Percentage))}
-    names(new_ranks) <- sub$Cancer_Type
-    ranks <- c(ranks, new_ranks)
-    remaining_cancer_types <- setdiff(remaining_cancer_types, sub$Cancer_Type)
-  }
-  freq.table$rank_from_driver <- unlist(lapply(freq.table$Cancer_Type, function(ct)
-    ranks[names(ranks) == ct]))
-  
-  # Create plot
-  distinct_colors = c("TP53" = "#0072B5FF", "PIK3CA" = "#BC3C29FF", "KRAS" = "#20854EFF", "IDH1" = "#FFDC91FF", 
-             "CTNNB1" = "#E18727FF", "BRAF" = "#7876B1FF", "NSD1" = "#EE4C9799", "SPOP" = "cyan3",
-             "NRAS" = "mediumaquamarine", "NFE2L2" = "beige", "NOTCH1" = "slategray1", 
-             "FBXW7" = "palevioletred3", "FGFR3" = "darkolivegreen3", "STK11" = "orange4", 
-             "CASP8" = "#6F99AD99", "TSC1" = "cornflowerblue", "RB1" = "yellow3", "SMARCA4" = "thistle2",
-             "HRAS" = "honeydew2", "SETD2" = "tan", "CIC" = "coral3", "PTEN" = "plum3",
-             "FGFR2" = "palegreen2", "ZNF521" = "lightsalmon", "MET" = "seagreen3",
-             "SMAD4" = "slateblue3", "NF1" = "orchid4", "CREBBP" = "paleturquoise2", "PBRM1" = "lightcoral",
-             "EGFR" = "navy", "ATM" = "white", "STAG2" = "greenyellow", "GNAS" = "gainsboro", 
-             "EP300" = "darkseagreen", "PPP2R1A" = "deepskyblue", "Other" = "gray")
-  g <- ggplot(freq.table, aes(x = fct_reorder(Cancer_Type, rank_from_driver), 
-                         y = Percentage, 
-                         fill = fct_reorder(Driver, Rank, .desc = T), 
-                         label = Frequency.Label)) + 
-    geom_bar(position="stack", stat="identity", color = "black") +
-    theme_minimal() + xlab("Cancer Type") + 
-    ylab(paste0("Percentage of Hits q<", tophit_thres)) +
-    scale_fill_manual(values = distinct_colors,
-                      breaks = as.character(freq.per.driver.df$Driver),
-                      name = "Driver") +
-    geom_text(size = 3, position = position_stack(vjust = 0.5)) +
-    theme(axis.title = element_text(face = "bold", size = 14), 
-          axis.text = element_text(face = "bold", size = 12),
-          legend.title = element_text(face = "bold", size = 14),
-          legend.text = element_text(size = 12))
-  g
-}
-
-#' Helper function to generate the input frequency table for drivers, given 
-#' appropriate significance thresholds
-#' @param master_df output master DF with target gene names and q-values
-#' @param tophit_thres a percentage or q-value threshold (e.g. 0.05) within 
-#' which to  consider a hit "significant" 
-#' @param perc_or_qval_or_ss whether the threshold is a percentage, a q-value,
-#' or a stability score
-#' @param all_genes_id_conv a conversion table to convert R_i Uniprot IDs to 
-#' intelligible gene names
-generate_frequency_input_table <- function(master_df, tophit_thres, 
-                                           perc_or_qval_or_ss, 
-                                           all_genes_id_conv) {
-  if(perc_or_qval_or_ss == "perc") {
-    # Get the top n% of hits
-    master_df_topn <- master_df[1:(tophit_thres * nrow(master_df)),]
-    if('q.value' %in% colnames(master_df)) {
-      print(paste("Q-Value at", 
-                  paste(tophit_thres, 
-                        paste("threshold:", master_df[tophit_thres*nrow(master_df), 
-                                                      'q.value']))))
+    if(!is.na(qval_thres)) {
+      sig_targets <- unique(master_df[master_df$q.value < qval_thres, 
+                                      'T_k.name'])
+      nonsig_targets <- unique(master_df[master_df$q.value > qval_thres, 
+                                         'T_k.name'])
+    } else if(!is.na(top_n)) {
+      sig_targets <- unique(master_df[1:top_n, 'T_k.name'])
+      nonsig_targets <- unique(master_df[(top_n+1):nrow(master_df), 'T_k.name'])
+    } else {
+      print("Must specify a q-value threshold or top N in order to perform a 
+            Fischer's exact test. Please try again.")
+      return(NA)
     }
-    if('stability.score' %in% colnames(master_df)) {
-      print(paste("Stability score at", 
-                  paste(tophit_thres, 
-                        paste("threshold:", master_df[tophit_thres*nrow(master_df), 
-                                                      'stability.score']))))
-    }
-  } else if (perc_or_qval_or_ss == "qval") {
-    # Get the n hits below the qvalue threshold
-    master_df_topn <- master_df[master_df$q.value < tophit_thres,]
-    print(paste("Number of hits below the q-value threshold:", 
-                nrow(master_df_topn)))
-  } else if (perc_or_qval_or_ss == "ss") {
-    # Get the n hits greater than or equal to the stability score threshold
-    master_df_topn <- master_df[master_df$stability.score >= tophit_thres,]
-    print(paste("Number of hits above or equal to threshold:", 
-                nrow(master_df_topn)))
-  } else {
-    print("The only possible thresholding options are perc or qval. 
-          Please try again.")
-    return(NA)
-  }
-  
-  # Get the unique drivers, and create a frequency table of the number of 
-  # times that each driver appears
-  if(nrow(master_df_topn) > 0) {
-    unique_drivers <- unique(master_df_topn$term)
-    unique_drivers <- unique_drivers[!is.na(unique_drivers)]
+    targets <- unique(master_df$T_k.name)
     
-    freq.table <- as.data.frame(lapply(unique_drivers, function(x)
-      nrow(master_df_topn[master_df_topn$term == x,])))
-    unique_driver_names <- unlist(lapply(unique_drivers, function(d) {
-      driver_uniprot <- unlist(strsplit(d, "_", fixed = TRUE))[1]
-      driver_gn <- unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == 
-                                              driver_uniprot, 
-                                            'external_gene_name'])
-      return(driver_gn)
+    num_sig_targets <- length(sig_targets)
+    num_nonsig_targets <- length(nonsig_targets)
+    
+    known_targs_i <- intersect(known_targs, targets)
+    notknown_targs_i <- setdiff(targets, known_targs)
+    
+    num_known_targets <- length(known_targs_i)
+    num_notknown_targets <- length(notknown_targs_i)
+    
+    num_known_sig_targets <- length(intersect(sig_targets, known_targs_i))
+    num_known_nonsig_targets <- length(intersect(nonsig_targets, known_targs_i))
+    num_notknown_sig_targets <- length(intersect(sig_targets, notknown_targs_i))
+    num_notknown_nonsig_targets <- length(intersect(nonsig_targets, notknown_targs_i))
+    
+    contigency_table <- matrix(c(num_known_sig_targets, 
+                                 num_known_nonsig_targets,
+                                 num_notknown_sig_targets, 
+                                 num_notknown_nonsig_targets),
+                               nrow = 2, ncol = 2)
+    print(contigency_table)
+    
+    fisher_res <- fisher.test(contigency_table, alternative = "greater")
+    print(fisher_res$p.value)
+    
+    final_res <- fisher_res
+  }
+  if ((type == "k-s") | (type == "both")) {
+    # Create a uniform distribution the same length as the number of genes
+    uniform <- 1:length(master_df$T_k.name)
+    
+    # Get the ranks of the known targets within our ranked list
+    known_targs <- setdiff(known_targs, setdiff(known_targs, master_df$T_k.name))
+    ranks_of_targs <- unlist(lapply(known_targs, function(x) {
+      if(x %fin% master_df$T_k.name) {return(min(which(master_df$T_k.name == x,)))}
+      else {return(NA)}
     }))
-    names(freq.table) <- unique_driver_names
+    ranks_of_targs <- ranks_of_targs[!(is.infinite(ranks_of_targs) | 
+                                         (is.na(ranks_of_targs)))]
+
+    # Perform the K-S test, with the uniform distribution
+    ks_res <- ks.test(ranks_of_targs, uniform, alternative = "greater")
+    print(ks_res$p.value)
     
-    freq.table.m <- melt(freq.table)
-    colnames(freq.table.m) <- c("Driver", "Frequency")
-    freq.table.m <- freq.table.m[order(freq.table.m$Frequency, decreasing = TRUE),]
+    # Alternative to print the K-S statistic exactly, using the KSgeneral package
+    # (Note that this is now a two-sided test)
+    if(ks_res$p.value == 0) {
+      print("Printing KSgeneral two-sided K-S p-value:")
+      ks_res_exact <- disc_ks_test(ranks_of_targs, ecdf(uniform), exact = T,
+                                   alternative = "greater")
+      print(ks_res_exact$p.value)
+      ks_res <- ks_res_exact
+    }
     
-    return(freq.table.m)
+    if(type == "both") {final_res <- list(final_res, ks_res)}
+    else {final_res <- ks_res}
   }
-  else {return(NA)}
-}
-
-# Call function
-create_driver_bar(perCancer, 0.2, "qval", all_genes_id_conv)
-
-
-############################################################
-### PART B: UpSet Plots per Driver Gene
-############################################################
-#' Create an UpSet plot for a given gene-of-interest (goi) to visualize the
-#' shared hits between various cancer types
-#' @param list_of_master_dfs a named list of output DFs from Dyscovr, where 
-#' names correspond to cancer types 
-#' @param goi the Uniprot ID of the driver gene-of-interest
-#' @param qval_thres q-value threshold for significance
-#' @param top_n an optional field to limit to only the top n hits 
-plot_overlap_between_subgroups_upset <- function(list_of_master_dfs, goi, 
-                                                 qval_thres, top_n) {
-  
-  sig_hits <- lapply(1:length(list_of_master_dfs), function(i) {
-    m <- list_of_master_dfs[[i]]
-    if(!(goi %fin% m$R_i)) {return(NA)}
-    
-    sig_hits_tmp <- as.character(unlist(m[(m$R_i == goi) & 
-                                            (m$q.value < qval_thres), 
-                                          'T_k.name']))
-    if(!is.na(top_n)) {
-      if(length(sig_hits_tmp) > top_n) {sig_hits_tmp <- sig_hits_tmp[1:top_n]}
-    }
-    return(sig_hits_tmp)
-  })
-  names(sig_hits) <- names(list_of_master_dfs)
-  sig_hits <- sig_hits[!is.na(sig_hits)]
-  sig_hits <- sig_hits[lengths(sig_hits) != 0]
-  
-  ylab <- paste(goi, paste("Hit Intersections, q <", qval_thres))
-  
-  # Software is limited to only 5 groups, to restrict to just the cancer types
-  # with the greatest absolute number of hits
-  sig_hits_top5 <- sig_hits[order(lengths(sig_hits), decreasing = T)][1:5]
-  
-  # Set color scheme
-  main_bar_col <- c("#0072B5FF")
-  sets_bar_col <- c("#FFDC91FF")
-  matrix_col <- c("#E18727FF")
-  shade_col <- c("wheat4")
-  
-  if(!is.na(top_n)) {ylab <- paste0(ylab, 
-                                    paste(", top", 
-                                          paste(top_n, "hits per cancer type")))}
-  # Create UpSet plot
-  plt <- upset(fromList(sig_hits_top5),
-               order.by = 'freq', point.size = 3.5, line.size = 2, 
-               mainbar.y.label = paste0("Intersection Size, q<", qval_thres), 
-               sets.x.label = "Number of Hits", 
-               text.scale = c(2, 2, 2, 2, 2, 2),
-               main.bar.color = main_bar_col,
-               sets.bar.color = sets_bar_col,
-               matrix.color = matrix_col,
-               shade.color = shade_col)
-  print(plt)
-}
-
-# Call function
-plot_overlap_between_subgroups_upset(perCancer, "P04637", 0.2, NA) # TP53
-plot_overlap_between_subgroups_upset(perCancer, "P42336", 0.2, NA) # PIK3CA
-plot_overlap_between_subgroups_upset(perCancer, "P01116", 0.2, NA) # KRAS
-plot_overlap_between_subgroups_upset(perCancer, "O75874", 0.2, NA) # IDH1
-
-# NOTE: Annotations of shared target genes were added manually in a graphics editor
-
-
-############################################################
-### PART C: Pairwise Weighted Spearman Correlation Barplot
-############################################################
-#' Take the Spearman correlation, weighted Spearman, dot product, or cosine
-#' similarity of the coefficients fit in each pairwise set of cancer types at
-#' or above some q-value threshold, or a HG test of the hits that are shared
-#' at that threshold. Plot barplot containing all driver genes.
-#' @param perCancer list of output data frames from Dyscovr per-cancer, named by
-#' the cancer type
-#' @param qval_thres a q-value threshold for significance
-#' @param method either 'Spearman', 'WeightedSpearman', 'DP', 'CS', or 'HG' to 
-#' indicate what kind of test we are performing
-#' @param drivers a vector of the driver gene names that are highly mutated in
-#' at least 3 cancer types/ that we'd like to consider
-create_perdriver_percancer_barplot <- function(perCancer, qval_thres, method,
-                                               drivers) {
-  
-  if((method == "Spearman") | (method == "WeightedSpearman") | (method == "DP") | 
-     (method == "CS")) {
-    
-    # Use helper function to get the correlation values for each driver (pairwise
-    # between each set of cancer types in which that driver is frequently mutated)
-    vals_per_driver <- calculate_correlations_spearman_etc(perCancer, qval_thres, 
-                                                           method, drivers)
-    input_df <- melt(vals_per_driver)
-    
-    ## SPEARMAN ## 
-    if(method == "Spearman") {
-      colnames(input_df) <- c("Spearman", "Driver")
-      
-      g <- ggplot(input_df, aes(x = Driver, y = Spearman, fill = Driver)) + 
-        geom_boxplot() + theme_minimal() +
-        scale_fill_manual(values = c("TP53" = "#0072B5FF", "PIK3CA" = "#BC3C29FF", 
-                                     "KRAS" = "#20854EFF", "CTNNB1" = "#E18727FF", 
-                                     "FBXW7" = "palevioletred3")) +
-        geom_hline(yintercept = 0, linetype = "dashed") + 
-        ylab("Pairwise Spearman Correlation") + 
-        scale_x_discrete(limits = rev) + 
-        theme(axis.text = element_text(face = "bold", size = 12),
-              axis.title = element_text(face = "bold", size = 14),
-              axis.ticks = element_blank(), axis.line = element_blank(),
-              panel.border = element_blank(), legend.position = "none",
-              panel.grid.major = element_line(color='#eeeeee'))
-      print(g)
-    }
-    ## WEIGHTED SPEARMAN ## 
-    if(method == "WeightedSpearman") {
-      colnames(input_df) <- c("WeightedSpearman", "Driver")
-      print(head(input_df))
-      g <- ggplot(input_df, aes(x = Driver, y = WeightedSpearman, fill = Driver)) + 
-        geom_boxplot() + theme_minimal() +
-        scale_fill_manual(values = c("TP53" = "#0072B5FF", "PIK3CA" = "#BC3C29FF", 
-                                     "KRAS" = "#20854EFF", "CTNNB1" = "#E18727FF", 
-                                     "FBXW7" = "palevioletred3")) +
-        geom_hline(yintercept = 0, linetype = "dashed") + 
-        ylab("Pairwise Weighted Spearman Correlation") + 
-        scale_x_discrete(limits = rev) + 
-        theme(axis.text = element_text(face = "bold", size = 12),
-              axis.title = element_text(face = "bold", size = 14),
-              axis.ticks = element_blank(), axis.line = element_blank(),
-              panel.border = element_blank(), legend.position = "none",
-              panel.grid.major = element_line(color='#eeeeee'))
-      print(g)
-    }
-    ## DOT PRODUCT ## 
-    if(method == "DP") {
-      colnames(input_df) <- c("Dot.Product", "Driver")
-      print(head(input_df))
-      g <- ggplot(input_df, aes(x = Driver, y = Dot.Product, fill = Driver)) + 
-        geom_boxplot() + theme_minimal() +
-        scale_fill_manual(values = c("TP53" = "#0072B5FF", "PIK3CA" = "#BC3C29FF", 
-                                     "KRAS" = "#20854EFF", "CTNNB1" = "#E18727FF", 
-                                     "FBXW7" = "palevioletred3")) +
-        geom_hline(yintercept = 0, linetype = "dashed") +
-        ylab("Pairwise Dot Product") + 
-        scale_x_discrete(limits = rev) + 
-        theme(axis.text = element_text(face = "bold", size = 12),
-              axis.title = element_text(face = "bold", size = 14),
-              axis.ticks = element_blank(), axis.line = element_blank(),
-              panel.border = element_blank(), legend.position = "none",
-              panel.grid.major = element_line(color='#eeeeee'))
-      print(g)
-    }
-    ## COSINE SIMILARITY ## 
-    if (method == "CS") {
-      colnames(input_df) <- c("Cosine.Similarity", "Driver")
-      print(head(input_df))
-      g <- ggplot(input_df, aes(x = Driver, y = Cosine.Similarity, fill = Driver)) + 
-        geom_boxplot() + theme_minimal() +
-        scale_fill_manual(values = c("TP53" = "#0072B5FF", "PIK3CA" = "#BC3C29FF", 
-                                     "KRAS" = "#20854EFF", "CTNNB1" = "#E18727FF", 
-                                     "FBXW7" = "palevioletred3")) +
-        geom_hline(yintercept = 0, linetype = "dashed") +
-        ylab("Pairwise Cosine Similarity") + 
-        scale_x_discrete(limits = rev) + 
-        theme(axis.text = element_text(face = "bold", size = 12),
-              axis.title = element_text(face = "bold", size = 14),
-              axis.ticks = element_blank(), axis.line = element_blank(),
-              panel.border = element_blank(), legend.position = "none",
-              panel.grid.major = element_line(color='#eeeeee'))
-      print(g)
-    }
-  
-  ## HYPERGEOMETRIC TEST ## 
-  } else if (method == "HG") {
-  
-    hg_per_driver <- calculate_hg_per_driver(perCancer, qval_thres, method, drivers)
-    
-    input_df <- melt(hg_per_driver)
-    colnames(input_df) <- c("HG.pvalue", "Driver")
-    print(head(input_df))
-    ggplot(input_df, aes(x = Driver, y = HG.pvalue)) + geom_boxplot()
-    
-  } else {
-    print("Only implemented for methods 'Spearman', 'DP', 'CS', 'WeightedSpearman',
-    and 'HG'. Please try again with one of these inputs.")
+  if (!(type %in% c("fisher's exact", "k-s", "both"))) {
+    print("Only implemented for 'Fisher's exact' or 'k-s' tests.")
+    return(0)
   }
+  return(final_res)
 }
 
-#' Helper function to subset each output data frame in the list by driver d and
-#' by q-value; keep only the necessary columns (estimate and target name)
-#' @param perCancer list of output data frames from Dyscovr per-cancer
-#' @param d the name of the given driver
-#' @param qval_thres a q-value threshold for significance
-#' @param min_hits the minimum number of hits for a given driver in a given 
-#' cancer type
-subset_output_list <- function(perCancer, d, qval_thres, min_hits = 15) {
-  perCancer_sub <- lapply(1:length(perCancer), function(i) {
-    x <- perCancer[[i]]
-    ct <- names(perCancer)[i]
+### CANCER GENE SETS ###
+# Import a table containing a compiled list of known cancer genes
+# CGC genes are from Cancer Gene Census genes (from COSMIC) downloaded January 21, 2019
+# COSMIC: https://www.sanger.ac.uk/tool/cosmic/
+# Vogelstein genes are from  Vogelstein et al. (Science 2013), 
+# doi: 10.1126/science.1235122, Tables S2A, S2B, S3A, S3B, S3C and S4
+known_cancer_genes_table <- read.table(paste0(PATH, "Validation_Files/GRCh38_driver_gene_list.tsv"), 
+                                       sep = "\t", header = T, check.names = F, 
+                                       comment.char = "#", skip = 10)
+known_cancer_genes <- known_cancer_genes_table$primary_gene_names
+vogelstein_genes <- known_cancer_genes_table[
+  grepl("V", known_cancer_genes_table$cancer_driver_status), 'primary_gene_names']
+cgc_genes <- known_cancer_genes_table[
+  grepl("C", known_cancer_genes_table$cancer_driver_status), 'primary_gene_names']
+
+
+### TF EFFECTORS FROM DOROTHEA ###
+
+# PIK3CA
+foxo_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("FOXO1|FOXO3|FOXO4|FOXO6", dorothea_net$tf) , 'target']))  #907
+srebp_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("SREBF", dorothea_net$tf) , 'target'])) #31
+myc_dorothea_targets <- unique(unlist(dorothea_net[
+  dorothea_net$tf == "MYC", 'target'])) #386
+hif1a_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("HIF1A", dorothea_net$tf) , 'target'])) #148
+atf4_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("ATF4", dorothea_net$tf) , 'target'])) #16
+nrf2_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("NFE2L2", dorothea_net$tf) , 'target'])) #11
+
+pik3ca_tf_targets <- unique(c(foxo_dorothea_targets, srebp_dorothea_targets, 
+                              myc_dorothea_targets, hif1a_dorothea_targets, 
+                              atf4_dorothea_targets, nrf2_dorothea_targets)) # 1411
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "PIK3CA",], 
+                               pik3ca_tf_targets, "both", 0.01, NA)
+
+# KRAS
+ets1_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("ETS1", dorothea_net$tf) , 'target']))  #145
+ets1_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("ETS2", dorothea_net$tf) , 'target']))  #30
+etv1_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("ETV1", dorothea_net$tf) , 'target']))  #29
+elk1_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("ELK1", dorothea_net$tf) , 'target']))  #31
+creb135_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("CREB1|CREB3|CREB5", dorothea_net$tf) , 'target']))  #1779
+foxo1_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("FOXO1", dorothea_net$tf) , 'target']))  #43
+myc_dorothea_targets <- unique(unlist(dorothea_net[
+  dorothea_net$tf == "MYC", 'target'])) #386
+
+kras_tf_targets <- unique(c(ets1_dorothea_targets, ets2_dorothea_targets, 
+                            etv1_dorothea_targets, elk1_dorothea_targets, 
+                            foxo1_dorothea_targets, myc_dorothea_targets, 
+                            creb135_dorothea_targets)) # 2591
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "KRAS",], 
+                               kras_tf_targets, "both", 0.01, NA)
+
+# IDH1
+atf3_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("ATF3", dorothea_net$tf) , 'target']))  #1304
+jun_dorothea_targets <- unique(unlist(dorothea_net[
+  grepl("JUN", dorothea_net$tf), 'target']))  #176
+sox8_dorothea_targets <- unique(unlist(dorothea_net[
+  dorothea_net$tf == "SOX8", 'target']))  #802
+mycn_dorothea_targets <- unique(unlist(dorothea_net[
+  dorothea_net$tf == "MYCN", 'target']))  #13
+hey1_dorothea_targets <- unique(unlist(dorothea_net[
+  dorothea_net$tf == "HEY1", 'target']))  #422
+nr2f2_dorothea_targets <- unique(unlist(dorothea_net[
+  dorothea_net$tf == "NR2F2", 'target'])) #18
+
+idh1_tf_targets <- unique(c(atf3_dorothea_targets, jun_dorothea_targets, 
+                            sox8_dorothea_targets, mycn_dorothea_targets,
+                            hey1_dorothea_targets, nr2f2_dorothea_targets))
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "IDH1",], 
+                               idh1_tf_targets, "both", 0.01, NA)
+
+
+#' Create enrichment barplot of -log10(p-values) from enrichment test for each
+#' driver gene
+#' @param pc_allGenes results DF from Dyscovr, pan-cancer
+#' @param drivers vector of the names of the driver genes of interest
+#' @param target_set a list of 1, with the entry corresponding to a vector of 
+#' names of genes in the target set. Alternatively, if we have a different
+#' target set per driver, a list of target sets with names corresponding
+#' to driver genes
+#' @param label_enrichment_type a label for the type of enrichment test (e.g. "K-S")
+#' @param label_target_set a label for the name of the target gene set (e.g. CGC)
+#' @param qval_thres a q-value threshold for significance, only relevant for 
+create_enrichment_barplot <- function(pc_allGenes, drivers, label_enrichment_type,
+                                      target_set, label_target_set, qval_thres) {
+  enrichments <- lapply(drivers, function(d) {
+    print(d)
     
-    if(d %fin% x$R_i.name) {
-      # Keep only if there are at least 15 hits for this driver
-      if(nrow(x[(x$R_i.name == d) & (x$q.value < 0.2),]) < min_hits) {return(NA)}
-      
-      est_newname <- paste0('estimate.', ct)
-      colnames(x)[which(colnames(x) == 'estimate')] <- est_newname
-      
-      # Uncomment to use the T-statistic instead
-      #est_newname <- paste0('statistic.', ct)
-      #colnames(x)[which(colnames(x) == 'statistic')] <- est_newname
-      
-      est_newname_qval <- paste0('q.value.', ct)
-      colnames(x)[which(colnames(x) == 'q.value')] <- est_newname_qval
-      
-      cols_to_keep <- c(est_newname, 'T_k.name', est_newname_qval)
-      
-      if(!is.na(qval_thres)) {
-        if(nrow(x[(x$q.value < qval_thres) & (x$R_i.name == d),]) > 0) {
-          return(x[(x$q.value < qval_thres) & (x$R_i.name == d), 
-                   which(colnames(x) %fin% cols_to_keep), with=F])
-        } else {return(NA)}
-      } else {return(x[x$R_i.name == d, which(colnames(x) %fin% cols_to_keep), 
-                       with=F])}
-    } else {return(NA)}
-  })
-  perCancer_sub <- perCancer_sub[!is.na(perCancer_sub)]
-  names(perCancer_sub) <- unlist(lapply(perCancer_sub, function(x) 
-    return(unlist(strsplit(colnames(x)[1], ".", fixed = T))[2])))
-  
-  return(perCancer_sub)
-}
-
-#' Calculates the correlation (according to the given method) of the pairwise 
-#' mutation coefficients for each driver gene 
-#' @param perCancer list of output data frames from Dyscovr per-cancer, named by
-#' the cancer type
-#' @param qval_thres a q-value threshold for significance
-#' @param method either 'Spearman', 'WeightedSpearman', 'DP', 'CS', or 'HG' to 
-#' indicate what kind of test we are performing
-#' @param drivers a vector of the driver gene names that are highly mutated in
-#' at least 3 cancer types/ that we'd like to consider
-calculate_correlations_spearman_etc <- function(perCancer, qval_thres, method,
-                                                drivers) {
-  
-  vals_per_driver <- lapply(drivers, function(d) {
-    perCancer_sub <- subset_output_list(perCancer, d, qval_thres)
-    
-    # Merge estimates by gene
-    if(length(perCancer_sub) > 1) {
-      perCancer_merged <- Reduce(function(...) 
-        merge(..., by = 'T_k.name', all = T), perCancer_sub)
-      
-      # Keep only rows that have at least two non-NA values
-      #perCancer_merged <- perCancer_merged[rowSums(!is.na(
-      #  perCancer_merged)) > 1,]
-      
-      if(nrow(perCancer_merged) > 9) {
-        
-        ## SPEARMAN ##
-        if(method == "Spearman") {
-          perCancer_merged <- perCancer_merged[,!which(grepl("q.value", 
-                                                             colnames(perCancer_merged))),
-                                               with=F]
-          # Generate correlation matrix using the Hmisc package
-          corr_mat <- as.data.frame(rcorr(x = as.matrix(
-            perCancer_merged[,2:ncol(perCancer_merged)]), 
-            type = "spearman")$r)
-          vals <- unlist(lapply(1:(ncol(corr_mat)-1), function(i) {
-            return(corr_mat[(i+1):nrow(corr_mat),i])
-          }))
-          return(vals)
-          
-        } else {
-          perCancer_qvals <- perCancer_merged[,c(1, which(grepl("q.value",
-                                                                colnames(perCancer_merged)))),
-                                              with=F]
-          perCancer_merged <- perCancer_merged[,!which(grepl("q.value",
-                                                             colnames(perCancer_merged))),
-                                               with=F]
-          coeff_vects <- lapply(2:ncol(perCancer_merged), function(i) {
-            vals <- unlist(perCancer_merged[,i,with=F])
-            return(as.numeric(vals))
-          })
-          qval_vects <- lapply(2:ncol(perCancer_qvals), function(i) {
-            vals <- unlist(perCancer_qvals[,i,with=F])
-            return(as.numeric(vals))
-          })
-          
-          # Take the pairwise CS/ DP/ Weighted Spearman of each vector
-          vals <- c()
-          for (i in 1:(length(coeff_vects)-1)) {
-            for (j in (i+1):length(coeff_vects)) {
-              v1 <- coeff_vects[[i]]
-              v2 <- coeff_vects[[j]]
-              q1 <- qval_vects[[i]]
-              q2 <- qval_vects[[j]]
-              ## WEIGHTED SPEARMAN ##
-              if (method == "WeightedSpearman") {
-                vals_to_rm <- unique(c(which(is.na(v1) | is.nan(v1)), 
-                                       which(is.na(v2) | is.nan(v2))))
-                if(length(vals_to_rm) > 0) {
-                  v1 <- v1[-vals_to_rm]
-                  v2 <- v2[-vals_to_rm]
-                  q1 <- q1[-vals_to_rm]
-                  q2 <- q2[-vals_to_rm]
-                }
-                w <- q1 * q2
-                #w <- pmin(q1, q2, na.rm=T)
-                w <- unlist(lapply(w, function(l) 1-l))
-                
-                # Use the WCorr package
-                spearman <- weightedCorr(v1, v2, method = "Spearman", 
-                                         weights = w)
-                vals <- c(vals, spearman)
-              }
-              ## DOT PRODUCT ##
-              if (method == "DP") {
-                dp <- as.numeric(sum(v1*v2, na.rm = T))
-                vals <- c(vals, dp)
-                
-                ## COSINE SIMILARITY ##
-              } else {
-                vals_to_rm <- unique(c(which(is.na(v1)), which(is.na(v2))))
-                if(length(vals_to_rm) > 0) {
-                  v1 <- v1[-vals_to_rm]
-                  v2 <- v2[-vals_to_rm]
-                }
-                cos <- cosine(v1, v2)
-                vals <- c(vals, cos)
-              }
-            }
-          }
-          return(vals)
-        }
-      } else {return(NA)}
-    } else{return(NA)}
-  })
-  names(vals_per_driver) <- drivers
-  vals_per_driver <- vals_per_driver[!is.na(vals_per_driver)]
-  
-  return(vals_per_driver)
-}
-
-#' Calculates the Hypergeometric enrichment of the pairwise sets of mutation
-#' coefficients for each driver gene
-#' @param perCancer list of output data frames from Dyscovr per-cancer, named by
-#' the cancer type
-#' @param qval_thres a q-value threshold for significance
-#' @param method either 'Spearman', 'WeightedSpearman', 'DP', 'CS', or 'HG' to 
-#' indicate what kind of test we are performing
-#' @param drivers a vector of the driver gene names that are highly mutated in
-#' at least 3 cancer types/ that we'd like to consider
-calculate_hg_per_driver <- function(perCancer, qval_thres, method, drivers) {
-  
-  hg_per_driver <- lapply(drivers, function(d) {
-    targets_by_ct <- lapply(1:length(perCancer), function(i) {
-      x <- perCancer[[i]]
-      if(!is.na(qval_thres)) {
-        if(nrow(x[(x$q.value < qval_thres) & (x$R_i.name == d),]) > 0) {
-          return(as.character(unlist(x[(x$q.value < qval_thres) & (x$R_i.name == d), 
-                                       'T_k.name', with=F])))
-        } else {return(NA)}
-      } else {return(as.character(unlist(x[x$R_i.name == d, 'T_k.name', with=F])))}
-    })
-    names(targets_by_ct) <- names(perCancer)
-    targets_by_ct <- targets_by_ct[!is.na(targets_by_ct)]
-    targets_by_ct <- targets_by_ct[lengths(targets_by_ct) != 0]
-
-    if(length(targets_by_ct) > 1) {
-      # Take the pairwise HG of each set of cancer types
-      hg <- c()
-      for (i in 1:(length(targets_by_ct)-1)) {
-        len_hits1 <- length(targets_by_ct[[i]])
-        ct1 <- names(targets_by_ct)[i]
-        dfi <- perCancer[[ct1]]
-        
-        for (j in (i+1):length(targets_by_ct)) {
-          # Calculate whether overlap is significant using an approx. of an 
-          # exact hypergeometric test
-          len_hits2 <- length(targets_by_ct[[j]])
-          target_overlap <- intersect(targets_by_ct[[i]], 
-                                      targets_by_ct[[j]])
-          len_ol <- length(target_overlap)
-
-          ct2 <- names(targets_by_ct)[j]
-          dfj <- perCancer[[ct2]]
-          n <- length(intersect(as.character(unlist(dfi[dfi$R_i.name == d, 
-                                                        'T_k.name'])), 
-                                as.character(unlist(dfj[dfj$R_i.name == d, 
-                                                        'T_k.name']))))
-          print(n)
-          
-          # n is size of urn; hits1 is the number of genes from set 1. Say we 
-          # were to draw the number of balls the size of hits2 (# of genes from 
-          # set 2), w/o replacement. M of these balls are also found in hits2. 
-          # What are the odds that M >= len_ol?
-          phyper_res <- phyper(len_ol-1, len_hits1, n-len_hits1, len_hits2, 
-                               lower.tail = F, log.p = F)
-          print(paste("p-value:", phyper_res))
-          hg <- c(hg, phyper_res)
-        }
-      }
-      return(hg)
-    } else {return(NA)}
-  })
-  names(hg_per_driver) <- drivers
-  hg_per_driver <- hg_per_driver[!is.na(hg_per_driver)]
-  
-  return(hg_per_driver)
-}
-
-# Call function
-top5_drivers <- c("TP53", "PIK3CA", "KRAS", "CTNNB1", "FBXW7")
-create_perdriver_percancer_barplot(perCancer, 0.2, 'WeightedSpearman', top5_drivers)
-
-
-############################################################
-### PART D: Spearman Correlation between TCGA-BRCA and METABRIC
-############################################################   
-#' Create a Spearman barplot that, when given two corresponding lists of master 
-#' DFs (named according to the R_i), computes the Spearman correlation of the 
-#' mutation coefficient (Beta) values. Plots a barplot of the results.
-#' @param source1_master_list a list of master DFs from a certain source 1
-#' @param source2_master_list a list of master DFs (for the same genes) from a 
-#' certain source 2. Two source lists should be the same length.
-#' @param qval_thres optional q-value threshold for significance
-#' @param label a character label of the data sets for plotting
-create_spearman_barplot <- function(source1_master_list, source2_master_list, 
-                                    qval_thres, label) {
-  
-  spearman_correlations <- lapply(1:length(source1_master_list), function(i) {
-    df1 <- source1_master_list[[i]]
-    df2 <- source2_master_list[[i]]
-    
-    if(!(is.na(qval_thres))) {
-      df1 <- df1[df1$q.value < qval_thres,]
-      df2 <- df2[df2$q.value < qval_thres,]
+    e <- NA
+    # One target set for all drivers (e.g. CGC genes)
+    if(length(target_set) == 1) {
+      e <- compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == d,], 
+                                          unlist(target_set), 
+                                          tolower(label_enrichment_type), 
+                                          qval_thres)
+    # One target set per driver (e.g. TF targets)
+    } else {
+      target_set_d <- target_set[[which(names(target_set) == d)]]
+      e <- compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == d,], 
+                                          target_set_d, tolower(label_enrichment_type), 
+                                          qval_thres)
     }
-    
-    df_merged <- merge(df1, df2, by = "T_k.name", all = FALSE)
-    
-    betas_df1 <- df_merged$estimate.x
-    betas_df2 <- df_merged$estimate.y
-    
-    neglogpvals_df1 <- -log2(df_merged$p.value.x)
-    neglogpvals_df2 <- -log2(df_merged$p.value.y)
-    
-    neglogpvals_wdir_df1 <- unlist(lapply(1:length(neglogpvals_df1), function(i) {
-      beta <- betas_df1[i]
-      pval <- neglogpvals_df1[i]
-      return(ifelse(beta < 0, (-1)*pval, pval))
-    }))
-    neglogpvals_wdir_df2 <- unlist(lapply(1:length(neglogpvals_df2), function(i) {
-      beta <- betas_df2[i]
-      pval <- neglogpvals_df2[i]
-      return(ifelse(beta < 0, (-1)*pval, pval))
-    }))
-    
-    spearman <- tidy(cor.test(neglogpvals_wdir_df1, neglogpvals_wdir_df2, 
-                              method = "spearman", use = "pairwise"))
-    # Try a weighted Spearman
-    #w <- df_merged$p.value.x * df_merged$p.value.y
-    #w <- pmin(df_merged$p.value.x, df_merged$p.value.y, na.rm=T)
-    #w <- unlist(lapply(w, function(l) 1-l))
-    
-    # Use the WCorr package
-    #spearman <- weightedCorr(betas_df1, betas_df2, method = "Spearman", 
-    #                         weights = w)
-    
-    return(spearman)
+
+    p <- -log10(e$p.value)
+    return(p)
   })
-  #spearman_cor_vals <- as.numeric(unlist(spearman_correlations))
-  spearman_cor_vals <- as.numeric(unlist(lapply(spearman_correlations, function(x) 
-    x$estimate)))
-  spearman_correlations_df <- data.frame("Gene" = names(source1_master_list), 
-                                         "Spearman" = spearman_cor_vals)
-  #print("P-Values")
-  #print(unlist(lapply(spearman_correlations, function(x) 
-    #as.numeric(x$p.value))))
-  #print("Correlations")
-  #print(as.numeric(unlist(lapply(spearman_correlations, function(x) 
-    #x$estimate))))
+  names(enrichments) <- drivers
   
-  ylab <- paste("Weighted SCC,", label)
-  if(!is.na(qval_thres)) {
-    ylab <- paste(ylab, paste0("(q <", paste0(qval_thres, ")")))
-  }
-  print(spearman_correlations_df)
-  p <- ggplot(spearman_correlations_df, aes(x = reorder(Gene, -Spearman, mean), 
-                                            y = Spearman, fill = Gene)) + 
-    geom_bar(stat = "identity", show.legend = FALSE) + scale_fill_nejm() + 
-    theme_minimal() + xlab("Gene") + ylab(ylab) +
-    theme(axis.text = element_text(face="bold", size = 12), 
-          axis.title=element_text(size=14,face="bold"))
+  input <- melt(as.data.frame(enrichments))
+  colnames(input) <- c("Driver", "negLog10pval")
   
+  p <- ggplot(input, aes(y = negLog10pval, fill = Driver, 
+                    x = reorder(Driver, negLog10pval, mean))) + 
+    geom_bar(position = "dodge", width = 0.95, stat = "identity", 
+             show.legend = F, color = "black") + 
+    scale_fill_manual(values = c("#0072B5FF", "#BC3C29FF", "#20854EFF", "#FFDC91FF")) + 
+    #scale_fill_nejm() + 
+    xlab("Driver") +
+    ylab(paste("-log10(pval) of", 
+                paste(label_enrichment_type, 
+                      paste("Enrichment,\n", paste(label_target_set, "Genes"))))) +
+    geom_hline(yintercept=-log10(0.05), linetype="dashed", color = "black") + 
+    coord_flip() + #theme_minimal() +
+    scale_y_discrete(expand = c(0, 0)) + scale_y_continuous(expand = c(0, 0)) +
+    theme(axis.text = element_text(face="bold", size = 14), 
+          axis.title=element_text(size=16, face="bold"), 
+          panel.grid.major = element_blank(),
+          panel.background = element_rect(fill = 'white'))
   print(p)
 }
 
-tcga_brca <- perCancer[["BRCA"]]
-source1_master_list <- list("TP53" = tcga_brca[tcga_brca$R_i.name == "TP53",], 
-                            "PIK3CA" = tcga_brca[tcga_brca$R_i.name == "PIK3CA",])
+drivers <- c("TP53", "PIK3CA", "KRAS", "IDH1")
 
-# Import METABRIC results
-metabric_res <- read.csv(paste0(PATH, "METABRIC/res_top_0.05_allGenes_df_rawCNA_methMRaw_Nonsyn.Driver.Vogel.sklearn.elim.vif.5_corrected_MUT.csv"))
+# Call function (CGC)
+create_enrichment_barplot(pc_allGenes, drivers, "K-S", list(cgc_genes), "CGC", 0.01)
 
-source2_master_list <- list("TP53" = metabric_res[metabric_res$R_i.name == "TP53",], 
-                            "PIK3CA" = metabric_res[metabric_res$R_i.name == "PIK3CA",])
+# Call function (DoRothEA targets)
+tf_targets <- list("TP53" = tp53_dorothea_targets, 
+                         "PIK3CA" = pik3ca_tf_targets,
+                         "KRAS" = kras_tf_targets,
+                         "IDH1" = idh1_tf_targets)
+create_enrichment_barplot(pc_allGenes, drivers, "K-S", tf_targets, 
+                          "DoRothEA TF Targets (Pooled)", 0.01)
+
+
+############################################################
+### PART D: TP53 CUMULATIVE FRACTION OF KNOWN TARGETS
+############################################################  
+#' Function to plot the enrichment of various target groups among the significant 
+#' gene hits, together on one plot, where the enrichment in the given source is 
+#' denoted by color and line form
+#' @param master_df a master DF produced from Dyscovr that has q-values
+#' @param target_sets_list a list of each of the target sets we are interested 
+#' in doing enrichment on, with each set's name/ label as the name for the 
+#' list item
+#' @param goi a string denoting the gene-of-interest, for labeling graph
+#' @param thres a threshold for the number of hit genes we show in the full plot; 
+#' if NA then we plot enrichment across all gene targets
+#' @param cutout_thres a threshold for the inset/cutout enrichment plot 
+#' ('zoomed' in on)
+#' @param silent_df OPTIONAL: an additional, corresponding DF from Dyscovr with 
+#' silent mutation results
+plot_combined_enrichment <- function(master_df, target_sets_list, goi, thres, 
+                                     cutout_thres, silent_df) {
+  
+  master_df <- master_df[order(master_df$q.value),]
+  if(length(silent_df) > 1) {
+    silent_df <- silent_df[order(silent_df$q.value),]
+  }
+  
+  # For each source, create a 0 and 1 vector for each  target hit to indicate if  
+  # it is a a hit in that source
+  target_set_vector_list <- lapply(target_sets_list, function(source) {
+    source <- setdiff(source, setdiff(source, master_df$T_k.name))
+    vect <- unlist(lapply(1:nrow(master_df), function(i) {
+      x <- master_df[i, 'T_k.name']
+      return(ifelse(x %fin% source, 1, 0))
+    }))
+    return(vect)
+  })
+  
+  target_set_vector_list_silent <- NA
+  if(length(silent_df) > 1) {
+    names(target_set_vector_list) <- paste0("MN.", names(target_sets_list))
+    silent_df$T_k.name <- as.factor(silent_df$T_k.name)
+    target_set_vector_list_silent <- lapply(target_sets_list, function(source) {
+      vect <- unlist(lapply(1:nrow(silent_df), function(i) {
+        x <- silent_df[i, 'T_k.name']
+        return(ifelse(x %fin% source, 1, 0))
+      }))
+      return(vect)
+    })
+    names(target_set_vector_list_silent) <- paste0("S.", names(target_sets_list))
+  } else {
+    names(target_set_vector_list) <- names(target_sets_list)
+  }
+  
+  # Use helper function to get fraction of genes at given rank
+  target_set_fraction_df <- get_frac_of_genes_at_rank(target_set_vector_list, 
+                                                      master_df)
+  target_set_fraction_df_silent <- NA
+  if(length(silent_df) > 1) {
+    target_set_fraction_df_silent <- get_frac_of_genes_at_rank(
+      target_set_vector_list_silent, silent_df)
+    target_set_fraction_df <- merge(target_set_fraction_df, 
+                                    target_set_fraction_df_silent, by = "Rank")
+  }
+  
+  target_sets_fraction_df_m <- melt(target_set_fraction_df, "Rank")
+  colnames(target_sets_fraction_df_m) <- c("Rank", "Source", "Frac")
+  target_sets_fraction_df_m$Mutation.Type <- unlist(lapply(
+    target_sets_fraction_df_m$Source, function(x) {
+      val <- "Nonsynonymous"
+      if(grepl("S.", x, fixed = TRUE)) {val <- "Synonymous"}
+      return(val)
+  }))
+  
+  # Create inset plot
+  p2 <- ggplot(target_sets_fraction_df_m[target_sets_fraction_df_m$Rank %fin% 
+                                           1:cutout_thres,], 
+               mapping = aes(x = Rank, y = Frac, color = Source)) + 
+    geom_line(aes(linetype=Mutation.Type, alpha = Mutation.Type), size = 1.25) +
+    scale_x_continuous(limits = c(1,cutout_thres)) + 
+    scale_color_nejm() + scale_alpha_manual(values=c(0.9,0.9,0.4,0.4)) +
+    scale_color_manual(values = c("#BC3C29FF", "#0072B5FF", "#BC3C29FF", "#0072B5FF")) + 
+    theme(legend.position = "none", axis.title.x = element_blank(), 
+          axis.title.y = element_blank(), panel.grid.minor = element_blank(), 
+          axis.text.x = element_text(size = 14, face = "bold"), 
+          axis.text.y =  element_text(size = 14, face = "bold"))
+  
+  p <- ggplot(target_sets_fraction_df_m[target_sets_fraction_df_m$Rank %fin% 
+                                          1:thres,], 
+              mapping = aes(x = Rank, y = Frac, color = Source)) + 
+    geom_line(aes(linetype=Mutation.Type, alpha = Mutation.Type), size = 1.25) +
+    theme(axis.text = element_text(size = 16, face = "bold"), 
+          axis.title = element_text(size = 18, face = "bold"), 
+          panel.grid.minor = element_blank(), 
+          panel.background = element_rect(fill = 'white'), 
+          legend.text=element_text(size=14), 
+          legend.title = element_text(size = 16)) +
+    xlab("Gene Rank") + ylab("Fraction in Set of Known Targets") + 
+    scale_x_continuous(limits = c(1,thres)) +
+    scale_color_nejm() +  scale_alpha_manual(values=c(0.9,0.9,0.4,0.4)) +
+    scale_color_manual(values = c("#BC3C29FF", "#0072B5FF", "#BC3C29FF", "#0072B5FF"),
+                       labels = c(names(target_sets_list), 
+                                  rep("", times = length(names(target_sets_list))))) + 
+    annotation_custom(ggplotGrob(p2), xmin =(thres-round(thres/1.5)), 
+                      xmax = thres, ymin = 0.30, ymax = 1.0) +
+    geom_rect(data=target_sets_fraction_df_m[1:cutout_thres,], 
+              aes(xmin = 1, xmax = cutout_thres, ymin = 0, ymax = 1, 
+                  fill = "gray"), color = NA, fill = alpha("gray", .01))
+  return(p)
+}
+
+#' Get the fraction of genes at or above the given rank, for each set
+#' @param target_set_vector_list a named list of each source with hit/not 
+#' binary vector
+#' @param master_df master df with ordered top hits
+get_frac_of_genes_at_rank <- function(target_set_vector_list, master_df) {
+  target_set_fraction_list <- lapply(target_set_vector_list, function(vect) {
+    frac_nw_vect <- c()
+    count_of_nw_genes <- 0
+    for (i in 1:nrow(master_df)) {
+      val_of_curr_tg <- vect[i]
+      count_of_nw_genes <- count_of_nw_genes + val_of_curr_tg
+      frac <- count_of_nw_genes / i
+      frac_nw_vect <- c(frac_nw_vect, frac)
+    }
+    return(frac_nw_vect)
+  })
+  
+  names(target_set_fraction_list) <- names(target_set_vector_list)
+  target_sets_fraction_df <- as.data.frame(target_set_fraction_list)
+  
+  target_sets_fraction_df$Rank <- 1:nrow(master_df)
+  
+  return(target_sets_fraction_df)
+}
+
+
+### CURATED TARGETS ###
+# TP53 target genes from Fischer et al., 2017: https://pubmed.ncbi.nlm.nih.gov/28288132/
+tp53_curated_targets <- read.csv(paste0(PATH, "Validation_Files/TP53_Targets_Fischer_2017_Oncogene.csv"),
+                                 header = T, check.names = F)[,1]
+
+### DoRothEA  ###
+# https://bioconductor.org/packages/release/data/experiment/vignettes/dorothea/inst/doc/dorothea.html
+dorothea_net <- dorothea::dorothea_hs
+
+tp53_dorothea_targets <- unlist(dorothea_net[dorothea_net$tf == "TP53", 'target'])
+
+# Combine into list
+tp53_select_target_set_list <- list("Curated_Fischer_2017" = tp53_curated_targets,
+                                    "DoRothEA" = tp53_dorothea_targets)
 
 # Call function
-create_spearman_barplot(source1_master_list, source2_master_list, 0.2, 
-                        "TCGA-BRCA & METABRIC") 
+plot_combined_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",],
+                         tp53_select_target_set_list, "TP53", 500, 50, NA)
+
+
+############################################################
+### PART E: PER-DRIVER NETWORK OVERLAY
+############################################################  
+# Useful tutorial: https://mr.schochastics.net/material/netVizR/
+
+#' Generate results graph display for a driver of interest 
+#' This graphical display takes confidence interaction relationships from 
+#' a network like STRING or HumanBase, and displays these relationships
+#' as a graph. The graph will only include hits with a q-value below the
+#' given threshold. The edges and genes are colored by whether activation or 
+#' repression is predicted by Dyscovr when the driver is mutated. 
+#' @param master_df an output DF from Dyscovr
+#' @param goi the name of the driver gene of interest
+#' @param qval_thres a q-value threshold, below which a target-driver
+#' pairing is considered significant
+#' @param network a table with the network information from either 
+#' HumanBase or STRING
+#' @param network_label either "STRING" or "HumanBase" to denote 
+#' what type of network this is
+#' @param conf_thres a confidence threshold for a connection between two 
+#' genes in the given network
+#' @param top_n if not NA, gives a value of the top N most significant targets 
+#' to use
+create_graphical_representation <- function(master_df, goi, qval_thres, 
+                                            network, network_label, conf_thres, 
+                                            top_n) {
+  
+  # Subset the master DF to the given goi and q-value threshold
+  master_df_sub <- master_df[(master_df$R_i.name == goi) & 
+                               (master_df$q.value < qval_thres),]
+  if(!is.na(top_n)) {master_df_sub <- master_df_sub[1:top_n, ]}
+  nodes <-  c(goi, unique(master_df_sub$T_k.name))
+  
+  network_model_targs <- NA
+  
+  # Subset the network to the significant targets, plus the GOI
+  if(network_label == "STRING") {
+    network_model_targs <- network[(network$node1_name %fin% nodes) & 
+                                     (network$node2_name %fin% nodes),]
+  } else if (network_label == "HumanBase") {
+    network_model_targs <- network[(network$node1_name %fin% nodes) & 
+                                     (network$node2_name %fin% nodes),]
+    
+  } else {
+    print("Error in given network label. Only implemented for STRING and 
+          HumanBase networks.")
+  }
+  
+  # Remove cases where nodes 1 and 2 are the same, or rows where the values in 
+  # the row are duplicated in a different order. Divide all confidence scores by 
+  # 1000 for STRING
+  network_model_targs <- subset(network_model_targs, node1_name != node2_name & 
+                                  !duplicated(cbind(pmin(node1_name, node2_name), 
+                                                    pmax(node1_name, node2_name))))
+  if(network_label == "STRING") {
+    network_model_targs$combined_score <- network_model_targs$combined_score / 1000
+  }
+  
+  # For each of the targets, get its a) directionality (up- or down-regulated), 
+  # b) confidence score in the given network, in relation to the driver 
+  edge_rows <- lapply(1:nrow(network_model_targs), function(i) {
+    conf <- network_model_targs[i, 'combined_score']   
+    if(conf > conf_thres) {
+      g1 <- network_model_targs[i, 'node1_name']
+      g2 <- network_model_targs[i, 'node2_name']
+      return(data.frame("src" = g1, "target" = g2, 
+                        "conf" = as.numeric(conf)))
+    } else {return (NA)}
+  })
+  edge_rows <- edge_rows[!is.na(edge_rows)]
+  edge_table <- do.call(rbind, edge_rows)
+  colnames(edge_table) <- c("src", "target", "conf")
+
+  unique_nodes <- unique(c(edge_table$src, edge_table$target))
+  node_table <- as.data.frame(unique_nodes)
+  colnames(node_table) <- "nodes"
+  node_table$dir <- as.factor(unlist(lapply(unique_nodes, function(n) {
+    dir <- NA
+    if(n == goi) {dir <- 0}
+    else {
+      dir <- ifelse(as.numeric(master_df_sub[master_df_sub$T_k.name == n, 
+                                             'estimate'])[1] > 0, 1, -1)
+    }
+    return(dir)
+  })))
+  node_table$node_size <- unlist(lapply(node_table$dir, function(d) {
+    if(d == 0) {return(2)}
+    else {return(1)}
+  }))
+  print(node_table)
+
+  # Convert to ggraph format
+  network_table <- tbl_graph(nodes = node_table, edges = edge_table, directed = F)
+  
+  # Create ggraph
+  driver_targ_network <- ggraph(network_table, layout = "fr") +   # other options: stress
+    geom_edge_link0(edge_colour = "darkgray", edge_width = 1) +  
+    geom_node_point(aes(fill = dir, size = node_size), shape = 21) +    
+    scale_size(range = c(5,10), guide = 'none') + 
+    geom_node_label(aes(label = nodes), repel = TRUE, show.legend = F, 
+                    label.size = NA, label.padding = 0.05) +
+    theme_graph() +
+    scale_fill_manual(values = c("#0072B5FF", "lightgreen", "#E18727FF"), 
+                      labels = c("Pred. Downregulation", "Driver", 
+                                 "Pred. Upregulation"),
+                      name = "Direction of Regulation") +
+    theme(legend.title = element_text(face = "bold", size = 14),
+          legend.text = element_text(size = 12), legend.position="bottom") 
+
+  # Render the network
+  show(driver_targ_network)
+  
+  return(node_table)
+}
+
+#' Helper function to adjust the STRING network file for use with visual rendering
+#' @param string_nw an unadjusted STRING network file downloaded from STRING
+#' https://string-db.org/
+#' @param string_nw_info a helper file from STRING with additional gene annotations
+#' @param all_genes_id_conv ID conversion file from BioMart
+adjust_string_nw_files <- function(string_nw, string_nw_info, all_genes_id_conv) {
+
+  colnames(string_nw) <- c("node1", "node2", "combined_score")
+  string_nw$index <- 1:nrow(string_nw)
+  
+  # Add info for any missing IDs
+  missing_ids <- setdiff(string_nw_info$string_protein_id, 
+                         unique(c(string_nw$node1, string_nw$node2)))
+  missing_info <- lapply(missing_ids, function(id) {
+    new_id <- unlist(strsplit(id, ".", fixed = T))[2]
+    print(new_id)
+    if(new_id %fin% all_genes_id_conv$ensembl_peptide_id) {
+      id_row <- all_genes_id_conv[all_genes_id_conv$ensembl_peptide_id == new_id,]
+      print(id_row)
+      name <- unique(unlist(id_row[,'external_gene_name']))
+      return(data.frame("string_protein_id" = id, "preferred_name" = name, 
+                        "protein_size" = NA, "annotation" = NA))
+    } else {return(NA)}
+  })
+  missing_info <- missing_info[!is.na(missing_info)]
+  missing_info_df <- do.call(rbind, missing_info)
+  string_nw_info <- rbind(string_nw_info, missing_info_df)
+  
+  # Convert any ENSG IDs to external gene names
+  string_nw_info$preferred_name <- unlist(lapply(string_nw_info$preferred_name, function(n) {
+    new_n <- n
+    if(grepl("ENSG", n, fixed = T)) {
+      new_n <- paste(unique(all_genes_id_conv[all_genes_id_conv$ensembl_gene_id == n, 
+                                              'external_gene_name']), collapse = ";")
+    }
+    return(new_n)
+  }))
+  
+  missing_ids_from_run <- setdiff(pc_allGenes$T_k.name, 
+                                  string_nw_info$preferred_name)
+  missing_info_from_run <- lapply(missing_ids_from_run, function(name) {
+    ensp <- unique(all_genes_id_conv[all_genes_id_conv$external_gene_name == name, 
+                                     'ensembl_peptide_id'])
+    ensp <- paste0("9606.", ensp)
+    return(data.frame("string_protein_id" = ensp, "preferred_name" = name, 
+                      "protein_size" = NA, "annotation" = NA))
+  })
+  missing_info_from_run_df <- do.call(rbind, missing_info_from_run)
+  missing_info_from_run_df <- missing_info_from_run_df[
+    !(missing_info_from_run_df$string_protein_id == "9606."),]
+  string_nw_info <- rbind(string_nw_info, missing_info_from_run_df)
+  
+  string_nw_pt1 <- merge(string_nw[, c('node1', 'combined_score', 'index')], 
+                         string_nw_info[, c('string_protein_id', 'preferred_name')], 
+                         by.x = 'node1', by.y = 'string_protein_id')
+  colnames(string_nw_pt1) <- c("node1", "combined_score", "index", "node1_name")
+  string_nw_pt1 <- string_nw_pt1[order(string_nw_pt1$index),]
+  
+  string_nw_pt2 <- merge(string_nw[, c('node2', 'combined_score', 'index')], 
+                         string_nw_info[, c('string_protein_id', 'preferred_name')], 
+                         by.x = 'node2', by.y = 'string_protein_id')
+  colnames(string_nw_pt2) <- c("node2", "combined_score", "index", "node2_name")
+  string_nw_pt2 <- string_nw_pt2[order(string_nw_pt2$index),]
+  
+  string_nw_full <- merge(string_nw_pt1, string_nw_pt2, 
+                          by = c('combined_score', 'index'))
+  
+  string_nw_full$node1 <- unlist(lapply(string_nw_full$node1, function(x) 
+    unlist(strsplit(x, ".", fixed = T))[2]))
+  string_nw_full$node2 <- unlist(lapply(string_nw_full$node2, function(x) 
+    unlist(strsplit(x, ".", fixed = T))[2]))
+  
+  return(string_nw_full)
+}
+
+# Import the String network files and adjust (only need to do this once)
+string_nw <- fread(paste0(PATH, "Validation_Files/string.9606.protein.links.v11.5.txt"),
+                   header = T)
+string_nw_info <- read.table(paste0(PATH, "Validation_Files/string.9606.protein.info.v11.5.txt"), 
+                             header = T, sep = "\t")
+string_nw_full <- adjust_string_nw_files(string_nw, string_nw_info, 
+                                         all_genes_id_conv)
+fwrite(string_nw_full, paste0(
+  PATH, "Validation_Files/string.9606.protein.links.v11.5.namesAdded.txt"))
+
+# Read back, once completed
+string_nw_full <- fread(paste0(PATH, "Validation_Files/string.9606.protein.links.v11.5.namesAdded.txt"))
+
+# Call function
+create_graphical_representation(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
+                                "TP53", 0.01, string_nw_full, "STRING", 0.4, NA)
+
+
+############################################################
+### PART F: PER-DRIVER VOLCANO PLOTS
+############################################################ 
+#' Create a volcano plot for a given driver in a particular cancer type or 
+#' subtype, with significant hits highlighted and labeled
+#' @param master_df a data frame produced by Dyscovr
+#' @param goi a driver gene-of-interest uniprot ID
+#' @param qval_thres a q-value threshold for significance
+create_volcano_plot <- function(master_df, goi, qval_thres) {
+  
+  # Subset to the GOI 
+  master_df <- master_df[master_df$R_i == goi,]
+  master_df <- na.omit(master_df)
+  
+  # Get the log2(Beta), which we are considering here to be like log2(fold change)
+  log2_beta <- unlist(lapply(master_df$estimate, function(e) { 
+    if((is.nan(e)) | (length(e) == 0)) {return(0)}
+    else {return(e)}
+  }))
+
+  # Get the -log10(qvalue)
+  neg_log10_qval <- unlist(lapply(master_df$q.value, function(q) { 
+    if((is.nan(q)) | (length(q) == 0)) {return(-log10(1))}
+    else {return(-log10(q))}
+  }))
+
+  up_or_down <- unlist(lapply(1:nrow(master_df), function(i) {
+    if(master_df[i, 'q.value'] < qval_thres) {
+      beta_sign <- ifelse(master_df[i, 'estimate'] > 0, 1, 0) 
+      if(beta_sign == 1) {return("up")}
+      else {return("down")}
+    } else {return("ns")}
+  }))
+  
+  gene_names <- unlist(lapply(1:nrow(master_df), function(i) 
+    ifelse(-log10(master_df$q.value[i]) > 5, master_df$T_k.name[i], NA)))
+
+  # Put this into a DF for plotting
+  plot_df <- data.frame("log2_beta" = log2_beta, "neg_log10_qval" = neg_log10_qval,
+                        "up_or_down" = up_or_down, "gene" = gene_names)
+  plot_df[which(plot_df$neg_log10_qval == Inf), 'neg_log10_qval'] <- max(
+    plot_df$neg_log10_qval[plot_df$neg_log10_qval != Inf]) + 5
+  
+  xlim_min <- -1
+  xlim_max <- 1
+  
+  # Optionally squish each point outside the given x-axis limits
+  #plot_df[which(plot_df$log2_beta > xlim_max), 'log2_beta'] <- xlim_max
+  #plot_df[which(plot_df$log2_beta < xlim_min), 'log2_beta'] <- xlim_min
+  
+  # Set color and alpha params
+  cols <- c("up" = "#E18727FF", "down" = "#0072B5FF", "ns" = "grey") 
+  alphas <- c("up" = 0.95, "down" = 0.95, "ns" = 0.5)
+  
+  p <- ggplot(plot_df, aes(x = log2_beta, y = neg_log10_qval, fill = up_or_down, 
+                           alpha = up_or_down, label = gene)) + 
+    geom_point(shape = 21, size = 2.5) + xlab("Mutation Coefficient") + 
+    ylab("-log10(q-value)") + theme_minimal() + 
+    ylim(0, max(plot_df$neg_log10_qval[plot_df$neg_log10_qval != Inf]) + 1) +
+    geom_hline(yintercept = -log10(qval_thres), linetype = "dashed") +
+    scale_fill_manual(values = cols) + scale_alpha_manual(values = alphas) + 
+    theme(legend.position = "none", 
+          axis.title = element_text(face = "bold", size = 14),
+          axis.text = element_text(size = 12)) + 
+    geom_text_repel(min.segment.length = unit(0.05, "lines"), size = 4, 
+                    force = 3.5, box.padding = 0.6, colour = "black") + 
+    xlim(xlim_min, xlim_max)
+  p
+}
+
+create_volcano_plot(pc_allGenes[pc_allGenes$R_i.name == "TP53",], "P04637", 0.01)
+create_volcano_plot(pc_allGenes[pc_allGenes$R_i.name == "PIK3CA",], "P42336", 0.01)
+create_volcano_plot(pc_allGenes[pc_allGenes$R_i.name == "KRAS",], "P01116", 0.01)
+create_volcano_plot(pc_allGenes[pc_allGenes$R_i.name == "IDH1",], "O75874", 0.01)
+
+
+############################################################
+### SUPPLEMENTAL TABLE 2: TP53 ENRICHMENTS IN OTHER EXTERNAL DATASETS
+############################################################ 
+### TRRUST ###
+# https://www.grnpedia.org/trrust/
+trrust_df <- read.table(paste0(PATH, "Validation_Files/trrust_rawdata.human.txt"),
+                        header = F, check.names = F)
+trrust_df_tp53 <- trrust_df[(trrust_df[,1] == "TP53") | (trrust_df[,2] == "TP53"),]
+tp53_trrust_targets <- unique(c(trrust_df_tp53$V1, trrust_df_tp53$V2))
+tp53_trrust_targets <- tp53_trrust_targets[tp53_trrust_targets != "TP53"]
+
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+                               tp53_trrust_targets, "k-s", 0.01)
+
+### hTFtarget ###
+# http://bioinfo.life.hust.edu.cn/hTFtarget
+tf_target_df <- read.table(paste0(PATH, "Validation_Files/TF-Target-information.txt"),
+                           header = T, check.names = F, sep = "\t")
+tf_target_df_tp53 <- tf_target_df[grepl("P53", tf_target_df$TF),]
+tf_target_tp53 <- unique(tf_target_df_tp53$target)
+
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+                               tf_target_tp53, "k-s", 0.01)
+
+### Reactome ###
+# https://reactome.org/PathwayBrowser/
+# Transcriptional Regulation by TP53 (R-HSA-3700989)
+tp53_transcriptional_reg_pw <- read.csv(paste0(
+  PATH, "Validation_Files/Transcriptional Regiulation by TP53_R-HSA-3700989.csv"), 
+                                        header = T, check.names = F)
+tp53_transcriptional_reg_pw_gns <- unlist(lapply(tp53_transcriptional_reg_pw$MoleculeName, function(x) 
+  unlist(strsplit(x, " ", fixed = TRUE))[2]))
+tp53_transcriptional_reg_pw_gns <- unique(tp53_transcriptional_reg_pw_gns[
+  tp53_transcriptional_reg_pw_gns != "TP53"])
+
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+                               tp53_transcriptional_reg_pw_gns, "k-s", 0.01)
+
+# TP53 Regulates Metabolic Genes (R-CFA-5628897)
+tp53_regulates_metabolism_pw <- read.csv(paste0(
+  nw_path, "Validation_Files/TP53 Regulates Metabolic Genes_R-HSA-5628897.csv"), 
+                                         header = TRUE, check.names = FALSE)
+tp53_regulates_metabolism_pw_gns <- unlist(lapply(tp53_regulates_metabolism_pw$MoleculeName, function(x) 
+  unlist(strsplit(x, " ", fixed = TRUE))[2]))
+tp53_regulates_metabolism_pw_gns <- unique(tp53_regulates_metabolism_pw_gns[tp53_regulates_metabolism_pw_gns != "TP53"])
+
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+                               tp53_regulates_metabolism_pw_gns, "k-s", 0.01)
+
+### KEGG ###
+# https://www.gsea-msigdb.org/gsea/msigdb/cards/KEGG_P53_SIGNALING_PATHWAY
+# KEGG P53 Signaling Pathway (hsa04115)
+tp53_kegg_pathway <- read.table(paste0(
+  PATH, "Validation_Files/KEGG_P53_SIGNALING_PATHWAY.v7.5.1.txt"), sep = "\t", header = T)
+tp53_kegg_pathway_genes <- unlist(strsplit(tp53_kegg_pathway$KEGG_P53_SIGNALING_PATHWAY[19], 
+                                           ",", fixed = T))
+
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+                               tp53_kegg_pathway_genes, "k-s", 0.01)
+
+### HUMAN BASE ###
+# Link to download: https://hb.flatironinstitute.org/download
+global_nw <- fread(paste0(input_path, "HumanBase/global_top/global_top"), header = F)
+colnames(global_nw) <- c("entrez1", "entrez2", "posterior_prob")
+
+# Limit to posterior probability of at least 0.5 (default on website)
+global_nw_0.5 <- global_nw[global_nw$posterior_prob > 0.5, ]
+
+# Change Entrez IDs to gene names
+mapping <- as.data.frame(bitr(unique(c(global_nw_0.5$entrez1, global_nw_0.5$entrez2)), 
+                              fromType = "ENTREZID", toType = "SYMBOL", 
+                              OrgDb=org.Hs.eg.db, drop = T))
+global_nw_0.5$gene_name1 <- unlist(lapply(global_nw_0.5$entrez1, function(x) {
+  symb <- mapping[mapping$ENTREZID == x, 'SYMBOL']
+  if(length(symb) == 0) {return(NA)}
+  else{return(symb)}
+}))
+global_nw_0.5$gene_name2 <- unlist(lapply(global_nw_0.5$entrez2, function(x) {
+  symb <- mapping[mapping$ENTREZID == x, 'SYMBOL']
+  if(length(symb) == 0) {return(NA)}
+  else{return(symb)}
+}))
+
+fwrite(global_nw_0.5, paste0(input_path, "HumanBase/global_top/global_top_0.5_idconv.csv"))
+
+# Get driver interactors from HumanBase 
+tp53_hb_interactors <- unique(unlist(global_nw_0.5[(global_nw_0.5$gene_name1 == "TP53") |
+                                                  (global_nw_0.5$gene_name2 == "TP53"), 
+                                                c("gene_name1", "gene_name2")]))  #262
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+                               tp53_hb_interactors, "k-s", 0.01)
+
+### INTACT ###
+# Website: https://www.ebi.ac.uk/intact/home
+# Search TP53 and download set of interactors
+tp53_intact_interactors <- read.table(paste0(PATH, "Validation_Files/IntAct/tp53_interactors.txt"),
+                                      header = T, sep = "\t")
+tp53_intact_interactors[,1] <- unlist(lapply(tp53_intact_interactors[,1], function(x) 
+  unlist(strsplit(x, ":", fixed = T))[2]))
+tp53_intact_interactors[,2] <- unlist(lapply(tp53_intact_interactors[,2], function(x) 
+  unlist(strsplit(x, ":", fixed = T))[2]))
+tp53_intact_interactors <- unique(unlist(tp53_intact_interactors[(tp53_intact_interactors[,1] == "P04637") |
+                                                     (tp53_intact_interactors[,2] == "P04637"), c(1,2)]))
+tp53_intact_interactors <- tp53_intact_interactors[tp53_intact_interactors != "P04637"]
+
+# Convert to gene names, or modify enrichment function
+tp53_intact_interactors <- unlist(lapply(tp53_intact_interactors, function(ia) 
+  unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == ia, 'external_gene_name'])))
+
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+                               tp53_intact_interactors, "k-s", 0.01)  
+
+### BIOGRID ###
+# Website: https://thebiogrid.org/
+# Search TP53 and download set of interactors
+
+tp53_biogrid_interactors <- read.table(paste0(PATH, "Validation_Files/BioGrid/TP53/BIOGRID-GENE-113010-4.4.233.tab3.txt"),
+                                      header = T, sep = "\t")
+tp53_biogrid_interactors <- unique(unlist(c(tp53_biogrid_interactors$`Systematic Name Interactor A`,
+                                            tp53_biogrid_interactors$`Systematic Name Interactor B`)))
+tp53_biogrid_interactors <- tp53_biogrid_interactors[tp53_biogrid_interactors != "TP53"]
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+                               tp53_biogrid_interactors, "k-s", 0.01)  
+
