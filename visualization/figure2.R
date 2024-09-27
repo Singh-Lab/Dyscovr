@@ -176,6 +176,8 @@ cgc_genes <- known_cancer_genes_table[
 
 
 ### TF EFFECTORS FROM DOROTHEA ###
+# https://bioconductor.org/packages/release/data/experiment/vignettes/dorothea/inst/doc/dorothea.html
+dorothea_net <- dorothea::dorothea_hs
 
 # PIK3CA
 foxo_dorothea_targets <- unique(unlist(dorothea_net[
@@ -200,7 +202,7 @@ compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "PIK3CA",],
 # KRAS
 ets1_dorothea_targets <- unique(unlist(dorothea_net[
   grepl("ETS1", dorothea_net$tf) , 'target']))  #145
-ets1_dorothea_targets <- unique(unlist(dorothea_net[
+ets2_dorothea_targets <- unique(unlist(dorothea_net[
   grepl("ETS2", dorothea_net$tf) , 'target']))  #30
 etv1_dorothea_targets <- unique(unlist(dorothea_net[
   grepl("ETV1", dorothea_net$tf) , 'target']))  #29

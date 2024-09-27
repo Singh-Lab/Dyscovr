@@ -29,6 +29,11 @@ drug_sensitivity <- read.csv(paste0(PATH, "DepMap/Drug_sensitivity_AUC_(CTD^2).c
                              header = T, check.names = F)
 colnames(drug_sensitivity)[1] <- "depmap_id"
 
+# Read in CRISPR data
+crispr <- read.csv(paste0(PATH, "DepMap/CRISPR_(DepMap_Public_23Q2+Score,_Chronos).csv"),
+                             header = T, check.names = F)
+
+
 # Annotate file with GOI dependency for each cell line
 goi <- "KBTBD2"
 crispr_sub <- crispr[crispr$gene == goi, c("depmap_id", "value")]
