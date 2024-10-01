@@ -1,4 +1,4 @@
-![alt text](https://github.com/Singh-Lab/Dyscovr/Dyscovr_Logo.png "Logo")
+![alt text](https://github.com/Singh-Lab/Dyscovr/blob/main/Dyscovr_Logo.png "Logo")
 # Dyscovr (dyscovr.princeton.edu)
 #### Sara Geraghty, Mona Singh Lab
 #### Lewis-Sigler Institute for Integrative Genomics, Princeton University
