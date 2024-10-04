@@ -17,6 +17,7 @@ library(tidyverse)
 library(ggraph)
 library(tidygraph)
 library(org.Hs.eg.db)
+library(clusterProfiler)
 
 keytypes(org.Hs.eg.db)
 
@@ -462,6 +463,8 @@ dorothea_net <- dorothea::dorothea_hs
 
 tp53_dorothea_targets <- unlist(dorothea_net[dorothea_net$tf == "TP53", 'target'])
 
+
+
 # Combine into list
 tp53_select_target_set_list <- list("Curated_Fischer_2017" = tp53_curated_targets,
                                     "DoRothEA" = tp53_dorothea_targets)
@@ -469,7 +472,10 @@ tp53_select_target_set_list <- list("Curated_Fischer_2017" = tp53_curated_target
 # Call function
 plot_combined_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",],
                          tp53_select_target_set_list, "TP53", 500, 50, NA)
-
+# Optionally replace NA with Dyscovr run on silent mutations
+plot_combined_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",],
+                         tp53_select_target_set_list, "TP53", 500, 50,
+                         pc_allGenes_silent[pc_allGenes_silent$R_i.name == "TP53",])
 
 ############################################################
 ### PART E: PER-DRIVER NETWORK OVERLAY
@@ -760,13 +766,13 @@ create_volcano_plot(pc_allGenes[pc_allGenes$R_i.name == "IDH1",], "O75874", 0.01
 ############################################################ 
 ### TRRUST ###
 # https://www.grnpedia.org/trrust/
-trrust_df <- read.table(paste0(PATH, "Validation_Files/trrust_rawdata.human.txt"),
+trrust_df <- read.table(paste0(PATH, "Validation_Files/trrust_rawdata.human.tsv"),
                         header = F, check.names = F)
 trrust_df_tp53 <- trrust_df[(trrust_df[,1] == "TP53") | (trrust_df[,2] == "TP53"),]
 tp53_trrust_targets <- unique(c(trrust_df_tp53$V1, trrust_df_tp53$V2))
 tp53_trrust_targets <- tp53_trrust_targets[tp53_trrust_targets != "TP53"]
 
-compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
                                tp53_trrust_targets, "k-s", 0.01)
 
 ### hTFtarget ###
@@ -776,7 +782,7 @@ tf_target_df <- read.table(paste0(PATH, "Validation_Files/TF-Target-information.
 tf_target_df_tp53 <- tf_target_df[grepl("P53", tf_target_df$TF),]
 tf_target_tp53 <- unique(tf_target_df_tp53$target)
 
-compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
                                tf_target_tp53, "k-s", 0.01)
 
 ### Reactome ###
@@ -790,7 +796,7 @@ tp53_transcriptional_reg_pw_gns <- unlist(lapply(tp53_transcriptional_reg_pw$Mol
 tp53_transcriptional_reg_pw_gns <- unique(tp53_transcriptional_reg_pw_gns[
   tp53_transcriptional_reg_pw_gns != "TP53"])
 
-compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
                                tp53_transcriptional_reg_pw_gns, "k-s", 0.01)
 
 # TP53 Regulates Metabolic Genes (R-CFA-5628897)
@@ -801,23 +807,23 @@ tp53_regulates_metabolism_pw_gns <- unlist(lapply(tp53_regulates_metabolism_pw$M
   unlist(strsplit(x, " ", fixed = TRUE))[2]))
 tp53_regulates_metabolism_pw_gns <- unique(tp53_regulates_metabolism_pw_gns[tp53_regulates_metabolism_pw_gns != "TP53"])
 
-compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
                                tp53_regulates_metabolism_pw_gns, "k-s", 0.01)
 
 ### KEGG ###
 # https://www.gsea-msigdb.org/gsea/msigdb/cards/KEGG_P53_SIGNALING_PATHWAY
 # KEGG P53 Signaling Pathway (hsa04115)
 tp53_kegg_pathway <- read.table(paste0(
-  PATH, "Validation_Files/KEGG_P53_SIGNALING_PATHWAY.v7.5.1.txt"), sep = "\t", header = T)
-tp53_kegg_pathway_genes <- unlist(strsplit(tp53_kegg_pathway$KEGG_P53_SIGNALING_PATHWAY[19], 
+  PATH, "Validation_Files/KEGG_P53_SIGNALING_PATHWAY.v2024.1.Hs.txt"), sep = "\t", header = T)
+tp53_kegg_pathway_genes <- unlist(strsplit(tp53_kegg_pathway$KEGG_P53_SIGNALING_PATHWAY[17], 
                                            ",", fixed = T))
 
-compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
                                tp53_kegg_pathway_genes, "k-s", 0.01)
 
 ### HUMAN BASE ###
-# Link to download: https://hb.flatironinstitute.org/download
-global_nw <- fread(paste0(input_path, "HumanBase/global_top/global_top"), header = F)
+# Link to download: https://hb.flatironinstitute.org/download, Top Edges
+global_nw <- fread(paste0(PATH, "HumanBase/global_top/global_top"), header = F)
 colnames(global_nw) <- c("entrez1", "entrez2", "posterior_prob")
 
 # Limit to posterior probability of at least 0.5 (default on website)
@@ -838,20 +844,20 @@ global_nw_0.5$gene_name2 <- unlist(lapply(global_nw_0.5$entrez2, function(x) {
   else{return(symb)}
 }))
 
-fwrite(global_nw_0.5, paste0(input_path, "HumanBase/global_top/global_top_0.5_idconv.csv"))
+fwrite(global_nw_0.5, paste0(PATH, "HumanBase/global_top/global_top_0.5_idconv.csv"))
 
 # Get driver interactors from HumanBase 
 tp53_hb_interactors <- unique(unlist(global_nw_0.5[(global_nw_0.5$gene_name1 == "TP53") |
                                                   (global_nw_0.5$gene_name2 == "TP53"), 
                                                 c("gene_name1", "gene_name2")]))  #262
-compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
                                tp53_hb_interactors, "k-s", 0.01)
 
 ### INTACT ###
 # Website: https://www.ebi.ac.uk/intact/home
-# Search TP53 and download set of interactors
+# Search TP53 and download set of interactors in homo sapiens
 tp53_intact_interactors <- read.table(paste0(PATH, "Validation_Files/IntAct/tp53_interactors.txt"),
-                                      header = T, sep = "\t")
+                                      header = T, sep = "\t", fill = T)
 tp53_intact_interactors[,1] <- unlist(lapply(tp53_intact_interactors[,1], function(x) 
   unlist(strsplit(x, ":", fixed = T))[2]))
 tp53_intact_interactors[,2] <- unlist(lapply(tp53_intact_interactors[,2], function(x) 
@@ -864,7 +870,7 @@ tp53_intact_interactors <- tp53_intact_interactors[tp53_intact_interactors != "P
 tp53_intact_interactors <- unlist(lapply(tp53_intact_interactors, function(ia) 
   unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == ia, 'external_gene_name'])))
 
-compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
                                tp53_intact_interactors, "k-s", 0.01)  
 
 ### BIOGRID ###
@@ -876,6 +882,15 @@ tp53_biogrid_interactors <- read.table(paste0(PATH, "Validation_Files/BioGrid/TP
 tp53_biogrid_interactors <- unique(unlist(c(tp53_biogrid_interactors$`Systematic Name Interactor A`,
                                             tp53_biogrid_interactors$`Systematic Name Interactor B`)))
 tp53_biogrid_interactors <- tp53_biogrid_interactors[tp53_biogrid_interactors != "TP53"]
-compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53"], 
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
                                tp53_biogrid_interactors, "k-s", 0.01)  
 
+### STRING TOP 500 TARGETS, CONF > 0.4 ###
+# Website: https://string-db.org
+# Search TP53, specify top 500 full network, download short tabular text output
+tp53_string_top500 <- read.csv(paste0(PATH, "Validation_Files/STRING/TP53/tp53_string targets_top500.csv"), 
+                               header = T, check.names = F)
+tp53_string_top500_gns <- unique(c(tp53_string_top500$node1, tp53_string_top500$node2))
+tp53_string_top500_gns <- tp53_string_top500_gns[tp53_string_top500_gns != "TP53"]
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
+                               tp53_string_top500_gns, "k-s", 0.01)  
