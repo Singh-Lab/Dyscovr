@@ -6,8 +6,8 @@
 Uncover links between mutated driver genes and dysregulation of putative target genes across the genome, within and across 19 cancer types.
 
 # Publication Information
-LINK TO PUBLICATION
-Please cite as: 
+https://doi.org/10.1101/2024.11.20.624509
+Please cite as: Geraghty, S.E., Boyer, J.A., Fazel-Zarandi, M. Arzouni, N., Ryseck, R., McBride, M.J., Parsons, L.R., Rabinowitz, J.D., and Singh M. (2024). Integrative Computational Framework, Dyscovr, Links Mutated Driver Genes to Expression Dysregulation Across 19 Cancer Types. bioRxiv. https://doi.org/10.1101/2024.11.20.624509
 
 # Source Files
 * Input data files for the TCGA were downloaded from the GDC Data Portal Repository: https://portal.gdc.cancer.gov/repository. See Suppl. Table 6 for information about file downloads.
