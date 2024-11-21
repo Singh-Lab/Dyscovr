@@ -258,8 +258,10 @@ create_driver_bar(perCancer, 0.2, "qval", all_genes_id_conv)
 #' certain source 2. Two source lists should be the same length.
 #' @param qval_thres optional q-value threshold for significance
 #' @param label a character label of the data sets for plotting
+#' @param betas_or_neglogq either "betas" or "neglogq" to indicate what we 
+#' want to take the Spearman correlation of
 create_spearman_barplot <- function(source1_master_list, source2_master_list, 
-                                    qval_thres, label) {
+                                    qval_thres, label, betas_or_neglogq) {
   
   spearman_correlations <- lapply(1:length(source1_master_list), function(i) {
     df1 <- source1_master_list[[i]]
@@ -270,27 +272,32 @@ create_spearman_barplot <- function(source1_master_list, source2_master_list,
       df2 <- df2[df2$q.value < qval_thres,]
     }
     
-    df_merged <- merge(df1, df2, by = "T_k.name", all = FALSE)
+    df_merged <- merge(df1, df2, by = "T_k.name", all = F)
     
     betas_df1 <- df_merged$estimate.x
     betas_df2 <- df_merged$estimate.y
     
-    neglogpvals_df1 <- -log2(df_merged$p.value.x)
-    neglogpvals_df2 <- -log2(df_merged$p.value.y)
-    
-    neglogpvals_wdir_df1 <- unlist(lapply(1:length(neglogpvals_df1), function(i) {
-      beta <- betas_df1[i]
-      pval <- neglogpvals_df1[i]
-      return(ifelse(beta < 0, (-1)*pval, pval))
-    }))
-    neglogpvals_wdir_df2 <- unlist(lapply(1:length(neglogpvals_df2), function(i) {
-      beta <- betas_df2[i]
-      pval <- neglogpvals_df2[i]
-      return(ifelse(beta < 0, (-1)*pval, pval))
-    }))
-    
-    spearman <- tidy(cor.test(neglogpvals_wdir_df1, neglogpvals_wdir_df2, 
-                              method = "spearman", use = "pairwise"))
+    if(betas_or_neglogq == "neglogq") {
+      neglogpvals_df1 <- -log2(df_merged$p.value.x)
+      neglogpvals_df2 <- -log2(df_merged$p.value.y)
+      
+      neglogpvals_wdir_df1 <- unlist(lapply(1:length(neglogpvals_df1), function(i) {
+        beta <- betas_df1[i]
+        pval <- neglogpvals_df1[i]
+        return(ifelse(beta < 0, (-1)*pval, pval))
+      }))
+      neglogpvals_wdir_df2 <- unlist(lapply(1:length(neglogpvals_df2), function(i) {
+        beta <- betas_df2[i]
+        pval <- neglogpvals_df2[i]
+        return(ifelse(beta < 0, (-1)*pval, pval))
+      }))
+      
+      spearman <- tidy(cor.test(neglogpvals_wdir_df1, neglogpvals_wdir_df2, 
+                                method = "spearman", use = "pairwise"))
+    } else {
+      spearman <- tidy(cor.test(betas_df1, betas_df2, 
+                                method = "spearman", use = "pairwise"))
+    }
     # Try a weighted Spearman
     #w <- df_merged$p.value.x * df_merged$p.value.y
     #w <- pmin(df_merged$p.value.x, df_merged$p.value.y, na.rm=T)
@@ -314,14 +321,15 @@ create_spearman_barplot <- function(source1_master_list, source2_master_list,
   #print(as.numeric(unlist(lapply(spearman_correlations, function(x) 
   #x$estimate))))
   
-  ylab <- paste("Weighted SCC,", label)
+  #ylab <- paste("Weighted SCC,", label)
+  ylab <- paste("SCC", label)
   if(!is.na(qval_thres)) {
     ylab <- paste(ylab, paste0("(q <", paste0(qval_thres, ")")))
   }
   print(spearman_correlations_df)
   p <- ggplot(spearman_correlations_df, aes(x = reorder(Gene, -Spearman, mean), 
                                             y = Spearman, fill = Gene)) + 
-    geom_bar(stat = "identity", show.legend = FALSE) + scale_fill_nejm() + 
+    geom_bar(stat = "identity", show.legend = F) + scale_fill_nejm() + 
     theme_minimal() + xlab("Gene") + ylab(ylab) +
     theme(axis.text = element_text(face="bold", size = 12), 
           axis.title=element_text(size=14,face="bold"))
@@ -341,7 +349,7 @@ source2_master_list <- list("TP53" = metabric_res[metabric_res$R_i.name == "TP53
 
 # Call function
 create_spearman_barplot(source1_master_list, source2_master_list, 0.2, 
-                        "TCGA-BRCA & METABRIC") 
+                        "TCGA-BRCA & METABRIC", "betas") 
 
 
 ############################################################

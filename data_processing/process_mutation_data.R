@@ -43,7 +43,7 @@ source(general_important_functions.R)
 # Load TCGA MAF file of interest (do not merge mutation types to "Mutation")
 maf_filename <- paste0(PATH, "Mutation/Individual_PanCancer_MAFs/
                        TCGA.BRCA.muse.b8ca5856-9819-459c-87c5-94e91aca4032.DR-10.0.somatic.maf")
-maf_filename <- paste(PATH, "Mutation/TCGA.Aggregate.muse.aggregated.somatic.maf")
+maf_filename <- paste0(PATH, "Mutation/TCGA.Aggregate.muse.aggregated.somatic.maf")
 # For METABRIC
 maf_filename <- paste0(PATH, "Mutation/brca_metabric/data_mutations.txt")
 
@@ -130,15 +130,16 @@ maf_file_df <- filter_by_region(maf_file_df, goi, vect_of_pos)
 #' THIS ONLY INCLUDES NONSYNONYMOUS VARIANTS unless includeSyn 
 #' is specified as TRUE. This only includes primary solid tumor samples.
 #' @param maf a MAF file that has been read in by maftools
+#' @param includeSyn a T/F value indicating if we are looking at synonymous mutations
 get_mut_count_matrix <- function(maf, includeSyn) {
   
-  if(includeSyn == T) {
+  if(includeSyn == F) {
     # An explanation of the difference between a "Splice_Region" variant and a 
     # "Splice_Site" variant: https://github.com/mskcc/vcf2maf/issues/63#issuecomment-236981452
     # Essentially, "splice site" mutations are more likely to alter splicing 
     # (within 2bp of the splice site), while "splice region" mutations are more 
     # uncertain in their effect on splicing (3-8bp from the splice site)
-    mut_count_matrix <- mutCountMatrix(maf = maf, 
+    mut_count_matrix <- mutCountMatrix(maf = read.maf(maf), 
                                        countOnly = c("Missense_Mutation", 
                                                      "Nonsense_Mutation",
                                                      "Nonstop_Mutation",
@@ -153,7 +154,7 @@ get_mut_count_matrix <- function(maf, includeSyn) {
 }
 
 # Generate mutation count matrix and cancer patient-ID map
-mut_count_matrix <- get_mut_count_matrix(maf_file_df)
+mut_count_matrix <- get_mut_count_matrix(maf_file_df, includeSyn = F)
 
 
 ############################################################
@@ -200,6 +201,9 @@ allgene_targets <- read.csv(paste0(PATH, "allgene_targets.csv"), header = T,
 # Call function
 mut_count_matrix <- add_missing_genes_to_mut_count_mat(mut_count_matrix, 
                                                        allgene_targets)
+allgene_targets <- as.data.frame(unique(all_genes_id_conv[, 'ensembl_gene_id']))
+colnames(allgene_targets) <- "ensg"
+mut_count_matrix <- add_missing_genes_to_mut_count_mat(mut_count_matrix, all_g)
 
 
 #' Function to add patients with no mutation of the the given specificity in 

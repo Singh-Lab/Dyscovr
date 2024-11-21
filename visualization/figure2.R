@@ -64,7 +64,7 @@ ggplot(pc_allGenes_sig_freq, aes(y = Num.Hits, fill = Driver,
 
   
 ############################################################
-### PART B-C: BARPLOT OF ENRICHMENT IN CGC AND TF TARGETS
+### PART B, D: BARPLOT OF ENRICHMENT IN CGC AND TF TARGETS
 ############################################################  
 #' Use a one-sided Fisher's Exact Test/ Hypergeometric (HG) test or a 
 #' Kolmogorov-Smirnov (K-S) test to test for statistical enrichment
@@ -179,6 +179,12 @@ cgc_genes <- known_cancer_genes_table[
 ### TF EFFECTORS FROM DOROTHEA ###
 # https://bioconductor.org/packages/release/data/experiment/vignettes/dorothea/inst/doc/dorothea.html
 dorothea_net <- dorothea::dorothea_hs
+
+# TP53
+tp53_tf_targets <- unique(unlist(dorothea_net[dorothea_net$tf == "TP53", 
+                                                   'target']))
+compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
+                               tp53_tf_targets, "both", 0.01, NA)
 
 # PIK3CA
 foxo_dorothea_targets <- unique(unlist(dorothea_net[
@@ -318,7 +324,7 @@ create_enrichment_barplot(pc_allGenes, drivers, "K-S", tf_targets,
 
 
 ############################################################
-### PART D: TP53 CUMULATIVE FRACTION OF KNOWN TARGETS
+### PART C: TP53 CUMULATIVE FRACTION OF KNOWN TARGETS
 ############################################################  
 #' Function to plot the enrichment of various target groups among the significant 
 #' gene hits, together on one plot, where the enrichment in the given source is 
@@ -597,7 +603,9 @@ create_graphical_representation <- function(master_df, goi, qval_thres,
 #' https://string-db.org/
 #' @param string_nw_info a helper file from STRING with additional gene annotations
 #' @param all_genes_id_conv ID conversion file from BioMart
-adjust_string_nw_files <- function(string_nw, string_nw_info, all_genes_id_conv) {
+#' @param pc_allGenes output DF from Dyscovr
+adjust_string_nw_files <- function(string_nw, string_nw_info, all_genes_id_conv,
+                                   pc_allGenes) {
 
   colnames(string_nw) <- c("node1", "node2", "combined_score")
   string_nw$index <- 1:nrow(string_nw)
@@ -667,18 +675,23 @@ adjust_string_nw_files <- function(string_nw, string_nw_info, all_genes_id_conv)
   return(string_nw_full)
 }
 
-# Import the String network files and adjust (only need to do this once)
-string_nw <- fread(paste0(PATH, "Validation_Files/string.9606.protein.links.v11.5.txt"),
+# Import the String network files from a given STRING network,
+# downloaded from https://string-db.org/cgi/download?sessionId=bbXMNF0dYI8t,
+# and adjust (only need to do this once)
+string_nw <- fread(paste0(PATH, "Validation_Files/9606.protein.links.v12.0.txt"),
                    header = T)
-string_nw_info <- read.table(paste0(PATH, "Validation_Files/string.9606.protein.info.v11.5.txt"), 
-                             header = T, sep = "\t")
+# Import info file (from accessory data)
+string_nw_info <- read.table(paste0(PATH, "Validation_Files/9606.protein.info.v12.0.txt"), 
+                             header = F, sep = "\t", fill = T)
+colnames(string_nw_info) <- c('string_protein_id', 'preferred_name', 
+                              'protein_size', 'annotation')
 string_nw_full <- adjust_string_nw_files(string_nw, string_nw_info, 
-                                         all_genes_id_conv)
+                                         all_genes_id_conv, pc_allGenes)
 fwrite(string_nw_full, paste0(
-  PATH, "Validation_Files/string.9606.protein.links.v11.5.namesAdded.txt"))
+  PATH, "Validation_Files/9606.protein.links.v12.0.namesAdded.txt"))
 
 # Read back, once completed
-string_nw_full <- fread(paste0(PATH, "Validation_Files/string.9606.protein.links.v11.5.namesAdded.txt"))
+string_nw_full <- fread(paste0(PATH, "Validation_Files/9606.protein.links.v11.5.namesAdded.txt"))
 
 # Call function
 create_graphical_representation(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
@@ -894,3 +907,101 @@ tp53_string_top500_gns <- unique(c(tp53_string_top500$node1, tp53_string_top500$
 tp53_string_top500_gns <- tp53_string_top500_gns[tp53_string_top500_gns != "TP53"]
 compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
                                tp53_string_top500_gns, "k-s", 0.01)  
+
+############################################################
+#### COMPUTE STATISTICAL ENRICHMENT USING A HYPERGEOMETRIC
+#### (ONE-SIDED FISHER'S EXACT TEST) AND/OR A K-S TEST
+############################################################
+#' Use a one-sided Fisher's exact test/ Hypergeometric test or a Kolmogorov-Smirnov
+#' test to test for statistical enrichment
+#' @param master_df a master DF produced from run_linear_model() that has q-values
+#' @param known_targs a vector of known targets for a gene of interest (master
+#' DF should already be subsetted to just this gene); ex. ChIP-eat targets, HumanBase
+#' @param type the type of test, either "fisher's exact" or "k-s"
+#' @param qval_thres q-value threshold for HG enrichment
+#' @param top_n option to specify a top n hits, rather than a q-value threshold
+compute_statistical_enrichment <- function(master_df, known_targs, type, qval_thres, top_n) {
+  final_res <- NA
+  
+  if ((type == "fisher's exact") | (type == "both")) {
+    sig_targets <- c()
+    nonsig_targets <- c()
+    
+    if(!is.na(qval_thres)) {
+      sig_targets <- unique(master_df[master_df$q.value < qval_thres, 'T_k.name'])
+      nonsig_targets <- unique(master_df[master_df$q.value > qval_thres, 'T_k.name'])
+    } else if(!is.na(top_n)) {
+      sig_targets <- unique(master_df[1:top_n, 'T_k.name'])
+      nonsig_targets <- unique(master_df[(top_n+1):nrow(master_df), 'T_k.name'])
+    } else {
+      print("Must specify a q-value threshold or top N in order to perform a 
+            Fischer's exact test. Please try again.")
+      return(NA)
+    }
+    targets <- unique(master_df$T_k.name)
+    
+    num_sig_targets <- length(sig_targets)
+    num_nonsig_targets <- length(nonsig_targets)
+    
+    known_targs_i <- intersect(known_targs, targets)
+    notknown_targs_i <- setdiff(targets, known_targs)
+    
+    num_known_targets <- length(known_targs_i)
+    num_notknown_targets <- length(notknown_targs_i)
+    
+    num_known_sig_targets <- length(intersect(sig_targets, known_targs_i))
+    num_known_nonsig_targets <- length(intersect(nonsig_targets, known_targs_i))
+    num_notknown_sig_targets <- length(intersect(sig_targets, notknown_targs_i))
+    num_notknown_nonsig_targets <- length(intersect(nonsig_targets, notknown_targs_i))
+    
+    contigency_table <- matrix(c(num_known_sig_targets, num_known_nonsig_targets,
+                                 num_notknown_sig_targets, num_notknown_nonsig_targets),
+                               nrow = 2, ncol = 2)
+    print(contigency_table)
+    
+    fisher_res <- fisher.test(contigency_table, alternative = "greater")
+    print(fisher_res$p.value)
+    
+    final_res <- fisher_res
+  }
+  if ((type == "k-s") | (type == "both")) {
+    # Create a uniform distribution the same length as the number of genes
+    uniform <- 1:length(master_df$T_k.name)
+    
+    # Get the ranks of the known targets within our ranked list
+    known_targs <- setdiff(known_targs, setdiff(known_targs, master_df$T_k.name))
+    ranks_of_targs <- unlist(lapply(known_targs, function(x) {
+      if(x %fin% master_df$T_k.name) {return(min(which(master_df$T_k.name == x,)))}
+      else {return(NA)}
+    }))
+    ranks_of_targs <- ranks_of_targs[!(is.infinite(ranks_of_targs) | (is.na(ranks_of_targs)))]
+    #print(TRUE %in% duplicated(ranks_of_targs))
+    
+    # Perform the K-S test, with the uniform distribution
+    ks_res <- ks.test(ranks_of_targs, uniform, alternative = "greater")
+    
+    # Calculate effect size (see https://stats.stackexchange.com/questions/363402/is-there-a-rule-of-thumb-regarding-effect-size-and-the-two-sample-ks-test)
+    print(as.numeric(ks_res$statistic))
+    
+    #print(ks_res)
+    print(ks_res$p.value)
+    
+    # Alternative to print the K-S statistic exactly, using the KSgeneral package
+    # (Note that this is now a two-sided test)
+    if(ks_res$p.value == 0) {
+      print("Printing KSgeneral two-sided K-S p-value:")
+      ks_res_exact <- disc_ks_test(ranks_of_targs, ecdf(uniform), exact = T,
+                                   alternative = "greater")
+      print(ks_res_exact$p.value)
+      ks_res <- ks_res_exact
+    }
+    
+    if(type == "both") {final_res <- list(final_res, ks_res)}
+    else {final_res <- ks_res}
+  }
+  if (!(type %in% c("fisher's exact", "k-s", "both"))) {
+    print("Only implemented for 'Fisher's exact' or 'k-s' tests.")
+    return(0)
+  }
+  return(final_res)
+}

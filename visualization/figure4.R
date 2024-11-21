@@ -103,6 +103,131 @@ gsea_res_pik3ca_panq0.2_perq0.2_fisherp_subB <- gsea_res_pik3ca_panq0.2_perq0.2_
 gsea_res_kras_panq0.2_perq0.2_fisherp_subB <- perform_gsea_synleth(lm_res_kras_panq0.2_perq0.2_fishersp_subB)
 gsea_res_kras_panq0.2_perq0.2_fisherp_subB <- gsea_res_kras_panq0.2_perq0.2_fisherp_subB@result
 
+list_of_results_gsea <- list("TP53" = gsea_res_tp53_panq0.2_perq0.2_fisherp_subB, 
+                             "PIK3CA" = gsea_res_pik3ca_panq0.2_perq0.2_fisherp_subB, 
+                             "KRAS" = gsea_res_kras_panq0.2_perq0.2_fisherp_subB)
+
+
+
+#' Takes the output from the ReactomePA gene set enrichment analysis (above) and
+#' converts it into a bar chart format for visualization, with -log(p-value) on
+#' the x-axis (for multiple drivers)
+#' @param list_of_results_gsea a list of results tables from GSEA using the 
+#' ReactomePA package, with each entry in the list being the results for a given
+#' driver gene. List names are driver gene names.
+#' @param n the number of top pathways to display
+#' @param qval_thres a q-value threshold for a significantly enriched pathway
+#' @param sort_by a method by which to sort the pathways; defaults to q-value,
+#' but can also specify enrichment score ("ES"), leading edge percentage 
+#' ("leading_edge"), or -log10(q-value) times direction ("neglog10(qval)*dir")
+#' @param db the name of the database from which the pathways originated 
+#' (e.g. "GO")
+create_gsea_barchart_multGenes <- function(list_of_results_gsea, n, qval_thres, 
+                                           sort_by, db) {
+  
+  # Subset the results table based on the number of pathways
+  input_dfs <- lapply(1:length(list_of_results_gsea), function(i) {
+    results_gsea <- list_of_results_gsea[[i]]
+    driver <- names(list_of_results_gsea)[i]
+    
+    if(!is.na(qval_thres)) {results_gsea <- results_gsea[results_gsea$qvalue < 
+                                                           qval_thres, ]}
+    
+    if(sort_by == "ES") {results_gsea <- results_gsea[order(-abs(
+      results_gsea$enrichmentScore)),]}
+    
+    else if (sort_by == "neglog10(qval)*dir") {
+      dir <- unlist(lapply(results_gsea$enrichmentScore, function(x) 
+        ifelse(x>0, 1, -1)))
+      results_gsea$neglog10qvaltimesdir <- unlist(lapply(1:nrow(results_gsea), function(i) {
+        qval <- results_gsea$qvalue[i]
+        d <- dir[i]
+        return((-log10(qval)) * d)
+      }))
+    }
+    else if (sort_by == "leading_edge") {
+      results_gsea$leading_edge_signal <- unlist(lapply(results_gsea$leading_edge, function(x) {
+        spl <- unlist(strsplit(x, ", ", fixed = T))[3]
+        spl <- unlist(strsplit(unlist(strsplit(x, "=", fixed = T))[2], 
+                               "%", fixed = T))[1]
+        return(as.numeric(spl))
+      }))
+      results_gsea <- results_gsea[order(-results_gsea$leading_edge_signal),]
+    }
+    else {
+      results_gsea <- results_gsea[order(results_gsea$qvalue),]
+      
+      # If desired, uncomment to sort pathways within each q-value bucket by 
+      # leading edge signal
+      #buckets <- lapply(unique(results_gsea$qvalue), function(q) {
+      #  sub <- results_gsea[results_gsea$qvalue == q,]
+      #  sub$leading_edge_signal <- unlist(lapply(sub$leading_edge, function(x) {
+      #    spl <- unlist(strsplit(x, ", ", fixed = T))[3]
+      #    spl <- unlist(strsplit(unlist(strsplit(x, "=", fixed = T))[2], 
+      #                           "%", fixed = T))[1]
+      #    return(as.numeric(spl))
+      #  }))
+      #  return(sub[order(-sub$leading_edge_signal),])
+      #})
+      #results_gsea <- do.call(rbind, buckets)
+      #print(head(results_gsea))
+    }
+    
+    results_gsea_sub <- results_gsea[1:min(n, nrow(results_gsea)), ]
+    
+    # Convert the p-values to -log10(pvalue)
+    negLog10_pvalues <- -log10(results_gsea_sub$pvalue + 1E10^(-10))
+    print(head(negLog10_pvalues))
+    
+    # Create an input data frame for ggplot
+    input_df <- data.frame("Enriched.Pathway" = results_gsea_sub$Description,
+                           "Neg.Log10.Pval" = negLog10_pvalues, 
+                           "ES" = results_gsea_sub$enrichmentScore,
+                           "Driver" = driver)
+    return(input_df)
+  })
+  input_df <- do.call(rbind, input_dfs)
+  
+  roles <- function(x) sub("[^_]*_","",x) 
+  input_df$Enriched.Pathway.Driver <- unlist(lapply(1:nrow(input_df), function(i) 
+    paste(input_df[i, 'Driver'], input_df[i,'Enriched.Pathway'], sep = "_")))
+  
+  # Split up pathways longer than N characters with a newline
+  input_df$Enriched.Pathway.Driver <- unlist(lapply(input_df$Enriched.Pathway.Driver, function(pw) {
+    nchar_pw <- nchar(pw)
+    if(nchar_pw > 50) {
+      pw_spl <- unlist(strsplit(pw, " ", fixed = T))
+      half <- ceiling(length(pw_spl) / 2)
+      pw_spl[half] <- paste0(pw_spl[half], "\n")
+      return(paste(pw_spl, collapse = " "))
+    }
+    else{return(pw)}
+  }))
+  
+  #p <- ggplot(input_df, aes(x = reorder(Enriched.Pathway.Driver, abs(ES)), # Enriched.Pathway.Driver,
+  p <- ggplot(input_df, aes(x = reorder(Enriched.Pathway.Driver, Neg.Log10.Pval),
+                            #y = ES, fill = Driver)) +
+                            y = Neg.Log10.Pval, fill = Driver)) +
+    geom_col(width = 0.7, color = "black") + coord_flip() + theme_minimal() + 
+    theme(legend.position = "none", 
+          axis.title = element_text(face = "bold", size = 14), 
+          axis.text = element_text(face = "bold", size = 10), 
+          strip.text.x = element_text(face="bold", size=14, 
+                                      margin = margin(.2, 0, .2, 0, "cm"))) + 
+    xlab(paste("Enriched", paste(db, "Pathways"))) + 
+    #ylab("Enrichment Score") + 
+    ylab("-log10(pval)") + 
+    #geom_hline(yintercept=-log10(qval_thres), linetype="dashed", color = "black") +
+    scale_fill_manual(values = c("#20854EFF","#BC3C29FF","#0072B5FF", "#FFDC91FF")) + 
+    scale_x_discrete(labels=roles) +
+    facet_wrap(~factor(Driver, levels = c("TP53", "PIK3CA", "KRAS", "IDH1")), 
+               ncol = 1, scales = "free_y") 
+  
+  p
+}
+
+create_gsea_barchart_multGenes(list_of_results_gsea, 3, 0.2, "q.value", "GO")
+
 
 ############################################################
 ### CHECK FOR ENRICHMENT IN GOLD STANDARD SL SETS (IN-TEXT)

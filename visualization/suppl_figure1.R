@@ -37,7 +37,28 @@ outfn_rand <- "res_top_0.05_allGenes_quantile_rawCNA_methMRaw_3PCs_Nonsyn.Driver
 pc_allGenes_rand <- read.csv(paste0(PATH, outfn_rand))
 
 ############################################################
-### PART A: REAL V. RANDOMIZED HISTOGRAM
+### PART A: BARPLOT OF HITS AT Q < 0.2
+############################################################
+qval_thres <- 0.2
+pc_allGenes_sig <- pc_allGenes_wtnn[pc_allGenes_wtnn$q.value < qval_thres,]
+pc_allGenes_sig_freq <- melt(table(pc_allGenes_sig$R_i.name))
+colnames(pc_allGenes_sig_freq) <- c("Driver", "Num.Hits")
+pc_allGenes_sig_freq <- pc_allGenes_sig_freq[order(pc_allGenes_sig_freq$Num.Hits),]
+ggplot(pc_allGenes_sig_freq, aes(y = Num.Hits, fill = Driver, 
+                                 x = reorder(Driver, -Num.Hits, mean))) + 
+  geom_bar(position = "dodge", width = 0.95, stat = "identity", 
+           show.legend = F, color = "black") + 
+  scale_fill_manual(values = c("#FFDC91FF", "#20854EFF", "#BC3C29FF", 
+                               "#0072B5FF", "gray")) + 
+  xlab("Driver") + 
+  ylab(paste0("\n", paste0("Number of hits (q < ", paste0(qval_thres, ")")))) +
+  theme(axis.text = element_text(face="bold", size = 16), 
+        axis.title=element_text(size=18, face="bold"), 
+        panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'white'))
+
+############################################################
+### PART B: REAL V. RANDOMIZED HISTOGRAM
 ############################################################
 #' Plot a multi-layer histogram showing the p-value distributions for 
 #' a particular driver (or all drivers, if NA), both "real" and "randomized" 
@@ -91,28 +112,6 @@ plot_pvalue_histograms_real_and_random <- function(real_master_df,
 
 # Call function
 plot_pvalue_histograms_real_and_random(pc_allGenes, pc_allGenes_rand, NA, 0.01)
-
-
-############################################################
-### PART B: BARPLOT OF HITS AT Q < 0.2
-############################################################
-qval_thres <- 0.2
-pc_allGenes_sig <- pc_allGenes_wtnn[pc_allGenes_wtnn$q.value < qval_thres,]
-pc_allGenes_sig_freq <- melt(table(pc_allGenes_sig$R_i.name))
-colnames(pc_allGenes_sig_freq) <- c("Driver", "Num.Hits")
-pc_allGenes_sig_freq <- pc_allGenes_sig_freq[order(pc_allGenes_sig_freq$Num.Hits),]
-ggplot(pc_allGenes_sig_freq, aes(y = Num.Hits, fill = Driver, 
-                                 x = reorder(Driver, -Num.Hits, mean))) + 
-  geom_bar(position = "dodge", width = 0.95, stat = "identity", 
-           show.legend = F, color = "black") + 
-  scale_fill_manual(values = c("#FFDC91FF", "#20854EFF", "#BC3C29FF", 
-                               "#0072B5FF", "gray")) + 
-  xlab("Driver") + 
-  ylab(paste0("\n", paste0("Number of hits (q < ", paste0(qval_thres, ")")))) +
-  theme(axis.text = element_text(face="bold", size = 16), 
-        axis.title=element_text(size=18, face="bold"), 
-        panel.grid.major = element_blank(),
-        panel.background = element_rect(fill = 'white'))
 
 
 ############################################################

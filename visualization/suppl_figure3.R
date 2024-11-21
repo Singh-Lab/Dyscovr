@@ -56,7 +56,6 @@ patient_cancer_mapping <- get_patient_cancer_mapping(clinical_df)
 names(patient_cancer_mapping) <- unlist(lapply(names(patient_cancer_mapping), function(x)
   unlist(strsplit(x, "-", fixed = T))[2]))
 
-
 # Identify unique drivers across the various cancer types
 unique_drivers <- unique(unlist(lapply(perCancer, function(x) 
   unique(x$R_i.name)))) # 47 drivers
