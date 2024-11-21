@@ -1,6 +1,6 @@
 ![alt text](https://github.com/Singh-Lab/Dyscovr/blob/main/Dyscovr_Logo.png "Logo")
 # Dyscovr (dyscovr.princeton.edu)
-#### Sara Geraghty, Mona Singh Lab
+#### Mona Singh Lab
 #### Lewis-Sigler Institute for Integrative Genomics, Princeton University
 
 Uncover links between mutated driver genes and dysregulation of putative target genes across the genome, within and across 19 cancer types.
