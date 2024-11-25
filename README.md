@@ -20,7 +20,12 @@ Please cite as: Geraghty, S.E., Boyer, J.A., Fazel-Zarandi, M. Arzouni, N., Ryse
 
 # Running Dyscovr
 ## Install Dependencies
-Install dependencies using install.packages() and BiocManager::install(). See STAR Methods Software and Algorithms table for list of dependencies.
+Install dependencies using install.packages() and BiocManager::install(). See STAR Methods Software and Algorithms table for list of dependencies. For just running Dyscovr (no data preprocessing or downstream visualization), you can use the following calls:
+```
+install.packages(c("speedglm", "Hmisc", "caret", "gglasso", "statmod", "mvtnorm", "MCMCpack", "SuppDists", "mvnfast", "MBSGS", "MASS", "mgcv", "mnormt", "truncnorm", "glmnet", "stringr", "rlang", "broom", "qvalue", "gplots", "ggplot2", "olsrr", "RColorBrewer"), dependencies = TRUE, INSTALL_opts = '--no-lock')
+BiocManager::install('qvalue')
+```
+
 ## Clone Dyscovr Git Repository 
 Clone the repository into a location with ample storage for input and results files.
 ```
