@@ -1,7 +1,7 @@
 ############################################################
 # Code to Create Figure 3 Visualizations
 # Written by Sara Geraghty
-# PUBLICATION INFORMATION
+# https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 library(data.table)
@@ -27,6 +27,7 @@ source(general_important_functions.R)
 ############################################################
 ### IMPORT PER-CANCER OUTPUT FILE(S)
 ############################################################
+# Adjust to select all per-cancer Dyscovr output files of interest
 perCancer_fns <- intersect(list.files(path = PATH, recursive = T,
                                          pattern = "_corrected_MUT"), 
                               intersect(list.files(path = PATH, recursive = T,
@@ -34,10 +35,12 @@ perCancer_fns <- intersect(list.files(path = PATH, recursive = T,
                                         list.files(path = PATH, recursive = T,
                                                    pattern = "Nonsyn.Drivers.Vogel.elim.vif.5")))
 perCancer <- lapply(perCancer_fns, function(f) 
-  fread(paste0(PATH, f), header = T))
-names(perCancer) <- unlist(lapply(pc_perCancer, function(x)
+  as.data.frame(fread(paste0(PATH, f), header = T)))
+names(perCancer) <- unlist(lapply(perCancer_fns, function(x)
   unlist(strsplit(x, "/", fixed = T))[1]))
 
+# Eliminate row numbers, as needed
+perCancer <- lapply(perCancer, function(x) x[,!(colnames(x) %fin% "V1")])
 
 ############################################################
 ### PART A: PERCENTAGE BARPLOT OF DRIVER HITS PER-CANCER
@@ -133,12 +136,13 @@ create_driver_bar <- function(list_of_master_dfs, tophit_thres,
   for(d in drivers) {
     print(remaining_cancer_types)
     if(length(remaining_cancer_types) == 0) {break}
-    sub <- freq.table[(freq.table$Driver == d) & 
-                        (freq.table$Cancer_Type %fin% remaining_cancer_types),]
+    sub <- as.data.frame(freq.table[(freq.table$Driver == d) & 
+                        (freq.table$Cancer_Type %fin% remaining_cancer_types),])
     new_ranks <- c()
     if(length(ranks) > 0) {
-      new_ranks <- rank(desc(sub$Percentage)) + max(as.numeric(ranks))
-    } else {new_ranks <- rank(desc(sub$Percentage))}
+      new_ranks <- rank(dplyr::desc(as.numeric(unlist(sub$Percentage)))) + 
+        max(as.numeric(ranks))
+    } else {new_ranks <- rank(dplyr::desc(sub$Percentage))}
     names(new_ranks) <- sub$Cancer_Type
     ranks <- c(ranks, new_ranks)
     remaining_cancer_types <- setdiff(remaining_cancer_types, sub$Cancer_Type)
@@ -246,6 +250,7 @@ generate_frequency_input_table <- function(master_df, tophit_thres,
 
 # Call function
 create_driver_bar(perCancer, 0.2, "qval", all_genes_id_conv)
+
 
 ############################################################
 ### PART B: Spearman Correlation between TCGA-BRCA and METABRIC
@@ -410,10 +415,11 @@ plot_overlap_between_subgroups_upset <- function(list_of_master_dfs, goi,
 }
 
 # Call function
-plot_overlap_between_subgroups_upset(perCancer, "P04637", 0.2, NA) # TP53
-plot_overlap_between_subgroups_upset(perCancer, "P42336", 0.2, NA) # PIK3CA
-plot_overlap_between_subgroups_upset(perCancer, "P01116", 0.2, NA) # KRAS
-plot_overlap_between_subgroups_upset(perCancer, "O75874", 0.2, NA) # IDH1
+plot_overlap_between_subgroups_upset(perCancer, "P04637", 0.2, 1000) # TP53
+plot_overlap_between_subgroups_upset(perCancer, "P42336", 0.2, 1000) # PIK3CA
+plot_overlap_between_subgroups_upset(perCancer, "P01116", 0.2, 1000) # KRAS
+plot_overlap_between_subgroups_upset(perCancer, "P35222", 0.2, 1000) # CTNNB1
+plot_overlap_between_subgroups_upset(perCancer, "Q969H0", 0.2, 1000) # FBXW7
 
 # NOTE: Annotations of shared target genes were added manually in a graphics editor
 

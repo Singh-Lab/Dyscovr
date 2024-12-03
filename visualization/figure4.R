@@ -1,7 +1,7 @@
 ############################################################
 # Code to Create Figure 4 Visualizations
 # Written by Sara Geraghty
-# PUBLICATION INFORMATION
+# https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 library(data.table)
@@ -39,75 +39,87 @@ lm_res_kras_panq0.2_perq0.2_fishersp_subB <- fread(paste0(PATH, "Synthetic_Letha
 ############################################################
 #' Perform GSEA on the whole synthetic lethal table together, sorted by p-value
 #' @param results_table a result data frame from synthetic lethality pipeline
-#' @param minggssize the minimium gene set size for gseGO
-perform_gsea_synleth <- function(results_table, mingssize = 50) {
+#' @param kegg_or_go either 'kegg' or 'go' to indicate which database we are using
+#' @param minggssize the minimium gene set size for gseGO (default is 10)
+perform_gsea_synleth <- function(results_table, kegg_or_go, mingssize = 10) {
   
   # Get all of this driver protein's targets and their associated mutation 
   # coefficients, sorted descending order
-  #mapping <- as.data.frame(bitr(results_table$gene, fromType = "SYMBOL", 
-  #                              toType = "UNIPROT", OrgDb=org.Hs.eg.db, drop = T))
-  #mapping_kegg <- as.data.frame(bitr_kegg(mapping$UNIPROT, fromType = "uniprot", 
-  #                                        toType = "kegg", drop = T, 
-  #                                        organism = "hsa"))
-  #colnames(mapping_kegg) <- c("uniprot", "kegg")
-  
-  mapping <- as.data.frame(bitr(results_table$gene, fromType = "SYMBOL", 
-                                toType = "ENTREZID", OrgDb=org.Hs.eg.db, drop = T))
-  colnames(mapping) <- c("gene", "entrez")
-  
-  
-  #mapping <- merge(mapping, mapping_kegg, by = "uniprot")
-  print(head(mapping))
-  
-  results_table <- merge(results_table, mapping, all=T, by="gene")
-  #results_table <- distinct(results_table[, c("gene", "kegg", "pval")])
-  results_table <- distinct(results_table[, c("gene", "entrez", "pval", "qvalue")])
-  results_table$negLog10pval <- unlist(lapply(results_table$pval, function(p) -log10(p)))
-  
-  results_table <- results_table[order(results_table$negLog10pval, decreasing = T),]
-  #results_table <- results_table[order(results_table$stat, decreasing = T),]
-  results_table <- na.omit(results_table)
-  
-  #betas <- results_table$stat
-  betas <- results_table$negLog10pval
-  #names(betas) <- results_table$kegg
-  names(betas) <- results_table$entrez
-  
-  #gse.kegg <- gseKEGG(betas, pvalueCutoff = 1, pAdjustMethod = "BH", 
-  #keyType = "kegg")
-  #gse.kegg <- enrichKEGG(gene = results_table[results_table$qval < 0.2, 'uniprot'], 
-  #                       organism = 'hsa', pAdjustMethod = "BH", pvalueCutoff = 0.2,
-  #                       keyType = "uniprot")
-  #gse.kegg <- gseMKEGG(betas, pvalueCutoff = 1, 
-  #pAdjustMethod = "BH", keyType = "kegg")
-  #return(gse.kegg)
-  
-  gse.go <- gseGO(betas, OrgDb = org.Hs.eg.db, pvalueCutoff = 1, 
-                  pAdjustMethod = "BH", keyType = "ENTREZID", ont = "BP",
-                  minGSSize = mingssize)# BP = biological process
-  gse.go <- setReadable(gse.go, org.Hs.eg.db)
-  
-  #gse.go <- enrichGO(gene = unlist(results_table[results_table$qvalue < 0.2, 'entrez']),
-  #                    universe = results_table$entrez,
-  #                    OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = "BP",
-  #                    pAdjustMethod = "BH", pvalueCutoff = 1, readable = T)
-  #gse.go <- setReadable(gse.go, org.Hs.eg.db)
-  
-  return(gse.go)
+  if(kegg_or_go == "kegg") {
+
+    mapping_kegg <- as.data.frame(bitr_kegg(mapping$UNIPROT, fromType = "uniprot", 
+                                            toType = "kegg", drop = T, 
+                                            organism = "hsa"))
+    mapping <- as.data.frame(bitr(results_table$gene, fromType = "SYMBOL", 
+                                  toType = "UNIPROT", OrgDb=org.Hs.eg.db, drop = T))
+    mapping <- merge(mapping, mapping_kegg, by = "uniprot")
+    
+    colnames(mapping_kegg) <- c("uniprot", "kegg")
+    print(head(mapping))
+    
+    results_table <- merge(results_table, mapping, all=T, by="gene")
+    results_table <- distinct(results_table[, c("gene", "kegg", "pval")])
+    results_table$negLog10pval <- unlist(lapply(results_table$pval, function(p) -log10(p)))
+    
+    results_table <- results_table[order(results_table$negLog10pval, decreasing = T),]
+    #results_table <- results_table[order(results_table$stat, decreasing = T),]
+    results_table <- na.omit(results_table)
+    
+    #betas <- results_table$stat
+    betas <- results_table$negLog10pval
+    names(betas) <- results_table$kegg
+    
+    gse.kegg <- gseKEGG(betas, pvalueCutoff = 1, pAdjustMethod = "BH", 
+                        keyType = "kegg")
+    gse.kegg <- enrichKEGG(gene = results_table[results_table$qval < 0.2, 'uniprot'], 
+                           organism = 'hsa', pAdjustMethod = "BH", pvalueCutoff = 0.2,
+                           keyType = "uniprot")
+    #gse.kegg <- gseMKEGG(betas, pvalueCutoff = 1, 
+    #pAdjustMethod = "BH", keyType = "kegg")
+    return(gse.kegg)
+    
+  } else if (kegg_or_go == "go") {
+
+    mapping <- as.data.frame(bitr(results_table$gene, fromType = "SYMBOL", 
+                                  toType = "ENTREZID", OrgDb=org.Hs.eg.db, drop = T))
+    colnames(mapping) <- c("gene", "entrez")
+    print(head(mapping))
+    
+    results_table <- merge(results_table, mapping, all=T, by="gene")
+    results_table <- distinct(results_table[, c("gene", "entrez", "pval", "qvalue")])
+    results_table$negLog10pval <- unlist(lapply(results_table$pval, function(p) -log10(p)))
+    
+    results_table <- results_table[order(results_table$negLog10pval, decreasing = T),]
+    #results_table <- results_table[order(results_table$stat, decreasing = T),]
+    results_table <- na.omit(results_table)
+    
+    #betas <- results_table$stat
+    betas <- results_table$negLog10pval
+    names(betas) <- results_table$entrez
+    
+    gse.go <- gseGO(betas, OrgDb = org.Hs.eg.db, pvalueCutoff = 1, 
+                    pAdjustMethod = "BH", keyType = "ENTREZID", ont = "BP", # BP = biological process
+                    minGSSize = mingssize)
+    gse.go <- setReadable(gse.go, org.Hs.eg.db)
+    
+    return(gse.go)
+    
+  } else {
+    print("Only implemented for 'kegg' or 'go' database inputs. Please try again.")
+    return(NA)
+  }
 }
 
-gsea_res_tp53_panq0.2_perq0.2_fisherp_subB <- perform_gsea_synleth(lm_res_tp53_panq0.2_perq0.2_fishersp_subB)
+gsea_res_tp53_panq0.2_perq0.2_fisherp_subB <- perform_gsea_synleth(lm_res_tp53_panq0.2_perq0.2_fishersp_subB, "go")
 gsea_res_tp53_panq0.2_perq0.2_fisherp_subB <- gsea_res_tp53_panq0.2_perq0.2_fisherp_subB@result
-gsea_res_pik3ca_panq0.2_perq0.2_fisherp_subB <- perform_gsea_synleth(lm_res_pik3ca_panq0.2_perq0.2_fishersp_subB)
+gsea_res_pik3ca_panq0.2_perq0.2_fisherp_subB <- perform_gsea_synleth(lm_res_pik3ca_panq0.2_perq0.2_fishersp_subB, "go")
 gsea_res_pik3ca_panq0.2_perq0.2_fisherp_subB <- gsea_res_pik3ca_panq0.2_perq0.2_fisherp_subB@result
-gsea_res_kras_panq0.2_perq0.2_fisherp_subB <- perform_gsea_synleth(lm_res_kras_panq0.2_perq0.2_fishersp_subB)
+gsea_res_kras_panq0.2_perq0.2_fisherp_subB <- perform_gsea_synleth(lm_res_kras_panq0.2_perq0.2_fishersp_subB, "go")
 gsea_res_kras_panq0.2_perq0.2_fisherp_subB <- gsea_res_kras_panq0.2_perq0.2_fisherp_subB@result
 
 list_of_results_gsea <- list("TP53" = gsea_res_tp53_panq0.2_perq0.2_fisherp_subB, 
                              "PIK3CA" = gsea_res_pik3ca_panq0.2_perq0.2_fisherp_subB, 
                              "KRAS" = gsea_res_kras_panq0.2_perq0.2_fisherp_subB)
-
-
 
 #' Takes the output from the ReactomePA gene set enrichment analysis (above) and
 #' converts it into a bar chart format for visualization, with -log(p-value) on
@@ -159,18 +171,18 @@ create_gsea_barchart_multGenes <- function(list_of_results_gsea, n, qval_thres,
       
       # If desired, uncomment to sort pathways within each q-value bucket by 
       # leading edge signal
-      #buckets <- lapply(unique(results_gsea$qvalue), function(q) {
-      #  sub <- results_gsea[results_gsea$qvalue == q,]
-      #  sub$leading_edge_signal <- unlist(lapply(sub$leading_edge, function(x) {
-      #    spl <- unlist(strsplit(x, ", ", fixed = T))[3]
-      #    spl <- unlist(strsplit(unlist(strsplit(x, "=", fixed = T))[2], 
-      #                           "%", fixed = T))[1]
-      #    return(as.numeric(spl))
-      #  }))
-      #  return(sub[order(-sub$leading_edge_signal),])
-      #})
-      #results_gsea <- do.call(rbind, buckets)
-      #print(head(results_gsea))
+      buckets <- lapply(unique(results_gsea$qvalue), function(q) {
+        sub <- results_gsea[results_gsea$qvalue == q,]
+        sub$leading_edge_signal <- unlist(lapply(sub$leading_edge, function(x) {
+          spl <- unlist(strsplit(x, ", ", fixed = T))[3]
+          spl <- unlist(strsplit(unlist(strsplit(x, "=", fixed = T))[2], 
+                                 "%", fixed = T))[1]
+          return(as.numeric(spl))
+        }))
+        return(sub[order(-sub$leading_edge_signal),])
+      })
+      results_gsea <- do.call(rbind, buckets)
+      print(head(results_gsea))
     }
     
     results_gsea_sub <- results_gsea[1:min(n, nrow(results_gsea)), ]
@@ -218,9 +230,9 @@ create_gsea_barchart_multGenes <- function(list_of_results_gsea, n, qval_thres,
     #ylab("Enrichment Score") + 
     ylab("-log10(pval)") + 
     #geom_hline(yintercept=-log10(qval_thres), linetype="dashed", color = "black") +
-    scale_fill_manual(values = c("#20854EFF","#BC3C29FF","#0072B5FF", "#FFDC91FF")) + 
+    scale_fill_manual(values = c("#20854EFF","#BC3C29FF","#0072B5FF")) + 
     scale_x_discrete(labels=roles) +
-    facet_wrap(~factor(Driver, levels = c("TP53", "PIK3CA", "KRAS", "IDH1")), 
+    facet_wrap(~factor(Driver, levels = c("TP53", "PIK3CA", "KRAS")), 
                ncol = 1, scales = "free_y") 
   
   p

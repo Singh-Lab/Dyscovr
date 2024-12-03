@@ -1,7 +1,7 @@
 ############################################################
 # Code to create Suppl. Figure 2 Visualizations
 # Written by Sara Geraghty
-# PUBLICATION INFORMATION
+# https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 library(data.table)
@@ -217,22 +217,22 @@ adjust_string_nw_files <- function(string_nw, string_nw_info, all_genes_id_conv)
 }
 
 # Import the String network files and adjust (only need to do this once)
-string_nw <- fread(paste0(PATH, "Validation_Files/string.9606.protein.links.v11.5.txt"),
+string_nw <- fread(paste0(PATH, "Validation_Files/9606.protein.links.v12.0.txt"),
                    header = T)
-string_nw_info <- read.table(paste0(PATH, "Validation_Files/string.9606.protein.info.v11.5.txt"), 
+string_nw_info <- read.table(paste0(PATH, "Validation_Files/9606.protein.info.v12.0.txt"), 
                              header = T, sep = "\t")
 string_nw_full <- adjust_string_nw_files(string_nw, string_nw_info, 
                                          all_genes_id_conv)
 fwrite(string_nw_full, paste0(
-  PATH, "Validation_Files/string.9606.protein.links.v11.5.namesAdded.txt"))
+  PATH, "Validation_Files/9606.protein.links.v12.0.namesAdded.txt"))
 
 # Read back, once completed
-string_nw_full <- fread(paste0(PATH, "Validation_Files/string.9606.protein.links.v11.5.namesAdded.txt"))
+string_nw_full <- fread(paste0(PATH, "Validation_Files/9606.protein.links.v12.0.namesAdded.txt"))
 
 # Call function
 create_graphical_representation(pc_allGenes[pc_allGenes$R_i.name == "PIK3CA",], 
-                                "PIK3CA", 0.01, string_nw_full, "STRING", 0.4, NA)
+                                "PIK3CA", 0.01, string_nw_full, "STRING", 0.4, 100)
 create_graphical_representation(pc_allGenes[pc_allGenes$R_i.name == "KRAS",], 
-                                "KRAS", 0.01, string_nw_full, "STRING", 0.4, NA)
+                                "KRAS", 0.01, string_nw_full, "STRING", 0.4, 100)
 create_graphical_representation(pc_allGenes[pc_allGenes$R_i.name == "IDH1",], 
-                                "IDH1", 0.01, string_nw_full, "STRING", 0.4, NA)
+                                "IDH1", 0.01, string_nw_full, "STRING", 0.4, 100)

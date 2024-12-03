@@ -1,7 +1,7 @@
 ############################################################
 # Code to create Suppl. Figure 1 Visualizations
 # Written by Sara Geraghty
-# PUBLICATION INFORMATION
+# https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 library(data.table)
@@ -26,11 +26,13 @@ source(general_important_functions.R)
 ############################################################
 ### IMPORT PAN-CANCER OUTPUT FILE(S)
 ############################################################
+# Regular Dyscovr pan-cancer run
 outfn <- "res_top_0.05_allGenes_quantile_rawCNA_methMRaw_3PCs_Nonsyn.Drivers.Vogel.elim.vif5.sp0.7_corrected_MUT.csv"
-pc_allGenes <- read.csv(paste0(PATH, outfn))
+pc_allGenes <- read.csv(paste0(PATH, outfn), header = T, check.names = F)
 
+# Dyscovr run with TTN
 outfn_wttn <- "res_top_0.05_allGenes_quantile_rawCNA_methMRaw_3PCs_Nonsyn.All.Vogel.elim.vif5.sp0.7_corrected_MUT.csv"
-pc_allGenes_wtnn <- read.csv(paste0(PATH, outfn_wtnn))
+pc_allGenes_wttn <- read.csv(paste0(PATH, outfn_wttn), header = T, check.names = F)
 
 # Randomized output
 outfn_rand <- "res_top_0.05_allGenes_quantile_rawCNA_methMRaw_3PCs_Nonsyn.Drivers.Vogel.elim.vif5.sp0.7_corrected_MUT_RANDOMIZED.csv"
@@ -39,23 +41,34 @@ pc_allGenes_rand <- read.csv(paste0(PATH, outfn_rand))
 ############################################################
 ### PART A: BARPLOT OF HITS AT Q < 0.2
 ############################################################
+#' Function to create a barplot of the number of hits per pan-cancer driver; for
+#' more than 5 drivers, need to provide additional colors
+#' @param pc_allGenes output file from Dyscovr
+#' @param qval_thres a q-value threshold for significance
+plot_num_hit_barplot <- function(pc_allGenes, qval_thres) {
+  pc_allGenes_sig <- pc_allGenes[pc_allGenes$q.value < qval_thres,]
+  pc_allGenes_sig_freq <- melt(table(pc_allGenes_sig$R_i.name))
+  colnames(pc_allGenes_sig_freq) <- c("Driver", "Num.Hits")
+  pc_allGenes_sig_freq <- pc_allGenes_sig_freq[order(pc_allGenes_sig_freq$Num.Hits),]
+  ggplot(pc_allGenes_sig_freq, aes(y = Num.Hits, fill = Driver, 
+                                   x = reorder(Driver, -Num.Hits, mean))) + 
+    geom_bar(position = "dodge", width = 0.95, stat = "identity", 
+             show.legend = F, color = "black") + 
+    scale_fill_manual(values = c("#FFDC91FF", "#20854EFF", "#BC3C29FF", 
+                                 "#0072B5FF", "gray")) + 
+    xlab("Driver") + 
+    ylab(paste0("\n", paste0("Number of hits (q < ", paste0(qval_thres, ")")))) +
+    theme(axis.text = element_text(face="bold", size = 16), 
+          axis.title=element_text(size=18, face="bold"), 
+          panel.grid.major = element_blank(),
+          panel.background = element_rect(fill = 'white'))
+}
+
+#qval_thres <- 0.01
 qval_thres <- 0.2
-pc_allGenes_sig <- pc_allGenes_wtnn[pc_allGenes_wtnn$q.value < qval_thres,]
-pc_allGenes_sig_freq <- melt(table(pc_allGenes_sig$R_i.name))
-colnames(pc_allGenes_sig_freq) <- c("Driver", "Num.Hits")
-pc_allGenes_sig_freq <- pc_allGenes_sig_freq[order(pc_allGenes_sig_freq$Num.Hits),]
-ggplot(pc_allGenes_sig_freq, aes(y = Num.Hits, fill = Driver, 
-                                 x = reorder(Driver, -Num.Hits, mean))) + 
-  geom_bar(position = "dodge", width = 0.95, stat = "identity", 
-           show.legend = F, color = "black") + 
-  scale_fill_manual(values = c("#FFDC91FF", "#20854EFF", "#BC3C29FF", 
-                               "#0072B5FF", "gray")) + 
-  xlab("Driver") + 
-  ylab(paste0("\n", paste0("Number of hits (q < ", paste0(qval_thres, ")")))) +
-  theme(axis.text = element_text(face="bold", size = 16), 
-        axis.title=element_text(size=18, face="bold"), 
-        panel.grid.major = element_blank(),
-        panel.background = element_rect(fill = 'white'))
+
+# Call function
+plot_num_hit_barplot(pc_allGenes_wttn, qval_thres)
 
 ############################################################
 ### PART B: REAL V. RANDOMIZED HISTOGRAM
@@ -214,19 +227,19 @@ perform_gsea <- function(results_table, goi, sort_by, mingssize = 50) {
 # Call function
 results_gsea_tp53 <- perform_gsea(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
                                   "TP53", "p.value")
-results_gsea_tp53 <- results_gsea_tp53@result
+results_gsea_tp53[["go"]] <- results_gsea_tp53[["go"]]@result
 
 results_gsea_pik3ca <- perform_gsea(pc_allGenes[pc_allGenes$R_i.name == "PIK3CA",], 
                                     "PIK3CA", "p.value")
-results_gsea_pik3ca <- results_gsea_pik3ca@result
+results_gsea_pik3ca[["go"]] <- results_gsea_pik3ca[["go"]]@result
 
 results_gsea_kras <- perform_gsea(pc_allGenes[pc_allGenes$R_i.name == "KRAS",], 
                                   "KRAS", "p.value")
-results_gsea_kras <- results_gsea_kras@result
+results_gsea_kras[["go"]] <- results_gsea_kras[["go"]]@result
 
 results_gsea_idh1 <- perform_gsea(pc_allGenes[pc_allGenes$R_i.name == "IDH1",], 
                                   "IDH1", "p.value")
-results_gsea_idh1 <- results_gsea_kras@result
+results_gsea_idh1[["go"]] <- results_gsea_idh1[["go"]]@result
 
 
 #' Merge functionally similar pathways using ReactomePA's built-in semantic 
@@ -374,17 +387,17 @@ create_gsea_barchart_multGenes <- function(list_of_results_gsea, n, qval_thres,
   input_df$Enriched.Pathway.Driver <- unlist(lapply(1:nrow(input_df), function(i) 
     paste(input_df[i, 'Driver'], input_df[i,'Enriched.Pathway'], sep = "_")))
   
-  # Split up pathways longer than N characters with a newline
-  input_df$Enriched.Pathway.Driver <- unlist(lapply(input_df$Enriched.Pathway.Driver, function(pw) {
-    nchar_pw <- nchar(pw)
-    if(nchar_pw > 50) {
-      pw_spl <- unlist(strsplit(pw, " ", fixed = T))
-      half <- ceiling(length(pw_spl) / 2)
-      pw_spl[half] <- paste0(pw_spl[half], "\n")
-      return(paste(pw_spl, collapse = " "))
-    }
-    else{return(pw)}
-  }))
+  # Uncomment to split up pathways longer than N characters with a newline
+  #input_df$Enriched.Pathway.Driver <- unlist(lapply(input_df$Enriched.Pathway.Driver, function(pw) {
+  #  nchar_pw <- nchar(pw)
+  #  if(nchar_pw > 50) {
+  #    pw_spl <- unlist(strsplit(pw, " ", fixed = T))
+  #    half <- ceiling(length(pw_spl) / 2)
+  #    pw_spl[half] <- paste0(pw_spl[half], "\n")
+  #    return(paste(pw_spl, collapse = " "))
+  #  }
+  #  else{return(pw)}
+  #}))
   
   p <- ggplot(input_df, aes(x = reorder(Enriched.Pathway.Driver, abs(ES)), # Enriched.Pathway.Driver,
                             #p <- ggplot(input_df, aes(x = reorder(Enriched.Pathway.Driver, Neg.Log10.Pval),
@@ -397,8 +410,8 @@ create_gsea_barchart_multGenes <- function(list_of_results_gsea, n, qval_thres,
           strip.text.x = element_text(face="bold", size=14, 
                                       margin = margin(.2, 0, .2, 0, "cm"))) + 
     xlab(paste("Enriched", paste(db, "Pathways"))) + 
-    #ylab("Enrichment Score") + 
-    ylab("-log10(pval)") + 
+    ylab("Enrichment Score") + 
+    #ylab("-log10(pval)") + 
     #geom_hline(yintercept=-log10(qval_thres), linetype="dashed", color = "black") +
     scale_fill_manual(values = c("#20854EFF","#BC3C29FF","#0072B5FF", "#FFDC91FF")) + 
     scale_x_discrete(labels=roles) +
@@ -416,14 +429,14 @@ list_of_results_gsea <- list("TP53" = results_gsea_tp53[["go"]],
 create_gsea_barchart_multGenes(list_of_results_gsea, 8, 0.05, "q.value", "GO")
 
 # Import synthetic lethal GSEA results
-PATH_OUT <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
-results_gsea_synleth_tp53 <- fread(paste0(PATH_OUT, "DepMap/TP53/gsea_go_pancancer_qn_panq0.2_perq0.2_fishersp_dirsubB.csv"),
-                                   header = T)
-results_gsea_synleth_pik3ca <- fread(paste0(PATH_OUT, "DepMap/PIK3CA/gsea_go_pancancer_qn_panq0.2_perq0.2_fishersp_dirsubB.csv"),
-                                     header = T)
-results_gsea_synleth_kras <- fread(paste0(PATH_OUT, "DepMap/KRAS/gsea_go_pancancer_qn_panq0.2_perq0.2_fishersp_dirsubB.csv"),
-                                   header = T)
-list_of_results_gsea <- list("TP53" = results_gsea_synleth_tp53, 
-                             "PIK3CA" = results_gsea_synleth_pik3ca, 
-                             "KRAS" = results_gsea_synleth_kras)
-create_gsea_barchart_multGenes(list_of_results_gsea, 3, 0.2, "q.value", "GO")
+#PATH_OUT <- "C:/Users/sarae/Documents/Mona Lab Work/Main Project Files/Saved Output Data Files/Pan-Cancer/"
+#results_gsea_synleth_tp53 <- fread(paste0(PATH_OUT, "DepMap/TP53/gsea_go_pancancer_qn_panq0.2_perq0.2_fishersp_dirsubB.csv"),
+#                                   header = T)
+#results_gsea_synleth_pik3ca <- fread(paste0(PATH_OUT, "DepMap/PIK3CA/gsea_go_pancancer_qn_panq0.2_perq0.2_fishersp_dirsubB.csv"),
+#                                     header = T)
+#results_gsea_synleth_kras <- fread(paste0(PATH_OUT, "DepMap/KRAS/gsea_go_pancancer_qn_panq0.2_perq0.2_fishersp_dirsubB.csv"),
+#                                   header = T)
+#list_of_results_gsea <- list("TP53" = results_gsea_synleth_tp53, 
+#                             "PIK3CA" = results_gsea_synleth_pik3ca, 
+#                             "KRAS" = results_gsea_synleth_kras)
+#create_gsea_barchart_multGenes(list_of_results_gsea, 3, 0.2, "q.value", "GO")

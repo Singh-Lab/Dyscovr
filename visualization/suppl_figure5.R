@@ -1,7 +1,7 @@
 ############################################################
 # Code to create Suppl. Figure 5 Visualizations
 # Written by Sara Geraghty
-# PUBLICATION INFORMATION
+# https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 library(data.table)
@@ -15,7 +15,7 @@ outfn <- "res_top_0.05_allGenes_quantile_rawCNA_methMRaw_3PCs_Nonsyn.Drivers.Vog
 pc_allGenes <- read.csv(paste0(PATH, outfn))
 
 # Associated eliminated variables from multicollinearity
-elim_vars_fn <- "res_top_0.05_orig_allGenes_quantile_rawCNA_methMRaw_3PCs_elim.vif5.sp0.7_uncorrected_eliminated_variables.csv"
+elim_vars_fn <- "res_top_0.05_allGenes_quantile_rawCNA_methMRaw_3PCs_Nonsyn.Drivers.Vogel.elim.vif5.sp0.7_uncorrected_eliminated_variables.csv"
 pc_elimVars <- read.csv(paste0(PATH, elim_vars_fn))
 
 # Full output, with all covariates
@@ -28,6 +28,8 @@ pc_allGenes_full <- read.csv(paste0(PATH, outfn_full))
 ############################################################
 # Remove the (Intercept) terms
 pc_allGenes_full <- pc_allGenes_full[pc_allGenes_full$term != "(Intercept)",]
+# Order by q-value
+pc_allGenes_full <- pc_allGenes_full[order(pc_allGenes_full$q.value),]
 
 # Of the top X remaining tests, get what the terms are and plot the proportions
 x <- 500
@@ -37,7 +39,26 @@ terms_counts <- unlist(lapply(terms, function(x)
   nrow(pc_allGenes_full_topx[pc_allGenes_full_topx$term == x,])))
 terms_counts_df <- data.frame('Term' = terms, 'Freq' = terms_counts)
 
-# Visualize this as a Barplot 
+# Visualize by grouping all cancer type/subtype variables together
+cancer_type_counts <- terms_counts_df[grepl("Cancer_type", terms_counts_df$Term), ]
+cancer_types_count <- sum(unlist(cancer_type_counts$Freq))
+terms_counts_df <- terms_counts_df[!grepl("Cancer_type", terms_counts_df$Term),]
+terms_counts_df <- rbind(terms_counts_df, data.frame("Term" = "Cancer Type + Subtype",
+                                                     "Freq" = cancer_types_count))
+
+# Visualize by grouping all fraction of immune cell infiltration variables together
+ici_type_counts <- terms_counts_df[grepl("Tot_IC_Frac", terms_counts_df$Term), ]
+ici_types_count <- sum(unlist(ici_type_counts$Freq))
+terms_counts_df <- terms_counts_df[!grepl("Tot_IC_Frac", terms_counts_df$Term),]
+terms_counts_df <- rbind(terms_counts_df, data.frame("Term" = "Frac. of Immune Cell Infiltration",
+                                                     "Freq" = ici_types_count))
+
+# Adjust the names of other terms for visualization purposes
+terms_counts_df[terms_counts_df$Term == "MethStat_k", 'Term'] <- "Methylation Status (Target)"
+terms_counts_df[terms_counts_df$Term == "CNAStat_k", 'Term'] <- "CNA Status (Target)"
+terms_counts_df[terms_counts_df$Term == "P04637_CNAStat_i", 'Term'] <- "TP53 CNA Status"
+
+terms_counts_df <- terms_counts_df[order(terms_counts_df$Freq, decreasing = T),]
 ggplot(data = terms_counts_df[1:5,], aes(x = reorder(Term, -Freq), 
                                          y = Freq, fill = Term)) + 
   geom_bar(position = "dodge", stat = "identity") + 

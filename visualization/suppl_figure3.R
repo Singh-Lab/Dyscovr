@@ -1,7 +1,7 @@
 ############################################################
 # Code to create Suppl. Figure 3 Visualizations
 # Written by Sara Geraghty
-# PUBLICATION INFORMATION
+# https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 library(data.table)
@@ -118,7 +118,7 @@ driver_dfs <- get_driver_freq_dfs(unique_drivers, unique_drivers_uniprot,
 driver_freq_df <- do.call(rbind, driver_dfs)
 colnames(driver_freq_df)[which(colnames(driver_freq_df) == "Freq")] <- "Frequency"
 # Remove those rows with frequency zero
-driver_freq_df <- driver_freq_df[driver_freq_df$Frequency > 0,]
+driver_freq_df <- na.omit(driver_freq_df[driver_freq_df$Frequency > 0,])
 
 # Identify the number of cancer types in which each driver gene is present, for
 # visual sorting purposes

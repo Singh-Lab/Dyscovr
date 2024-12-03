@@ -1,7 +1,7 @@
 ############################################################
 # Code to Create Figure 2 Visualizations
 # Written by Sara Geraghty
-# PUBLICATION INFORMATION
+# https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 library(data.table)
@@ -21,7 +21,7 @@ library(clusterProfiler)
 
 keytypes(org.Hs.eg.db)
 
-# Local PATH to directory containing Dyscovr output files
+# Local path to directory containing Dyscovr output files
 PATH <-  paste0(getwd(), "Output/")
 
 # Generalized ID conversion table from BiomaRt
@@ -34,40 +34,59 @@ source(general_important_functions.R)
 ############################################################
 ### IMPORT PAN-CANCER OUTPUT FILE(S)
 ############################################################
+# Replace with the desired filenames
+
+# Regular Dyscovr pan-cancer run
 outfn <- "res_top_0.05_allGenes_quantile_rawCNA_methMRaw_3PCs_Nonsyn.Drivers.Vogel.elim.vif5.sp0.7_corrected_MUT.csv"
-pc_allGenes <- read.csv(paste0(PATH, outfn))
+pc_allGenes <- read.csv(paste0(PATH, outfn), header = T, check.names = F)
 
+# Dyscovr run with TTN
 outfn_wttn <- "res_top_0.05_allGenes_quantile_rawCNA_methMRaw_3PCs_Nonsyn.All.Vogel.elim.vif5.sp0.7_corrected_MUT.csv"
-pc_allGenes_wttn <- read.csv(paste0(PATH, outfn_wttn))
+pc_allGenes_wttn <- read.csv(paste0(PATH, outfn_wttn), header = T, check.names = F)
+
+# Dyscovr run using only silent mutations
+outfn_silent <- "res_top_0.05_allGenes_quantile_rawCNA_methMRaw_3PCs_Silent.Drivers.Vogel.elim.vif5.sp0.7_corrected_MUT.csv"
+pc_allGenes_silent <- read.csv(paste0(PATH, outfn_silent), header = T, check.names = F)
 
 
 ############################################################
-### PART A: BARPLOT OF HITS AT Q < 0.01
+### PART A: BARPLOT OF HITS AT GIVEN Q-VALUE THRESHOLD
 ############################################################
+#' Function to create a barplot of the number of hits per pan-cancer driver; for
+#' more than 5 drivers, need to provide additional colors
+#' @param pc_allGenes output file from Dyscovr
+#' @param qval_thres a q-value threshold for significance
+plot_num_hit_barplot <- function(pc_allGenes, qval_thres) {
+  pc_allGenes_sig <- pc_allGenes[pc_allGenes$q.value < qval_thres,]
+  pc_allGenes_sig_freq <- melt(table(pc_allGenes_sig$R_i.name))
+  colnames(pc_allGenes_sig_freq) <- c("Driver", "Num.Hits")
+  pc_allGenes_sig_freq <- pc_allGenes_sig_freq[order(pc_allGenes_sig_freq$Num.Hits),]
+  ggplot(pc_allGenes_sig_freq, aes(y = Num.Hits, fill = Driver, 
+                                   x = reorder(Driver, -Num.Hits, mean))) + 
+    geom_bar(position = "dodge", width = 0.95, stat = "identity", 
+             show.legend = F, color = "black") + 
+    scale_fill_manual(values = c("#FFDC91FF", "#20854EFF", "#BC3C29FF", 
+                                 "#0072B5FF", "gray")) + 
+    xlab("Driver") + 
+    ylab(paste0("\n", paste0("Number of hits (q < ", paste0(qval_thres, ")")))) +
+    theme(axis.text = element_text(face="bold", size = 16), 
+          axis.title=element_text(size=18, face="bold"), 
+          panel.grid.major = element_blank(),
+          panel.background = element_rect(fill = 'white'))
+}
+
 qval_thres <- 0.01
-pc_allGenes_sig <- pc_allGenes_wttn[pc_allGenes_wttn$q.value < qval_thres,]
-pc_allGenes_sig_freq <- melt(table(pc_allGenes_sig$R_i.name))
-colnames(pc_allGenes_sig_freq) <- c("Driver", "Num.Hits")
-pc_allGenes_sig_freq <- pc_allGenes_sig_freq[order(pc_allGenes_sig_freq$Num.Hits),]
-ggplot(pc_allGenes_sig_freq, aes(y = Num.Hits, fill = Driver, 
-                             x = reorder(Driver, -Num.Hits, mean))) + 
-  geom_bar(position = "dodge", width = 0.95, stat = "identity", 
-           show.legend = F, color = "black") + 
-  scale_fill_manual(values = c("#FFDC91FF", "#20854EFF", "#BC3C29FF", 
-                               "#0072B5FF", "gray")) + 
-  xlab("Driver") + 
-  ylab(paste0("\n", paste0("Number of hits (q < ", paste0(qval_thres, ")")))) +
-  theme(axis.text = element_text(face="bold", size = 16), 
-        axis.title=element_text(size=18, face="bold"), 
-        panel.grid.major = element_blank(),
-        panel.background = element_rect(fill = 'white'))
+#qval_thres <- 0.2
 
+# Call function
+plot_num_hit_barplot(pc_allGenes_wttn, qval_thres)
   
+
 ############################################################
 ### PART B, D: BARPLOT OF ENRICHMENT IN CGC AND TF TARGETS
 ############################################################  
 #' Use a one-sided Fisher's Exact Test/ Hypergeometric (HG) test or a 
-#' Kolmogorov-Smirnov (K-S) test to test for statistical enrichment
+#' Kolmogorov-Smirnov (K-S) test for statistical enrichment
 #' @param master_df a master DF produced from Dyscovr that has q-values
 #' @param known_targs a vector of known targets for a gene of interest (master
 #' DF should already be subsetted to just this gene); ex. ChIP-eat targets, STRING
@@ -315,7 +334,7 @@ drivers <- c("TP53", "PIK3CA", "KRAS", "IDH1")
 create_enrichment_barplot(pc_allGenes, drivers, "K-S", list(cgc_genes), "CGC", 0.01)
 
 # Call function (DoRothEA targets)
-tf_targets <- list("TP53" = tp53_dorothea_targets, 
+tf_targets <- list("TP53" = tp53_tf_targets, 
                          "PIK3CA" = pik3ca_tf_targets,
                          "KRAS" = kras_tf_targets,
                          "IDH1" = idh1_tf_targets)
@@ -463,25 +482,29 @@ get_frac_of_genes_at_rank <- function(target_set_vector_list, master_df) {
 tp53_curated_targets <- read.csv(paste0(PATH, "Validation_Files/TP53_Targets_Fischer_2017_Oncogene.csv"),
                                  header = T, check.names = F)[,1]
 
-### DoRothEA  ###
-# https://bioconductor.org/packages/release/data/experiment/vignettes/dorothea/inst/doc/dorothea.html
-dorothea_net <- dorothea::dorothea_hs
-
-tp53_dorothea_targets <- unlist(dorothea_net[dorothea_net$tf == "TP53", 'target'])
-
-
+### REACTOME TP53 SIGNALING PW TARGETS ###
+# https://reactome.org/PathwayBrowser/
+# Transcriptional Regulation by TP53 (R-HSA-3700989)
+tp53_transcriptional_reg_pw <- read.csv(paste0(
+  PATH, "Validation_Files/Transcriptional Regiulation by TP53_R-HSA-3700989.csv"), 
+  header = T, check.names = F)
+tp53_transcriptional_reg_pw_gns <- unlist(lapply(tp53_transcriptional_reg_pw$MoleculeName, function(x) 
+  unlist(strsplit(x, " ", fixed = TRUE))[2]))
+tp53_transcriptional_reg_pw_gns <- unique(tp53_transcriptional_reg_pw_gns[
+  tp53_transcriptional_reg_pw_gns != "TP53"])
 
 # Combine into list
 tp53_select_target_set_list <- list("Curated_Fischer_2017" = tp53_curated_targets,
-                                    "DoRothEA" = tp53_dorothea_targets)
+                                    "Reactome" = tp53_transcriptional_reg_pw_gns)
 
 # Call function
 plot_combined_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",],
                          tp53_select_target_set_list, "TP53", 500, 50, NA)
-# Optionally replace NA with Dyscovr run on silent mutations
+# Optionally also include Dyscovr run on silent mutations as a validation
 plot_combined_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",],
                          tp53_select_target_set_list, "TP53", 500, 50,
                          pc_allGenes_silent[pc_allGenes_silent$R_i.name == "TP53",])
+
 
 ############################################################
 ### PART E: PER-DRIVER NETWORK OVERLAY
@@ -691,11 +714,11 @@ fwrite(string_nw_full, paste0(
   PATH, "Validation_Files/9606.protein.links.v12.0.namesAdded.txt"))
 
 # Read back, once completed
-string_nw_full <- fread(paste0(PATH, "Validation_Files/9606.protein.links.v11.5.namesAdded.txt"))
+string_nw_full <- fread(paste0(PATH, "Validation_Files/9606.protein.links.v12.0.namesAdded.txt"))
 
 # Call function
 create_graphical_representation(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
-                                "TP53", 0.01, string_nw_full, "STRING", 0.4, NA)
+                                "TP53", 0.01, string_nw_full, "STRING", 0.4, 100)
 
 
 ############################################################
@@ -833,175 +856,3 @@ tp53_kegg_pathway_genes <- unlist(strsplit(tp53_kegg_pathway$KEGG_P53_SIGNALING_
 
 compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
                                tp53_kegg_pathway_genes, "k-s", 0.01)
-
-### HUMAN BASE ###
-# Link to download: https://hb.flatironinstitute.org/download, Top Edges
-global_nw <- fread(paste0(PATH, "HumanBase/global_top/global_top"), header = F)
-colnames(global_nw) <- c("entrez1", "entrez2", "posterior_prob")
-
-# Limit to posterior probability of at least 0.5 (default on website)
-global_nw_0.5 <- global_nw[global_nw$posterior_prob > 0.5, ]
-
-# Change Entrez IDs to gene names
-mapping <- as.data.frame(bitr(unique(c(global_nw_0.5$entrez1, global_nw_0.5$entrez2)), 
-                              fromType = "ENTREZID", toType = "SYMBOL", 
-                              OrgDb=org.Hs.eg.db, drop = T))
-global_nw_0.5$gene_name1 <- unlist(lapply(global_nw_0.5$entrez1, function(x) {
-  symb <- mapping[mapping$ENTREZID == x, 'SYMBOL']
-  if(length(symb) == 0) {return(NA)}
-  else{return(symb)}
-}))
-global_nw_0.5$gene_name2 <- unlist(lapply(global_nw_0.5$entrez2, function(x) {
-  symb <- mapping[mapping$ENTREZID == x, 'SYMBOL']
-  if(length(symb) == 0) {return(NA)}
-  else{return(symb)}
-}))
-
-fwrite(global_nw_0.5, paste0(PATH, "HumanBase/global_top/global_top_0.5_idconv.csv"))
-
-# Get driver interactors from HumanBase 
-tp53_hb_interactors <- unique(unlist(global_nw_0.5[(global_nw_0.5$gene_name1 == "TP53") |
-                                                  (global_nw_0.5$gene_name2 == "TP53"), 
-                                                c("gene_name1", "gene_name2")]))  #262
-compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
-                               tp53_hb_interactors, "k-s", 0.01)
-
-### INTACT ###
-# Website: https://www.ebi.ac.uk/intact/home
-# Search TP53 and download set of interactors in homo sapiens
-tp53_intact_interactors <- read.table(paste0(PATH, "Validation_Files/IntAct/tp53_interactors.txt"),
-                                      header = T, sep = "\t", fill = T)
-tp53_intact_interactors[,1] <- unlist(lapply(tp53_intact_interactors[,1], function(x) 
-  unlist(strsplit(x, ":", fixed = T))[2]))
-tp53_intact_interactors[,2] <- unlist(lapply(tp53_intact_interactors[,2], function(x) 
-  unlist(strsplit(x, ":", fixed = T))[2]))
-tp53_intact_interactors <- unique(unlist(tp53_intact_interactors[(tp53_intact_interactors[,1] == "P04637") |
-                                                     (tp53_intact_interactors[,2] == "P04637"), c(1,2)]))
-tp53_intact_interactors <- tp53_intact_interactors[tp53_intact_interactors != "P04637"]
-
-# Convert to gene names, or modify enrichment function
-tp53_intact_interactors <- unlist(lapply(tp53_intact_interactors, function(ia) 
-  unique(all_genes_id_conv[all_genes_id_conv$uniprot_gn_id == ia, 'external_gene_name'])))
-
-compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
-                               tp53_intact_interactors, "k-s", 0.01)  
-
-### BIOGRID ###
-# Website: https://thebiogrid.org/
-# Search TP53 and download set of interactors
-
-tp53_biogrid_interactors <- read.table(paste0(PATH, "Validation_Files/BioGrid/TP53/BIOGRID-GENE-113010-4.4.233.tab3.txt"),
-                                      header = T, sep = "\t")
-tp53_biogrid_interactors <- unique(unlist(c(tp53_biogrid_interactors$`Systematic Name Interactor A`,
-                                            tp53_biogrid_interactors$`Systematic Name Interactor B`)))
-tp53_biogrid_interactors <- tp53_biogrid_interactors[tp53_biogrid_interactors != "TP53"]
-compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
-                               tp53_biogrid_interactors, "k-s", 0.01)  
-
-### STRING TOP 500 TARGETS, CONF > 0.4 ###
-# Website: https://string-db.org
-# Search TP53, specify top 500 full network, download short tabular text output
-tp53_string_top500 <- read.csv(paste0(PATH, "Validation_Files/STRING/TP53/tp53_string targets_top500.csv"), 
-                               header = T, check.names = F)
-tp53_string_top500_gns <- unique(c(tp53_string_top500$node1, tp53_string_top500$node2))
-tp53_string_top500_gns <- tp53_string_top500_gns[tp53_string_top500_gns != "TP53"]
-compute_statistical_enrichment(pc_allGenes[pc_allGenes$R_i.name == "TP53",], 
-                               tp53_string_top500_gns, "k-s", 0.01)  
-
-############################################################
-#### COMPUTE STATISTICAL ENRICHMENT USING A HYPERGEOMETRIC
-#### (ONE-SIDED FISHER'S EXACT TEST) AND/OR A K-S TEST
-############################################################
-#' Use a one-sided Fisher's exact test/ Hypergeometric test or a Kolmogorov-Smirnov
-#' test to test for statistical enrichment
-#' @param master_df a master DF produced from run_linear_model() that has q-values
-#' @param known_targs a vector of known targets for a gene of interest (master
-#' DF should already be subsetted to just this gene); ex. ChIP-eat targets, HumanBase
-#' @param type the type of test, either "fisher's exact" or "k-s"
-#' @param qval_thres q-value threshold for HG enrichment
-#' @param top_n option to specify a top n hits, rather than a q-value threshold
-compute_statistical_enrichment <- function(master_df, known_targs, type, qval_thres, top_n) {
-  final_res <- NA
-  
-  if ((type == "fisher's exact") | (type == "both")) {
-    sig_targets <- c()
-    nonsig_targets <- c()
-    
-    if(!is.na(qval_thres)) {
-      sig_targets <- unique(master_df[master_df$q.value < qval_thres, 'T_k.name'])
-      nonsig_targets <- unique(master_df[master_df$q.value > qval_thres, 'T_k.name'])
-    } else if(!is.na(top_n)) {
-      sig_targets <- unique(master_df[1:top_n, 'T_k.name'])
-      nonsig_targets <- unique(master_df[(top_n+1):nrow(master_df), 'T_k.name'])
-    } else {
-      print("Must specify a q-value threshold or top N in order to perform a 
-            Fischer's exact test. Please try again.")
-      return(NA)
-    }
-    targets <- unique(master_df$T_k.name)
-    
-    num_sig_targets <- length(sig_targets)
-    num_nonsig_targets <- length(nonsig_targets)
-    
-    known_targs_i <- intersect(known_targs, targets)
-    notknown_targs_i <- setdiff(targets, known_targs)
-    
-    num_known_targets <- length(known_targs_i)
-    num_notknown_targets <- length(notknown_targs_i)
-    
-    num_known_sig_targets <- length(intersect(sig_targets, known_targs_i))
-    num_known_nonsig_targets <- length(intersect(nonsig_targets, known_targs_i))
-    num_notknown_sig_targets <- length(intersect(sig_targets, notknown_targs_i))
-    num_notknown_nonsig_targets <- length(intersect(nonsig_targets, notknown_targs_i))
-    
-    contigency_table <- matrix(c(num_known_sig_targets, num_known_nonsig_targets,
-                                 num_notknown_sig_targets, num_notknown_nonsig_targets),
-                               nrow = 2, ncol = 2)
-    print(contigency_table)
-    
-    fisher_res <- fisher.test(contigency_table, alternative = "greater")
-    print(fisher_res$p.value)
-    
-    final_res <- fisher_res
-  }
-  if ((type == "k-s") | (type == "both")) {
-    # Create a uniform distribution the same length as the number of genes
-    uniform <- 1:length(master_df$T_k.name)
-    
-    # Get the ranks of the known targets within our ranked list
-    known_targs <- setdiff(known_targs, setdiff(known_targs, master_df$T_k.name))
-    ranks_of_targs <- unlist(lapply(known_targs, function(x) {
-      if(x %fin% master_df$T_k.name) {return(min(which(master_df$T_k.name == x,)))}
-      else {return(NA)}
-    }))
-    ranks_of_targs <- ranks_of_targs[!(is.infinite(ranks_of_targs) | (is.na(ranks_of_targs)))]
-    #print(TRUE %in% duplicated(ranks_of_targs))
-    
-    # Perform the K-S test, with the uniform distribution
-    ks_res <- ks.test(ranks_of_targs, uniform, alternative = "greater")
-    
-    # Calculate effect size (see https://stats.stackexchange.com/questions/363402/is-there-a-rule-of-thumb-regarding-effect-size-and-the-two-sample-ks-test)
-    print(as.numeric(ks_res$statistic))
-    
-    #print(ks_res)
-    print(ks_res$p.value)
-    
-    # Alternative to print the K-S statistic exactly, using the KSgeneral package
-    # (Note that this is now a two-sided test)
-    if(ks_res$p.value == 0) {
-      print("Printing KSgeneral two-sided K-S p-value:")
-      ks_res_exact <- disc_ks_test(ranks_of_targs, ecdf(uniform), exact = T,
-                                   alternative = "greater")
-      print(ks_res_exact$p.value)
-      ks_res <- ks_res_exact
-    }
-    
-    if(type == "both") {final_res <- list(final_res, ks_res)}
-    else {final_res <- ks_res}
-  }
-  if (!(type %in% c("fisher's exact", "k-s", "both"))) {
-    print("Only implemented for 'Fisher's exact' or 'k-s' tests.")
-    return(0)
-  }
-  return(final_res)
-}
