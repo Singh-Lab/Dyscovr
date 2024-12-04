@@ -67,7 +67,7 @@ perCancer <- perCancer[names(perCancer) %fin% cts]
 # (https://depmap.org/portal/download/custom/) or full (https://depmap.org/portal/download/all/)
 # download webpages
 
-# Import CRISPRi, expression, mutation, and (optionally) CNA data
+# Import CRISPRi, expression, and mutation data
 crispr <- read.csv(paste0(PATH_DEPMAP, "CRISPR_(DepMap_Public_23Q2+Score,_Chronos).csv"), 
                    header = T, check.names = F, row.names = 1)
 
@@ -125,7 +125,7 @@ cell_line_cancer_type_mapping <- list(
 ############################################################
 #' Adjust the knockout and expression data frames to merge them with the mutation
 #' data and "melt" them so that we can more easily make plots
-#' @param depmap_df a DepMap knockout, expression, or CNA data frame
+#' @param depmap_df a DepMap knockout or expression data frame
 #' @param mutation_df a DepMap mutation data frame
 #' @param genes_of_interest a vector of the Hugo IDs of genes whose mutation
 #' status is of interest
@@ -204,7 +204,7 @@ print(length(intersect(crispr$depmap_id, expression_qn$depmap_id)))
 #' between unmutated expression of driver and target dependency
 #' @param cell_line_cancer_type_mapping a mapping between depmap IDs and cancer type
 #' @param terms_of_interest a vector of terms we'd like to include as variables
-#' (options include 'mutation', 'cna', and 'expression')
+#' (options include 'mutation' and 'expression')
 #' @param recombine either "None", "linearHypothesis", or "multcomp" to indicate 
 #' whether or not we are recombining the driver mutation and expression status using 
 #' the car package's linearHypothesis function or the multcomp package's multcomp
