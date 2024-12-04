@@ -1,6 +1,7 @@
 ############################################################
 ### Additional Pre-Dyscovr Processing 
-### Publication Information
+### Written by Sara Geraghty, Princeton University
+### https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 options("install.lock"=F)
@@ -58,7 +59,6 @@ colnames(expression_df)[2:ncol(expression_df)] <- unlist(lapply(
   colnames(expression_df)[2:ncol(expression_df)], function(x)
     paste(unlist(strsplit(x, "-", fixed = T))[3:4], collapse = "-")))
 
-
 ############################################################
 # IMPORT METHYLATION FILES
 ############################################################
@@ -84,14 +84,12 @@ colnames(mutation_df)[2:ncol(mutation_df)] <- unlist(lapply(
   colnames(mutation_df)[2:ncol(mutation_df)], function(x) 
     paste(unlist(strsplit(x, "-", fixed = T))[3:4], collapse = "-"))) 
 
-
 ############################################################
 # IMPORT CNA FILES
 ############################################################
 cna_df <- read.csv(paste0(
   PATH, "CNA/CNA_DF_AllGenes_CancerOnly_MergedIsoforms.csv"), 
   header = T, row.names = 1, check.names = F)
-
 
 ############################################################
 # IMPORT PATIENT FILES
@@ -117,14 +115,12 @@ per_cancer_patient_df_fns <- per_cancer_patient_df_fns[
 per_cancer_patient_dfs <- lapply(per_cancer_patient_df_fns, function(fn)
   read.csv(paste0(OUTPUT_PATH, paste0("Patient/", fn)), header = T, row.names = 1))
 
-
 ############################################################
 # IMPORT SAMPLE FILES
 ############################################################
 sample_df <- read.csv(paste0(
   OUTPUT_PATH, "Sample/sample_dataframe_cibersort_total_frac_washu.csv"), 
   header = T, row.names = 1)  
-
 
 ############################################################
 ############################################################
@@ -631,7 +627,7 @@ write(normLike_noMutOL, paste0(
 
 ############################################################
 ############################################################
-# 8. FIND SAMPLES WITH MUTATION IN ONE GENE & NO MUTATION
+# FIND SAMPLES WITH MUTATION IN ONE GENE & NO MUTATION
 # IN ANOTHER (INDEPENDENT POSITIVE AND NEGATIVE SETS)
 ############################################################
 ############################################################

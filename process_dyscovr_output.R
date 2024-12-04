@@ -1,6 +1,7 @@
 ############################################################
 ### Process Dyscovr Output
-### PUBLICATION INFORMATION 
+### Written by Sara Geraghty, Princeton University
+### https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 # Given an output 'master file' from Dyscovr, this file performs the following 
@@ -11,18 +12,6 @@
   # Addition of interpretable gene names
 
 #!/usr/bin/env Rscript
-
-# install.packages("gplots")
-
-#library("gplots", lib.loc = library.path, quietly = TRUE)
-#library(broom, lib.loc = library.path, quietly = TRUE)
-#library(qvalue, lib.loc = library.path, quietly = TRUE)
-#library(ggplot2, lib.loc = library.path, quietly = TRUE)
-#library(stringr, lib.loc = library.path, quietly = TRUE)
-#library(dplyr, lib.loc = library.path, quietly = TRUE)
-#library(olsrr, lib.loc = library.path, quietly = TRUE)
-#library("RColorBrewer", lib.loc = library.path, quietly = TRUE)
-
 
 ############################################################
 # SET PATH
@@ -147,6 +136,7 @@ if("p.value" %fin% colnames(master_df_mut)) {
   master_df_mut_corrected <- master_df_mut
 }
 
+
 ############################################################
 #### ADD GENE NAMES 
 ############################################################
@@ -185,8 +175,6 @@ tryCatch({
   # Write this to a new file
   outfn <- str_replace(outfn, "uncorrected", "corrected") 
   print(paste("NEW OUTPUT FILENAME:", outfn))
-  #print(paste(outpath_curr, paste(outfn, paste("_MUT", ".csv", sep = ""), 
-  #sep = ""), sep = "/"))
   fwrite(master_df_mut_corrected, paste(outpath_curr, 
                                         paste0(outfn, 
                                                paste0("_MUT", ".csv")), 

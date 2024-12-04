@@ -1,6 +1,7 @@
 ############################################################
 ### DYSCOVR Linear Regression Model
-### PUBLICATION INFORMATION
+### Written by Sara Geraghty, Princeton University
+### https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 #!/usr/bin/env Rscript
@@ -352,12 +353,6 @@ run_linear_model <- function(list_of_input_dfs, expression_df, cna_bucketing,
     shuffled_input_dfs <- get_shuffled_input_dfs(signif_eval_type, lm_input_dfs[1], 
                                                  expression_df, num_randomizations)
   }
-
-  # If we are resolving multicollinearity, create a file where we will store
-  # variables that were eliminated from each model
-  #removed_variables_outfn <- paste(
-  #  outpath, paste0(outfn, "_eliminated_variables.csv"), sep = "/")
-  #fwrite(data.table("Variables.Removed"), removed_variables_outfn, col.names = F)
   
   # Use multithreading to run these jobs in parallel
   num_groups <- 8
@@ -393,17 +388,7 @@ run_linear_model <- function(list_of_input_dfs, expression_df, cna_bucketing,
 		  "RColorBrewer", "glmnet", "gglasso", "statmod", "mvtnorm", "MCMCpack", "SuppDists",
 		  "mvnfast", "MBSGS", "MASS", "mgcv", "mnormt", "truncnorm"), 
     .combine = function(x,y) combine_res_obj(x, y)) %dopar% {
-      
-      # Source the necessary files for the worker node
-      #SOURCE_PATH <- "/Genomics/argo/users/scamilli/Dyscovr_Personal"
-      #source(paste(SOURCE_PATH, "general_important_functions.R", sep = "/"))
-      #source(paste(SOURCE_PATH, "dyscovr_helper_functions.R", sep = "/"))
-      #source(paste(SOURCE_PATH, "perform_collinearity_correction.R", sep = "/"))
-      #if (regularization != "None") {
-      #  source(paste(SOURCE_PATH, "run_regularized_models.R", sep = "/"))
-      #  source(paste(SOURCE_PATH, "run_bayesian_lasso.R", sep = "/"))
-      #}
-      
+            
       lm_input_table = list_of_input_dfs[[i]]
       if(debug) {print(head(lm_input_table))}
       
@@ -446,7 +431,7 @@ run_linear_model <- function(list_of_input_dfs, expression_df, cna_bucketing,
           unlist(strsplit(x, "_", fixed = T))[1]))
       swissprot_ids <- unique(swissprot_ids[swissprot_ids != ""])
       input_drivers <- data.table("swissprot" = swissprot_ids)
-      print(head(input_drivers))      
+      #print(head(input_drivers))      
 
       # Generate formula dynamically
       formula <- tryCatch({
@@ -456,7 +441,7 @@ run_linear_model <- function(list_of_input_dfs, expression_df, cna_bucketing,
           print(cond) 
           return(NA)
       })
-      print(formula)
+      #print(formula)
       
       # If we are using a VIF method to correct for collinearity, do this now 
       # after we have created the formula for the model fit
@@ -636,13 +621,7 @@ run_linear_model <- function(list_of_input_dfs, expression_df, cna_bucketing,
   
   # tell R that we don't need the processes anymore
   stopCluster(parallel_cluster)
-  
-  # Add target names to the DF containing removed variables
-  #variables_rm_df <- fread(removed_variables_outfn, header = T)
-  #variables_rm_df <- cbind(data.table("Target" = names(list_of_input_dfs), 
-   #                                   variables_rm_df))
-  #fwrite(variables_rm_df, removed_variables_outfn)
-  
+    
   if(debug) {
     print("Dyscovr Master DF")
     print(head(master_df))

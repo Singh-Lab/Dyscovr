@@ -47,14 +47,14 @@ module add R/4.0.5
 # Create LM input tables for all gene targets, pan-cancer (all cancer types together)
 Rscript create_dyscovr_input_tables.R --dataset "TCGA" --cancerType "PanCancer" --specificTypes "ALL" \
 --removeMetastatic "T" --randomize "F" --test "F" --run_query_genes_jointly "T" \
---protein_ids_df "protein_ids_df_gr0.05Freq_vogelstein_drivers_nonsynonymous_uniformHypermutRm.csv" \
+--protein_ids_df "protein_ids_df_gr0.05Freq_vogelstein_all_nonsynonymous_uniformHypermutRm.csv" \
 --expression_df "expression_quantile_norm_sklearn_uniformHypermutRm_IntersectPatientsWashU_orig.csv" \
 --methylation_df "methylation_M_CancerOnly_uniformHypermutRm_IntersectPatientsWashU_orig.csv" \
 --mutation_df "mut_count_matrix_nonsynonymous_uniformHypermutRm_IntersectPatientsWashU_orig.csv" \
 --cna_df "CNA_AllGenes_mergedIsoforms_CancerOnly_uniformHypermutRm_IntersectPatientsWashU.csv" \
 --patient_df "combined_patient_sample_inclSubtypes_uniformHypermutRm_IntersectPatientsWashU.csv" \
 --target_df "allgene_targets.csv" --cna_bucketing "rawCNA" --meth_bucketing "F" \
---meth_type "M" --run_name "top_0.05_orig" --num_pcs 3 --debug "F" --removeCis "F" 
+--meth_type "M" --run_name "top_0.05_orig_wttn" --num_pcs 3 --debug "F" --removeCis "F" 
 
 
 # Create LM input tables for all gene targets, per-cancer (all cancer types individually)

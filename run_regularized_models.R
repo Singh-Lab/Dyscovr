@@ -1,6 +1,7 @@
 ############################################################
 ### Run Regularized Models
-### PUBLICATION INFORMATION
+### Written by Sara Geraghty, Princeton University
+### https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 # This file contains a set of functions that will allow the Dyscovr model to 

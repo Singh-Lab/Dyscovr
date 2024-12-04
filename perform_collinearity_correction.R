@@ -1,12 +1,10 @@
 ############################################################
 ### PERFORM COLLINEARITY COLLECTION
-### PUBLICATION INFORMATION
+### Written by Sara Geraghty, Princeton University
+### https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 # Helper functions to remove covariates that are correlated/ collinear
-
-#library(Hmisc, lib.loc = library.path, quietly = T)
-#library(caret, lib.loc = library.path, quietly = T)
 
 ############################################################
 
@@ -143,8 +141,6 @@ correct_collinearity <- function(lm_input_table, formula, method, target, #outfi
   print(list(paste(as.character(unlist(variables_removed)), collapse = ",")))
   
   # Write removed variables to file
-  #fwrite(list(paste(as.character(unlist(variables_removed)), collapse = ",")), 
-         #outfile, append = T)
   variables_rm_df <- data.table('Target' = target,
                                 'Variables.Rm' = paste(as.character(unlist(variables_removed)),
                                                           collapse = ","))
@@ -259,8 +255,6 @@ correct_collinearity_spearman <- function(lm_input_matrix, method) {
       } 
     } 
   }
-  # Write removed variables to file
-  #fwrite(list(paste(variables_removed, collapse = ",")), outfile, append = T)
   
   return(list(lm_input_matrix, unique(variables_removed)))
 }

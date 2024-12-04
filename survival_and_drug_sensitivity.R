@@ -1,5 +1,7 @@
 ########################################################################
 ### SURVIVAL CURVES AND DRUG RESPONSE ANALYSIS
+### Written by Sara Geraghty, Princeton University
+### https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ########################################################################
 
 # Plot survival curves and perform drug sensitivity analysis using TCGA clinical data
@@ -215,31 +217,337 @@ create_survival_curves <- function(clinical_df, driver_name, mutation_count_matr
 #' @param expression_df a quantile-normalized expression data frame across genes
 #' and patient samples
 #' @param target_gene the name of the target gene of interest
-#' @param meth                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 @param lab a label with the name of the drug
-#' @param goi the name of the driver gene-of-interest
-create_drug_response_barplot <- function(mutation_count_matrix_driver, col_name, lab, goi) {
-  input_df_nomut <- melt(table(mutation_count_matrix_driver[mutation_count_matrix_driver$mutation_status == 0,
-                                                            col_name]))
-  colnames(input_df_nomut) <- c("Response", "Frequency")
-  input_df_nomut$Mutation.Status <- rep(0, times = nrow(input_df_nomut))
-  input_df_mut <- melt(table(mutation_count_matrix_driver[mutation_count_matrix_driver$mutation_status == 1,
-                                                          col_name]))
-  colnames(input_df_mut) <- c("Response", "Frequency")
-  input_df_mut$Mutation.Status <- rep(1, times = nrow(input_df_mut))
-  input_df <- rbind(input_df_nomut, input_df_mut)
-  input_df$Response <- factor(input_df$Response, levels = c("Complete Response", "Partial Response",
-                                                            "Stable Disease", "Clinical Progressive Disease"))
-  input_df$Response.Aggr <- unlist(lapply(input_df$Response, function(x) ifelse(grepl("Response", x), "Response", "Disease")))
-  input_df$Response.Aggr <- factor(input_df$Response.Aggr, levels = c("Response", "Disease"))
-  input_df$Response.Aggr <- as.character(input_df$Response.Aggr)
+#' @param meth   
+                      legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                      font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                      font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                      font.legend = c(12, "bold", "black")) + 
+        xlab("Time (Days)") + ylab("Survival Probability")
+      print(p)
+      
+      # Cox proportional hazards
+    } else {
+      formula <- "Surv(time = days, event = status) ~ mutation_status + Age + Gender + Prior_malig + Treatment_rad + Treatment_pharm + PC1 + PC2 + PC3 + Tumor_purity_b1 + Tumor_purity_b2 + Tumor_purity_b3 + Tot_IC_Frac_b1 + Tot_IC_Frac_b2 + Tot_IC_Frac_b3"
+      formula <- paste(formula, paste(
+        colnames(survival_df)[grepl("Cancer_type", colnames(survival_df))], 
+        collapse = " + "), sep = " + ")
+      res.cox <- coxph(as.formula(formula), data = survival_df)  #+ cancer_type
+      print(res.cox)
+      p <- ggadjustedcurves(res.cox, data = survival_df, variable = "mutation_status",
+                            legend.title = paste(driver_name, "Mutation Status"), 
+                            palette = c("#0072B5FF", "#BC3C29FF"),
+                            pval = T, ggtheme = theme_minimal(), 
+                            legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                            font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                            font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                            font.legend = c(12, "bold", "black"))
+      print(p)
+    }
+    
+  }
   
-  g <- ggplot(input_df, aes(x = Response.Aggr, y = Frequency, fill = as.factor(Mutation.Status))) +
-    geom_bar(stat = "identity", position = position_dodge()) +
-    xlab(paste(lab, "Drug Response")) + ylab("Frequency") + labs(fill = paste(goi, "Mutation Status")) +
-    theme_minimal() + scale_fill_nejm() +
-    theme(axis.text.x=element_text(size=14), axis.title.x=element_text(size=14, face="bold"), 
-          axis.title.y=element_text(size=14, face="bold"), axis.text.y=element_text(size=14),
-          legend.title = element_text(size=14, face="bold"), 
+  return(survival_df)
+}
+
+#' Helper function to add expression categorization by patient for the given 
+#' target gene; type of categorization is specified
+#' @param expression_df a quantile-normalized expression data fram  across genes
+#' and patient samples
+#' @param target_gene the name of the target gene of interest
+#' @param meth   
+                      legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                      font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                      font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                      font.legend = c(12, "bold", "black")) + 
+        xlab("Time (Days)") + ylab("Survival Probability")
+      print(p)
+      
+      # Cox proportional hazards
+    } else {
+      formula <- "Surv(time = days, event = status) ~ mutation_status + Age + Gender + Prior_malig + Treatment_rad + Treatment_pharm + PC1 + PC2 + PC3 + Tumor_purity_b1 + Tumor_purity_b2 + Tumor_purity_b3 + Tot_IC_Frac_b1 + Tot_IC_Frac_b2 + Tot_IC_Frac_b3"
+      formula <- paste(formula, paste(
+        colnames(survival_df)[grepl("Cancer_type", colnames(survival_df))], 
+        collapse = " + "), sep = " + ")
+      res.cox <- coxph(as.formula(formula), data = survival_df)  #+ cancer_type
+      print(res.cox)
+      p <- ggadjustedcurves(res.cox, data = survival_df, variable = "mutation_status",
+                            legend.title = paste(driver_name, "Mutation Status"), 
+                            palette = c("#0072B5FF", "#BC3C29FF"),
+                            pval = T, ggtheme = theme_minimal(), 
+                            legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                            font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                            font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                            font.legend = c(12, "bold", "black"))
+      print(p)
+    }
+    
+  }
+  
+  return(survival_df)
+}
+
+#' Helper function to add expression categorization by patient for the given 
+#' target gene; type of categorization is specified
+#' @param expression_df a quantile-normalized expression data fram  across genes
+#' and patient samples
+#' @param target_gene the name of the target gene of interest
+#' @param meth   
+                      legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                      font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                      font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                      font.legend = c(12, "bold", "black")) + 
+        xlab("Time (Days)") + ylab("Survival Probability")
+      print(p)
+      
+      # Cox proportional hazards
+    } else {
+      formula <- "Surv(time = days, event = status) ~ mutation_status + Age + Gender + Prior_malig + Treatment_rad + Treatment_pharm + PC1 + PC2 + PC3 + Tumor_purity_b1 + Tumor_purity_b2 + Tumor_purity_b3 + Tot_IC_Frac_b1 + Tot_IC_Frac_b2 + Tot_IC_Frac_b3"
+      formula <- paste(formula, paste(
+        colnames(survival_df)[grepl("Cancer_type", colnames(survival_df))], 
+        collapse = " + "), sep = " + ")
+      res.cox <- coxph(as.formula(formula), data = survival_df)  #+ cancer_type
+      print(res.cox)
+      p <- ggadjustedcurves(res.cox, data = survival_df, variable = "mutation_status",
+                            legend.title = paste(driver_name, "Mutation Status"), 
+                            palette = c("#0072B5FF", "#BC3C29FF"),
+                            pval = T, ggtheme = theme_minimal(), 
+                            legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                            font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                            font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                            font.legend = c(12, "bold", "black"))
+      print(p)
+    }
+    
+  }
+  
+  return(survival_df)
+}
+
+#' Helper function to add expression categorization by patient for the given 
+#' target gene; type of categorization is specified
+#' @param expression_df a quantile-normalized expression data fram  across genes
+#' and patient samples
+#' @param target_gene the name of the target gene of interest
+#' @param meth   
+                      legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                      font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                      font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                      font.legend = c(12, "bold", "black")) + 
+        xlab("Time (Days)") + ylab("Survival Probability")
+      print(p)
+      
+      # Cox proportional hazards
+    } else {
+      formula <- "Surv(time = days, event = status) ~ mutation_status + Age + Gender + Prior_malig + Treatment_rad + Treatment_pharm + PC1 + PC2 + PC3 + Tumor_purity_b1 + Tumor_purity_b2 + Tumor_purity_b3 + Tot_IC_Frac_b1 + Tot_IC_Frac_b2 + Tot_IC_Frac_b3"
+      formula <- paste(formula, paste(
+        colnames(survival_df)[grepl("Cancer_type", colnames(survival_df))], 
+        collapse = " + "), sep = " + ")
+      res.cox <- coxph(as.formula(formula), data = survival_df)  #+ cancer_type
+      print(res.cox)
+      p <- ggadjustedcurves(res.cox, data = survival_df, variable = "mutation_status",
+                            legend.title = paste(driver_name, "Mutation Status"), 
+                            palette = c("#0072B5FF", "#BC3C29FF"),
+                            pval = T, ggtheme = theme_minimal(), 
+                            legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                            font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                            font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                            font.legend = c(12, "bold", "black"))
+      print(p)
+    }
+    
+  }
+  
+  return(survival_df)
+}
+
+#' Helper function to add expression categorization by patient for the given 
+#' target gene; type of categorization is specified
+#' @param expression_df a quantile-normalized expression data fram  across genes
+#' and patient samples
+#' @param target_gene the name of the target gene of interest
+#' @param meth   
+                      legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                      font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                      font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                      font.legend = c(12, "bold", "black")) + 
+        xlab("Time (Days)") + ylab("Survival Probability")
+      print(p)
+      
+      # Cox proportional hazards
+    } else {
+      formula <- "Surv(time = days, event = status) ~ mutation_status + Age + Gender + Prior_malig + Treatment_rad + Treatment_pharm + PC1 + PC2 + PC3 + Tumor_purity_b1 + Tumor_purity_b2 + Tumor_purity_b3 + Tot_IC_Frac_b1 + Tot_IC_Frac_b2 + Tot_IC_Frac_b3"
+      formula <- paste(formula, paste(
+        colnames(survival_df)[grepl("Cancer_type", colnames(survival_df))], 
+        collapse = " + "), sep = " + ")
+      res.cox <- coxph(as.formula(formula), data = survival_df)  #+ cancer_type
+      print(res.cox)
+      p <- ggadjustedcurves(res.cox, data = survival_df, variable = "mutation_status",
+                            legend.title = paste(driver_name, "Mutation Status"), 
+                            palette = c("#0072B5FF", "#BC3C29FF"),
+                            pval = T, ggtheme = theme_minimal(), 
+                            legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                            font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                            font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                            font.legend = c(12, "bold", "black"))
+      print(p)
+    }
+    
+  }
+  
+  return(survival_df)
+}
+
+#' Helper function to add expression categorization by patient for the given 
+#' target gene; type of categorization is specified
+#' @param expression_df a quantile-normalized expression data fram  across genes
+#' and patient samples
+#' @param target_gene the name of the target gene of interest
+#' @param meth   
+                      legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                      font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                      font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                      font.legend = c(12, "bold", "black")) + 
+        xlab("Time (Days)") + ylab("Survival Probability")
+      print(p)
+      
+      # Cox proportional hazards
+    } else {
+      formula <- "Surv(time = days, event = status) ~ mutation_status + Age + Gender + Prior_malig + Treatment_rad + Treatment_pharm + PC1 + PC2 + PC3 + Tumor_purity_b1 + Tumor_purity_b2 + Tumor_purity_b3 + Tot_IC_Frac_b1 + Tot_IC_Frac_b2 + Tot_IC_Frac_b3"
+      formula <- paste(formula, paste(
+        colnames(survival_df)[grepl("Cancer_type", colnames(survival_df))], 
+        collapse = " + "), sep = " + ")
+      res.cox <- coxph(as.formula(formula), data = survival_df)  #+ cancer_type
+      print(res.cox)
+      p <- ggadjustedcurves(res.cox, data = survival_df, variable = "mutation_status",
+                            legend.title = paste(driver_name, "Mutation Status"), 
+                            palette = c("#0072B5FF", "#BC3C29FF"),
+                            pval = T, ggtheme = theme_minimal(), 
+                            legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                            font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                            font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                            font.legend = c(12, "bold", "black"))
+      print(p)
+    }
+    
+  }
+  
+  return(survival_df)
+}
+
+#' Helper function to add expression categorization by patient for the given 
+#' target gene; type of categorization is specified
+#' @param expression_df a quantile-normalized expression data fram  across genes
+#' and patient samples
+#' @param target_gene the name of the target gene of interest
+#' @param meth   
+                      legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                      font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                      font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                      font.legend = c(12, "bold", "black")) + 
+        xlab("Time (Days)") + ylab("Survival Probability")
+      print(p)
+      
+      # Cox proportional hazards
+    } else {
+      formula <- "Surv(time = days, event = status) ~ mutation_status + Age + Gender + Prior_malig + Treatment_rad + Treatment_pharm + PC1 + PC2 + PC3 + Tumor_purity_b1 + Tumor_purity_b2 + Tumor_purity_b3 + Tot_IC_Frac_b1 + Tot_IC_Frac_b2 + Tot_IC_Frac_b3"
+      formula <- paste(formula, paste(
+        colnames(survival_df)[grepl("Cancer_type", colnames(survival_df))], 
+        collapse = " + "), sep = " + ")
+      res.cox <- coxph(as.formula(formula), data = survival_df)  #+ cancer_type
+      print(res.cox)
+      p <- ggadjustedcurves(res.cox, data = survival_df, variable = "mutation_status",
+                            legend.title = paste(driver_name, "Mutation Status"), 
+                            palette = c("#0072B5FF", "#BC3C29FF"),
+                            pval = T, ggtheme = theme_minimal(), 
+                            legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                            font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                            font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                            font.legend = c(12, "bold", "black"))
+      print(p)
+    }
+    
+  }
+  
+  return(survival_df)
+}
+
+#' Helper function to add expression categorization by patient for the given 
+#' target gene; type of categorization is specified
+#' @param expression_df a quantile-normalized expression data fram  across genes
+#' and patient samples
+#' @param target_gene the name of the target gene of interest
+#' @param meth   
+                      legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                      font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                      font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                      font.legend = c(12, "bold", "black")) + 
+        xlab("Time (Days)") + ylab("Survival Probability")
+      print(p)
+      
+      # Cox proportional hazards
+    } else {
+      formula <- "Surv(time = days, event = status) ~ mutation_status + Age + Gender + Prior_malig + Treatment_rad + Treatment_pharm + PC1 + PC2 + PC3 + Tumor_purity_b1 + Tumor_purity_b2 + Tumor_purity_b3 + Tot_IC_Frac_b1 + Tot_IC_Frac_b2 + Tot_IC_Frac_b3"
+      formula <- paste(formula, paste(
+        colnames(survival_df)[grepl("Cancer_type", colnames(survival_df))], 
+        collapse = " + "), sep = " + ")
+      res.cox <- coxph(as.formula(formula), data = survival_df)  #+ cancer_type
+      print(res.cox)
+      p <- ggadjustedcurves(res.cox, data = survival_df, variable = "mutation_status",
+                            legend.title = paste(driver_name, "Mutation Status"), 
+                            palette = c("#0072B5FF", "#BC3C29FF"),
+                            pval = T, ggtheme = theme_minimal(), 
+                            legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                            font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                            font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                            font.legend = c(12, "bold", "black"))
+      print(p)
+    }
+    
+  }
+  
+  return(survival_df)
+}
+
+#' Helper function to add expression categorization by patient for the given 
+#' target gene; type of categorization is specified
+#' @param expression_df a quantile-normalized expression data fram  across genes
+#' and patient samples
+#' @param target_gene the name of the target gene of interest
+#' @param meth   
+                      legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                      font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                      font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                      font.legend = c(12, "bold", "black")) + 
+        xlab("Time (Days)") + ylab("Survival Probability")
+      print(p)
+      
+      # Cox proportional hazards
+    } else {
+      formula <- "Surv(time = days, event = status) ~ mutation_status + Age + Gender + Prior_malig + Treatment_rad + Treatment_pharm + PC1 + PC2 + PC3 + Tumor_purity_b1 + Tumor_purity_b2 + Tumor_purity_b3 + Tot_IC_Frac_b1 + Tot_IC_Frac_b2 + Tot_IC_Frac_b3"
+      formula <- paste(formula, paste(
+        colnames(survival_df)[grepl("Cancer_type", colnames(survival_df))], 
+        collapse = " + "), sep = " + ")
+      res.cox <- coxph(as.formula(formula), data = survival_df)  #+ cancer_type
+      print(res.cox)
+      p <- ggadjustedcurves(res.cox, data = survival_df, variable = "mutation_status",
+                            legend.title = paste(driver_name, "Mutation Status"), 
+                            palette = c("#0072B5FF", "#BC3C29FF"),
+                            pval = T, ggtheme = theme_minimal(), 
+                            legend = "bottom", legend.labs = c("No Mutation", "Mutation"), 
+                            font.main = c(16, "bold", "black"), font.x = c(14, "bold", "black"), 
+                            font.y = c(14, "bold", "black"), font.tickslab = c(12, "bold", "black"), 
+                            font.legend = c(12, "bold", "black"))
+      print(p)
+    }
+    
+  }
+  
+  return(survival_df)
+}
+
+#' Helper function to add expression categorization by patient for the given 
+#' target gene; type of categorization is specified
+#' @param expression_df a quantile-normalized expression data framace="bold"), 
           legend.text = element_text(size=14), legend.position = "bottom") 
   print(g)
   

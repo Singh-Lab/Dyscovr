@@ -1,12 +1,11 @@
 ############################################################
 ### General Important Functions
-### PUBLICATION INFORMATION
+### Written by Sara Geraghty, Princeton University
+### https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 # This file contains functions that are helpful across files
 # and will be used the project
-
-#library.path <- .libPaths()
 
 ############################################################
 #' Use a faster %in% function

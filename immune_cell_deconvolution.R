@@ -1,6 +1,7 @@
 ############################################################
 ### Immune Cell Deconvolution
-### PUBLICATION INFORMATION
+### Written by Sara Geraghty, Princeton University
+### https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 library(EPIC)
@@ -19,7 +20,6 @@ library(TCGAbiolinks)
 # At the bottom of the file, also presents an alternative method using 
 # pre-calculated estimates from TIMER on TCGA data
 # http://timer.cistrome.org/infiltration_estimation_for_tcga.csv.gz
-
 
 # Local PATH to directory containing Dyscovr output files
 PATH <- getwd()

@@ -1,6 +1,6 @@
 ############################################################
 ### Run Bayesian Models
-### Written By: Amey Pasarkar, Fall 2022; Modified by Sara Geraghty
+### Written By: Amey Pasarkar, Fall 2022; Modified by Sara Geraghty; Princeton University
 ############################################################
 
 #library(gglasso)

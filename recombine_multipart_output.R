@@ -1,3 +1,21 @@
+############################################################
+### Recombine Multipart Output
+### Written by Sara Geraghty, Princeton University
+### https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
+############################################################
+
+# Call script to recombine output when running Dyscovr in parts across 
+# a large set of genes. This function takes multipart Dyscovr output and 
+# recombines it into one large file, redoing the per-gene multiple hypothesis 
+# testing correction and ordering by q-value.
+
+# From command line, execute this script using the following:
+
+# module add R
+# Rscript recombine_multipart_output.R --path "PATH/TO/FILE/" --fn "NAME_OF_PT1"
+
+############################################################
+
 #!/usr/bin/env Rscript
 
 # Set the library path
@@ -7,9 +25,7 @@ library(qvalue, lib.loc = library.path, quietly = TRUE)
 library(data.table, lib.loc = library.path, quietly = TRUE)
 library(argparse, lib.loc = library.path, quietly = TRUE)
 
-# This function takes multipart Dyscovr output and recombines it into one,
-# redoing the per-gene multiple hypothesis testing correction and ordering by 
-# q-value.
+############################################################
 
 # Create parser object
 parser <- ArgumentParser()

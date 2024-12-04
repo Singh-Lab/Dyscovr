@@ -1,13 +1,10 @@
 ############################################################
 ### Dyscovr Helper Functions
-### PUBLICATION INFORMATION
+### Written by Sara Geraghty, Princeton University
+### https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 library.path <- .libPaths()
-
-#library(data.table, lib.loc = library.path, quietly = T)
-#library(dqrng, lib.loc = library.path, quietly = T)
-#library(stringr, lib.loc = library.path, quietly = T)
 
 # This file contains a set of helper functions that will be called by the 
 # create_dyscovr_input_tables.R or dyscovr.R while they are running.
@@ -51,7 +48,6 @@ filter_meth_by_ensg <- function(methylation_df, ensg_ids) {
   methylation_df <- methylation_df[meth_rows_to_keep,]
   return(methylation_df)
 }
-
 
 ############################################################
 
@@ -171,7 +167,6 @@ get_cna_stat <- function(cna_df, sample, cna_bucketing, dataset, use_relative,
   return(cna_stat)
 }
 
-
 ############################################################
 
 #' Given a mutation target DF and a sample of interest, extracts the 0 or 1 
@@ -194,7 +189,6 @@ get_mut_stat_targ <- function(mutation_targ_df, sample) {
   }
   return(mut_stat)
 }
-
 
 ############################################################
 
@@ -1537,5 +1531,4 @@ subset_to_trans_targets <- function(driver, target_df, all_genes_id_conv,
   
   return(trans_target_df)
 }
-
 

@@ -1,6 +1,7 @@
 ############################################################
 ### Create Dyscovr Input Tables
-### PUBLICATION INFORMATION 
+### Written by Sara Geraghty, Princeton University
+### https://www.biorxiv.org/content/10.1101/2024.11.20.624509v1
 ############################################################
 
 # This script requires 1 node and 8 CPUs for multithreading.
@@ -324,7 +325,7 @@ if(debug) {
 if((args$cancerType == "PanCancer") & (args$specificTypes != "ALL")) {
   patient_path <- paste0(MAIN_PATH, "Sample/")
   per_cancer_fns <- intersect(list.files(patient_path, pattern = args$patient_df),
-			      list.files(patient_path, pattern = "cibersort_total_frac"))  #TODO: change to find a less hacky way to exclude the pan-cancer file
+			      list.files(patient_path, pattern = "cibersort_total_frac"))  
   patient_df <- lapply(per_cancer_fns, function(x) {
     df <- fread(paste0(patient_path, x), header = T)
     colnames(df)[1] <- "sample_id"
@@ -1281,9 +1282,6 @@ if(is.na(patient_cancer_mapping)) {
     outpath_i <- outpath[[i]]
     
     ct <- names(patient_cancer_mapping)[i]
-    print(ct)
-    print(names(patient_df))
-    print(head(patient_df[[1]]))
     patient_df_ct <- patient_df[[which(names(patient_df) == ct)]]
 
     # Subset files using patient_ids (using helper functions from 

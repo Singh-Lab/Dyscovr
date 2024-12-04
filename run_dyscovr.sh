@@ -36,14 +36,14 @@ module add R/4.0.5
 Rscript dyscovr.R --dataset "TCGA" --cancerType "PanCancer" --specificTypes "ALL" \
 --clinical_df "clinical.csv" --run_query_genes_jointly "T" --test "F" \
 --randomize "F" --expression_df "expression_quantile_norm_sklearn_uniformHypermutRm_IntersectPatientsWashU_orig.csv" \
---input_lm_filepath "/Genomics/argo/users/scamilli/Dyscovr/input_files/PanCancer/lm_input_tables/top_0.05_orig" \
+--input_lm_filepath "/Genomics/argo/users/scamilli/Dyscovr_Personal/input_files/PanCancer/lm_input_tables/top_0.05_orig_wttn" \
 --patient_df "combined_patient_sample_inclSubtypes_uniformHypermutRm_IntersectPatientsWashU.csv" \
---run_name "top_0.05_orig" --target_df "allgene_targets_pt5.csv" --targets_name "allGenespt5" \
+--run_name "top_0.05_orig_wttn" --target_df "allgene_targets_pt1.csv" --targets_name "allGenespt1" \
 --cna_bucketing "rawCNA" --meth_bucketing "F" --meth_type "M" --num_pcs 3 \
 --debug "F" --model_type "linear" --collinearity_diagn "F" \
 --collinearity_corr_method "eliminate_vif" --regularization "None"  \
 --select_args "ExpStat_k;MutStat_i;CNAStat_i;MethStat_i;CNAStat_k;MutStat_k;MethStat_k;Age;Gender;Tumor_purity;Treatment_rad;Treatment_pharm;Tot_IC_Frac;PC;Prior_malig;Tot_Mut;Cancer_type" \
---select_args_label "elim.vif5.sp0.7" --select_drivers "P04637;P42336;P01116;O75874" 
+--select_args_label "elim.vif5.sp0.7" --select_drivers "P04637;P42336;P01116;O75874;Q8WZ42" 
 
 ## RUN DYSCOVR PER-CANCER ON ALL GENE TARGETS (EACH CANCER TYPE INDIVIDUALLY) ##
 #Rscript dyscovr.R --dataset "TCGA" --cancerType "PanCancer" --clinical_df "clinical.csv" \
