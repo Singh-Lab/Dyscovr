@@ -9,9 +9,9 @@ Uncover links between mutated driver genes and dysregulation of putative target 
 Please cite as: Geraghty, S.E., Boyer, J.A., Fazel-Zarandi, M. Arzouni, N., Ryseck, R., McBride, M.J., Parsons, L.R., Rabinowitz, J.D., and Singh M. (2024). Integrative Computational Framework, Dyscovr, Links Mutated Driver Genes to Expression Dysregulation Across 19 Cancer Types. bioRxiv. https://doi.org/10.1101/2024.11.20.624509
 
 # Source Files
-* Input data files for the TCGA were downloaded from the GDC Data Portal Repository: https://portal.gdc.cancer.gov/repository. See Suppl. Table 6 for information about file downloads.
+* Input data files for the TCGA were downloaded from the GDC Data Portal Repository: https://portal.gdc.cancer.gov/repository. See Suppl. Table 7 for information about file downloads.
 * Input data files for METABRIC (https://doi.org/10.1038/nature10983) were downloaded from cBioPortal (https://www.cbioportal.org/study/summary?id=brca_metabric).
-* After files are downloaded, they are run through the various preprocessing pipelines found in the data_processing folder. These steps vary by data type, but generally include filtering and normalization procedures.
+* After files are downloaded, they are run through the various preprocessing pipelines found in the data_processing folder. These steps vary by data type, but generally include filtering and normalization procedures. You may use your own preprocessing pipelines prior to running Dyscovr as well.
 
 # Preprocessing
 1. After initial preprocessing, files are processed according to the ```premodel_processing.R``` file. This file merges patient- and sample-level clinical data frames and ensures that all data files are subsetted to only those patient samples that have all data types of interest (e.g. mutation, CNA, expression, methylation, and clinical data).
